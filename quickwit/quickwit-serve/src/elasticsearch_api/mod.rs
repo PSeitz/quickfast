@@ -26,7 +26,7 @@ use quickwit_cluster::Cluster;
 use quickwit_config::NodeConfig;
 use quickwit_index_management::IndexService;
 use quickwit_ingest::IngestServiceClient;
-use quickwit_proto::ingest::router::IngestRouterServiceClient;
+use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_search::SearchService;
 pub use rest_handler::{
@@ -62,12 +62,13 @@ pub fn elastic_api_handlers(
     node_config: Arc<NodeConfig>,
     search_service: Arc<dyn SearchService>,
     ingest_service: IngestServiceClient,
-    ingest_router: IngestRouterServiceClient,
+    ingest_router: impl Into<IngestRouterClient>,
     metastore: MetastoreServiceClient,
     index_service: IndexService,
     enable_ingest_v1: bool,
     enable_ingest_v2: bool,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
+    let ingest_router = ingest_router.into();
     let max_body_size = node_config.ingest_api_config.max_body_size;
     let max_decompressed_body_size = node_config.ingest_api_config.max_decompressed_body_size;
     es_compat_cluster_info_handler(node_config.clone(), BuildInfo::get())
