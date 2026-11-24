@@ -20,7 +20,6 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
-use fail::fail_point;
 use itertools::Itertools;
 use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::io::IoControls;
@@ -48,7 +47,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::actors::Packager;
 use crate::controlled_directory::ControlledDirectory;
 use crate::merge_policy::{MergeOperationType, MergeSource};
-use crate::models::{IndexedSplit, IndexedSplitBatch, MergeScratch, PublishLock, SplitAttrs};
+use crate::models::{IndexedSplit, IndexedSplitBatch, MergeScratch, SplitAttrs};
 use crate::no_fsync_mmap_directory::open_split_scratch_directory;
 
 #[derive(Clone)]
@@ -174,7 +173,6 @@ impl Handler<MergeScratch> for MergeExecutor {
                 &self.merge_packager_mailbox,
                 IndexedSplitBatch {
                     splits: vec![indexed_split],
-                    publish_lock: PublishLock::default(),
                     batch_parent_span,
                     merge_task_opt,
                 },
@@ -354,8 +352,6 @@ impl MergeExecutor {
             &tantivy_dirs,
             self.doc_mapper.tokenizer_manager().tantivy_manager(),
         )?;
-        // TODO it would be nice if tantivy could let us run the merge in the current thread.
-        fail_point!("before-merge-split");
         let controlled_directory = self
             .merge_split_directories(
                 union_index_meta,
@@ -366,7 +362,6 @@ impl MergeExecutor {
                 ctx,
             )
             .await?;
-        fail_point!("after-merge-split");
 
         // This will have the side effect of deleting the directory containing the downloaded
         // splits.

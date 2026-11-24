@@ -2999,17 +2999,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fail"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe5e43d0f78a42ad591453aedb1d7ae631ce7ee445c7643691055a9ed8d3b01c"
-dependencies = [
- "log",
- "once_cell",
- "rand 0.8.8",
-]
-
-[[package]]
 name = "fancy-regex"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7145,7 +7134,6 @@ dependencies = [
  "bytes",
  "bytesize",
  "criterion",
- "fail",
  "flume 0.12.0",
  "fnv",
  "futures",
@@ -7204,7 +7192,6 @@ dependencies = [
  "bytes",
  "bytesize",
  "crc32fast",
- "fail",
  "futures",
  "http 1.5.0",
  "itertools 0.15.0",

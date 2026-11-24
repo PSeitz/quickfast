@@ -91,7 +91,6 @@
       "index_id": "my-index",
       "index_uri": "s3://quickwit-indexes/my-index",
       "indexing_settings": {
-        "commit_timeout_secs": 301,
         "docstore_blocksize": 1000000,
         "docstore_compression_level": 8,
         "merge_policy": {
@@ -125,7 +124,6 @@
       {
         "enabled": true,
         "input_format": "json",
-        "num_pipelines": 2,
         "params": {
           "client_params": {},
           "topic": "kafka-topic"

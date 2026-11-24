@@ -228,7 +228,7 @@ mod tests {
         let mut index_template = IndexTemplate::for_test("test-template", &["test-index-*"], 0);
 
         index_template.indexing_settings = IndexingSettings {
-            commit_timeout_secs: 42,
+            split_num_docs_target: 42,
             ..Default::default()
         };
         index_template.search_settings = SearchSettings {
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(index_config_foo.index_uri, "ram:///indexes/test-index-foo");
 
         assert_eq!(index_config_foo.doc_mapping.timestamp_field.unwrap(), "ts");
-        assert_eq!(index_config_foo.indexing_settings.commit_timeout_secs, 42);
+        assert_eq!(index_config_foo.indexing_settings.split_num_docs_target, 42);
         assert_eq!(
             index_config_foo.search_settings.default_search_fields,
             ["message"]

@@ -22,7 +22,7 @@ use quickwit_proto::types::{IndexUid, SplitId};
 use tracing::Span;
 
 use crate::merge_policy::MergeTask;
-use crate::models::{PublishLock, SplitAttrs};
+use crate::models::SplitAttrs;
 
 pub struct PackagedSplit {
     pub serialized_split_fields: Vec<u8>,
@@ -57,9 +57,7 @@ impl fmt::Debug for PackagedSplit {
 #[derive(Debug)]
 pub struct PackagedSplitBatch {
     pub splits: Vec<PackagedSplit>,
-    pub publish_lock: PublishLock,
-    /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
-    /// in the `MergePipeline` or `DeleteTaskPipeline`.
+    /// A [`MergeTask`] tracked by the `DeleteTaskPlanner` in `DeleteTaskPipeline`.
     pub merge_task_opt: Option<MergeTask>,
     pub batch_parent_span: Span,
 }
@@ -71,7 +69,6 @@ impl PackagedSplitBatch {
     /// - all splits must belong to the same `index_uid`.
     pub fn new(
         splits: Vec<PackagedSplit>,
-        publish_lock: PublishLock,
         merge_task_opt: Option<MergeTask>,
         batch_parent_span: Span,
     ) -> Self {
@@ -85,7 +82,6 @@ impl PackagedSplitBatch {
         );
         Self {
             splits,
-            publish_lock,
             merge_task_opt,
             batch_parent_span,
         }

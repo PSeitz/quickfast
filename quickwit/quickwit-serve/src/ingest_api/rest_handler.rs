@@ -151,22 +151,21 @@ async fn ingest(
 #[cfg(test)]
 mod tests {
     use quickwit_config::IngestApiConfig;
-    use quickwit_proto::ingest::router::{
-        IngestResponseV2, IngestRouterServiceClient, IngestSuccess, MockIngestRouterService,
-    };
+    use quickwit_ingest::router_client::{IngestResponse, IngestRouterClient, MockIngestRouter};
+    use quickwit_proto::ingest::router::IngestSuccess;
     use warp::Filter;
 
     use super::{RestIngestResponse, ingest_api_handlers};
 
     #[tokio::test]
     async fn test_ingest_api_happy_path_and_empty_payload() {
-        let mut mock_router = MockIngestRouterService::new();
+        let mut mock_router = MockIngestRouter::new();
         mock_router.expect_ingest().times(1).returning(|request| {
             assert_eq!(request.subrequests.len(), 1);
             let subrequest = &request.subrequests[0];
             assert_eq!(subrequest.index_id, "my-index");
             assert_eq!(subrequest.doc_batch.as_ref().unwrap().num_docs(), 2);
-            Ok(IngestResponseV2 {
+            Ok(IngestResponse {
                 successes: vec![IngestSuccess {
                     subrequest_id: 0,
                     num_ingested_docs: 2,
@@ -175,7 +174,7 @@ mod tests {
                 failures: Vec::new(),
             })
         });
-        let ingest_router = IngestRouterServiceClient::from_mock(mock_router);
+        let ingest_router = IngestRouterClient::from_mock(mock_router);
         let handler = ingest_api_handlers(ingest_router, IngestApiConfig::default());
 
         let resp = warp::test::request()
@@ -203,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_api_rejects_non_auto_commit() {
-        let ingest_router = IngestRouterServiceClient::mocked();
+        let ingest_router = IngestRouterClient::mocked();
         let handler = ingest_api_handlers(ingest_router, IngestApiConfig::default());
         for query in ["commit=force", "commit=wait_for"] {
             let resp = warp::test::request()
@@ -219,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn test_ingest_api_returns_413_if_body_is_too_large() {
         let config: IngestApiConfig = serde_json::from_str(r#"{ "max_body_size": "1" }"#).unwrap();
-        let ingest_router = IngestRouterServiceClient::mocked();
+        let ingest_router = IngestRouterClient::mocked();
         let handler = ingest_api_handlers(ingest_router, config).recover(crate::recover_fn);
         let resp = warp::test::request()
             .path("/my-index/ingest")

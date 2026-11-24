@@ -218,15 +218,6 @@ async fn test_ingesthree_guards_reject_before_writes() {
     create_index(&sandbox, index_id).await;
     let local = sandbox.node_configs[1].0.data_dir_path.join("ingesthree");
     let endpoint = format!("http://{}", sandbox.node_configs[1].0.grpc_listen_addr);
-    let mut v2_client = quickwit_proto::ingest::router::ingest_router_service_grpc_client::IngestRouterServiceGrpcClient::connect(endpoint.clone()).await.unwrap();
-    assert_eq!(
-        v2_client
-            .ingest(payload(index_id, CommitTypeV2::Auto))
-            .await
-            .unwrap_err()
-            .code(),
-        tonic::Code::Unimplemented
-    );
     let mut client = IngesthreeServiceClient::connect(endpoint).await.unwrap();
     for version in [None, Some("v2"), Some("INGESTHREE")] {
         let mut request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));

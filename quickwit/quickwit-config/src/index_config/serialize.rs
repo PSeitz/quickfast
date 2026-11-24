@@ -377,7 +377,7 @@ mod test {
                 default_search_fields: [body]
 
             indexing_settings:
-                commit_timeout_secs: 10
+                split_num_docs_target: 1000
 
             retention:
                 period: 90 days
@@ -413,8 +413,8 @@ mod test {
             Vec::<String>::default(),
         );
         assert_eq!(
-            updated_config.indexing_settings.commit_timeout_secs,
-            IndexingSettings::default_commit_timeout_secs()
+            updated_config.indexing_settings.split_num_docs_target,
+            IndexingSettings::default_split_num_docs_target()
         );
         assert_eq!(updated_config.retention_policy_opt, None);
     }

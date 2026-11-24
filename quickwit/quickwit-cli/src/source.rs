@@ -523,7 +523,6 @@ fn flatten_json(value: JsonValue) -> Vec<(String, JsonValue)> {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroUsize;
     use std::str::FromStr;
 
     use quickwit_config::{SourceInputFormat, SourceParams};
@@ -705,7 +704,6 @@ mod tests {
 
         let sources = vec![SourceConfig {
             source_id: "foo-source".to_string(),
-            num_pipelines: NonZeroUsize::MIN,
             enabled: true,
             source_params: SourceParams::file_from_str("path/to/file").unwrap(),
             transform_config: None,
@@ -752,7 +750,6 @@ mod tests {
         let sources = [
             SourceConfig {
                 source_id: "foo-source".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
                 enabled: true,
                 source_params: SourceParams::stdin(),
                 transform_config: None,
@@ -760,7 +757,6 @@ mod tests {
             },
             SourceConfig {
                 source_id: "bar-source".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
                 enabled: true,
                 source_params: SourceParams::stdin(),
                 transform_config: None,

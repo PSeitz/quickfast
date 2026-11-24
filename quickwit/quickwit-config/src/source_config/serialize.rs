@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
-
 use anyhow::{bail, ensure};
 use quickwit_proto::types::SourceId;
 use serde::{Deserialize, Serialize};
 
 use super::{RESERVED_SOURCE_IDS, TransformConfig};
-use crate::{
-    ConfigFormat, FileSourceParams, SourceConfig, SourceInputFormat, SourceParams,
-    validate_identifier,
-};
+use crate::{ConfigFormat, SourceConfig, SourceInputFormat, SourceParams, validate_identifier};
 
 type SourceConfigForSerialization = SourceConfigV0_8;
 
@@ -104,8 +99,6 @@ impl SourceConfigForSerialization {
         if !RESERVED_SOURCE_IDS.contains(&self.source_id.as_str()) {
             validate_identifier("source", &self.source_id)?;
         }
-        let num_pipelines = NonZeroUsize::new(self.num_pipelines)
-            .ok_or_else(|| anyhow::anyhow!("`desired_num_pipelines` must be strictly positive"))?;
         match &self.source_params {
             SourceParams::Stdin => {
                 bail!(
@@ -119,18 +112,6 @@ impl SourceConfigForSerialization {
             | SourceParams::Ingest
             | SourceParams::IngestCli
             | SourceParams::Void(_) => {}
-        }
-        match &self.source_params {
-            SourceParams::PubSub(_)
-            | SourceParams::Kafka(_)
-            | SourceParams::File(FileSourceParams::Notifications(_)) => {}
-            _ => {
-                if self.num_pipelines > 1 {
-                    bail!(
-                        "Quickwit currently supports multiple pipelines only for GCP PubSub or Kafka sources. open an issue https://github.com/quickwit-oss/quickwit/issues if you need the feature for other source types"
-                    );
-                }
-            }
         }
 
         if self.transform.is_some()
@@ -147,7 +128,6 @@ impl SourceConfigForSerialization {
 
         Ok(SourceConfig {
             source_id: self.source_id,
-            num_pipelines,
             enabled: self.enabled,
             source_params: self.source_params,
             transform_config: self.transform,
@@ -160,7 +140,6 @@ impl From<SourceConfig> for SourceConfigV0_8 {
     fn from(source_config: SourceConfig) -> Self {
         SourceConfigV0_8 {
             source_id: source_config.source_id,
-            num_pipelines: source_config.num_pipelines.get(),
             enabled: source_config.enabled,
             source_params: source_config.source_params,
             transform: source_config.transform_config,
@@ -184,32 +163,14 @@ impl TryFrom<VersionedSourceConfig> for SourceConfig {
     }
 }
 
-fn default_max_num_pipelines_per_indexer() -> usize {
-    1
-}
-
-fn default_num_pipelines() -> usize {
-    1
-}
-
 fn default_source_enabled() -> bool {
     true
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
 pub struct SourceConfigV0_7 {
     #[schema(value_type = String)]
     pub source_id: SourceId,
-
-    #[serde(
-        default = "default_max_num_pipelines_per_indexer",
-        alias = "num_pipelines"
-    )]
-    pub max_num_pipelines_per_indexer: usize,
-
-    #[serde(default = "default_num_pipelines")]
-    pub desired_num_pipelines: usize,
 
     // Denotes if this source is enabled.
     #[serde(default = "default_source_enabled")]
@@ -227,13 +188,9 @@ pub struct SourceConfigV0_7 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
 pub struct SourceConfigV0_8 {
     #[schema(value_type = String)]
     pub source_id: SourceId,
-
-    #[serde(default = "default_num_pipelines")]
-    pub num_pipelines: usize,
 
     // Denotes if this source is enabled.
     #[serde(default = "default_source_enabled")]
@@ -254,8 +211,6 @@ impl From<SourceConfigV0_7> for SourceConfigV0_8 {
     fn from(source_config_v0_7: SourceConfigV0_7) -> Self {
         let SourceConfigV0_7 {
             source_id,
-            max_num_pipelines_per_indexer: _,
-            desired_num_pipelines,
             enabled,
             source_params,
             transform,
@@ -263,7 +218,6 @@ impl From<SourceConfigV0_7> for SourceConfigV0_8 {
         } = source_config_v0_7;
         SourceConfigV0_8 {
             source_id,
-            num_pipelines: desired_num_pipelines,
             enabled,
             source_params,
             transform,

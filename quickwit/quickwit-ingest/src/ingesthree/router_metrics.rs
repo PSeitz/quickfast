@@ -65,13 +65,8 @@ impl RouterMetrics {
                     IngestFailureReason::IndexNotFound => "index_not_found",
                     IngestFailureReason::SourceNotFound => "source_not_found",
                     IngestFailureReason::Internal => "internal",
-                    IngestFailureReason::NoShardsAvailable => "no_shards_available",
-                    IngestFailureReason::ShardRateLimited => "shard_rate_limited",
-                    IngestFailureReason::WalFull => "wal_full",
                     IngestFailureReason::Timeout => "timeout",
-                    IngestFailureReason::RouterLoadShedding => "router_load_shedding",
                     IngestFailureReason::LoadShedding => "load_shedding",
-                    IngestFailureReason::CircuitBreaker => "circuit_breaker",
                 },
                 IngestFailure::Ingesthree { error, .. } => error_result(error),
             };

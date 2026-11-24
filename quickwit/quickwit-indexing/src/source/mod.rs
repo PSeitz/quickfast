@@ -16,7 +16,7 @@
 //!
 //! Supported pull sources (Kafka, SQS, GCP Pub/Sub) rely on native broker coordination
 //! (consumer groups, competing consumers / visibility timeouts, subscriptions) and forward
-//! document batches directly to the ingest API (`IngestRouterService`), committing offsets or
+//! document batches directly to the ingest API (`IngestRouterClient`), committing offsets or
 //! acknowledging messages only after `ingesthree` accepts each batch.
 
 pub mod doc_file_reader;
@@ -39,10 +39,10 @@ use quickwit_config::{
     FileSourceNotification, FileSourceParams, INGEST_V2_SOURCE_ID, SourceConfig, SourceParams,
 };
 use quickwit_ingest::IngestServiceError;
-use quickwit_ingest::router_client::{IngestFailure, IngestRouterClient, IngestRouterError};
+use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_metastore::ListIndexesMetadataResponseExt;
 use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
-use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2, IngestV2Error};
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
 use quickwit_proto::metastore::{
     ListIndexesMetadataRequest, MetastoreService, MetastoreServiceClient,
 };
@@ -66,7 +66,7 @@ const SUPERVISOR_RESTART_BACKOFF: Duration = Duration::from_secs(2);
 /// Target sink receiving batches forwarded by pull sources.
 #[async_trait]
 pub trait IngestSink: Send + Sync + 'static {
-    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error>;
+    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestServiceError>;
 
     /// Retries transient ingest errors until accepted or `shutdown` fires.
     async fn ingest_with_retry(
@@ -82,9 +82,7 @@ pub trait IngestSink: Send + Sync + 'static {
                 Err(error)
                     if matches!(
                         error,
-                        IngestV2Error::Unavailable(_)
-                            | IngestV2Error::TooManyRequests(_)
-                            | IngestV2Error::Timeout(_)
+                        IngestServiceError::Unavailable(_) | IngestServiceError::RateLimited(_)
                     ) =>
                 {
                     rate_limited_warn!(
@@ -125,24 +123,9 @@ impl IngestRouterSink {
     }
 }
 
-fn router_error_to_ingest_error(error: IngestRouterError) -> IngestV2Error {
-    match error {
-        IngestRouterError::V2(err) => err,
-        IngestRouterError::Ingesthree(err) => ingesthree_error_to_ingest_error(err),
-    }
-}
-
-fn ingesthree_error_to_ingest_error(error: IngestServiceError) -> IngestV2Error {
-    match error {
-        IngestServiceError::Unavailable(msg) => IngestV2Error::Unavailable(msg),
-        IngestServiceError::RateLimited(cause) => IngestV2Error::TooManyRequests(cause),
-        other => IngestV2Error::Internal(other.to_string()),
-    }
-}
-
 #[async_trait]
 impl IngestSink for IngestRouterSink {
-    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error> {
+    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestServiceError> {
         let mut doc_uid_generator = DocUidGenerator::default();
         let mut doc_uids = Vec::with_capacity(docs.len());
         let mut doc_lengths = Vec::with_capacity(docs.len());
@@ -167,20 +150,9 @@ impl IngestSink for IngestRouterSink {
                 doc_batch: Some(doc_batch),
             }],
         };
-        let response = self
-            .router
-            .ingest(request)
-            .await
-            .map_err(router_error_to_ingest_error)?;
+        let response = self.router.ingest(request).await?;
         if let Some(failure) = response.failures.into_iter().next() {
-            return Err(match failure {
-                IngestFailure::Ingesthree { error, .. } => ingesthree_error_to_ingest_error(error),
-                IngestFailure::V2(failure) => IngestV2Error::Internal(format!(
-                    "ingest subrequest failed for index `{}`: {:?}",
-                    failure.index_id,
-                    failure.reason()
-                )),
-            });
+            return Err(IngestServiceError::from(failure));
         }
         Ok(())
     }
@@ -572,7 +544,7 @@ pub(crate) mod tests {
 
     #[async_trait]
     impl IngestSink for RecordingSink {
-        async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error> {
+        async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestServiceError> {
             let remaining = self.transient_failures_left.load(Ordering::SeqCst);
             if remaining > 0
                 && self
@@ -580,7 +552,7 @@ pub(crate) mod tests {
                     .compare_exchange(remaining, remaining - 1, Ordering::SeqCst, Ordering::SeqCst)
                     .is_ok()
             {
-                return Err(IngestV2Error::Unavailable("try again".to_string()));
+                return Err(IngestServiceError::Unavailable("try again".to_string()));
             }
             self.batches
                 .lock()

@@ -16,8 +16,8 @@ use std::io;
 
 use quickwit_actors::AskError;
 use quickwit_common::rate_limited_error;
+use quickwit_proto::ingest::RateLimitingCause;
 use quickwit_proto::ingest::router::{IngestFailure, IngestFailureReason};
-use quickwit_proto::ingest::{IngestV2Error, RateLimitingCause};
 use quickwit_proto::types::IndexId;
 use quickwit_proto::{GrpcServiceError, ServiceError, ServiceErrorCode, tonic};
 use serde::{Deserialize, Serialize};
@@ -72,23 +72,6 @@ impl From<io::Error> for IngestServiceError {
     }
 }
 
-impl From<IngestV2Error> for IngestServiceError {
-    fn from(error: IngestV2Error) -> Self {
-        match error {
-            IngestV2Error::Timeout(error_msg) => {
-                IngestServiceError::Unavailable(format!("timeout {error_msg}"))
-            }
-            IngestV2Error::Unavailable(error_msg) => {
-                IngestServiceError::Unavailable(format!("unavailable: {error_msg}"))
-            }
-            IngestV2Error::Internal(message) => IngestServiceError::Internal(message),
-            IngestV2Error::TooManyRequests(rate_limiting_cause) => {
-                IngestServiceError::RateLimited(rate_limiting_cause)
-            }
-        }
-    }
-}
-
 impl From<IngestFailure> for IngestServiceError {
     fn from(ingest_failure: IngestFailure) -> Self {
         match ingest_failure.reason() {
@@ -99,32 +82,17 @@ impl From<IngestFailure> for IngestServiceError {
                 index_id: ingest_failure.index_id,
             },
             IngestFailureReason::SourceNotFound => IngestServiceError::Internal(format!(
-                "Ingest v2 source not found for index {}",
+                "Ingest source not found for index {}",
                 ingest_failure.index_id
             )),
             IngestFailureReason::Internal => {
                 IngestServiceError::Internal("internal error".to_string())
             }
-            IngestFailureReason::NoShardsAvailable => {
-                IngestServiceError::Unavailable("no shards available".to_string())
-            }
-            IngestFailureReason::ShardRateLimited => {
-                IngestServiceError::RateLimited(RateLimitingCause::ShardRateLimiting)
-            }
-            IngestFailureReason::WalFull => {
-                IngestServiceError::RateLimited(RateLimitingCause::WalFull)
-            }
             IngestFailureReason::Timeout => {
                 IngestServiceError::Internal("request timed out".to_string())
             }
-            IngestFailureReason::RouterLoadShedding => {
-                IngestServiceError::RateLimited(RateLimitingCause::RouterLoadShedding)
-            }
             IngestFailureReason::LoadShedding => {
                 IngestServiceError::RateLimited(RateLimitingCause::LoadShedding)
-            }
-            IngestFailureReason::CircuitBreaker => {
-                IngestServiceError::RateLimited(RateLimitingCause::CircuitBreaker)
             }
         }
     }

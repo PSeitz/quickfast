@@ -40,30 +40,12 @@ use crate::index_config::serialize::VersionedIndexConfig;
 use crate::merge_policy_config::MergePolicyConfig;
 use crate::serde_utils::HumanDuration;
 
-#[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IndexingResources {
     #[schema(value_type = String, default = "2 GB")]
     #[serde(default = "IndexingResources::default_heap_size")]
     #[serde(with = "crate::serde_utils::bytesize_serde")]
     pub heap_size: ByteSize,
-    // DEPRECATED: See #4439
-    #[schema(value_type = String)]
-    #[serde(default)]
-    #[serde(skip_serializing)]
-    max_merge_write_throughput: Option<ByteSize>,
-}
-
-impl PartialEq for IndexingResources {
-    fn eq(&self, other: &Self) -> bool {
-        self.heap_size == other.heap_size
-    }
-}
-
-impl Hash for IndexingResources {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.heap_size.hash(state);
-    }
 }
 
 impl IndexingResources {
@@ -75,18 +57,7 @@ impl IndexingResources {
     pub fn for_test() -> Self {
         Self {
             heap_size: ByteSize::mb(20),
-            ..Default::default()
         }
-    }
-
-    pub fn validate(&self) -> anyhow::Result<()> {
-        if self.max_merge_write_throughput.is_some() {
-            warn!(
-                "`max_merge_write_throughput` is deprecated and will be removed in a future \
-                 version. See #4439. A global limit now exists in indexer configuration."
-            );
-        }
-        Ok(())
     }
 }
 
@@ -94,17 +65,12 @@ impl Default for IndexingResources {
     fn default() -> Self {
         Self {
             heap_size: Self::default_heap_size(),
-            max_merge_write_throughput: None,
         }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Hash, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
 pub struct IndexingSettings {
-    #[schema(default = 60)]
-    #[serde(default = "IndexingSettings::default_commit_timeout_secs")]
-    pub commit_timeout_secs: usize,
     #[schema(default = 8)]
     #[serde(default = "IndexingSettings::default_docstore_compression_level")]
     pub docstore_compression_level: i32,
@@ -125,14 +91,6 @@ pub struct IndexingSettings {
 }
 
 impl IndexingSettings {
-    pub fn commit_timeout(&self) -> Duration {
-        Duration::from_secs(self.commit_timeout_secs as u64)
-    }
-
-    fn default_commit_timeout_secs() -> usize {
-        60
-    }
-
     pub fn default_docstore_blocksize() -> usize {
         1_000_000
     }
@@ -157,7 +115,6 @@ impl IndexingSettings {
 impl Default for IndexingSettings {
     fn default() -> Self {
         Self {
-            commit_timeout_secs: Self::default_commit_timeout_secs(),
             docstore_blocksize: Self::default_docstore_blocksize(),
             docstore_compression_level: Self::default_docstore_compression_level(),
             split_num_docs_target: Self::default_split_num_docs_target(),
@@ -514,10 +471,8 @@ impl crate::TestableForRegression for IndexConfig {
         let merge_policy = MergePolicyConfig::StableLog(stable_log_config);
         let indexing_resources = IndexingResources {
             heap_size: ByteSize::mb(50),
-            ..Default::default()
         };
         let indexing_settings = IndexingSettings {
-            commit_timeout_secs: 301,
             split_num_docs_target: 10_000_001,
             merge_policy,
             resources: indexing_resources,
@@ -585,7 +540,6 @@ pub(super) fn validate_index_config(
     build_doc_mapper(doc_mapping, search_settings)?;
 
     indexing_settings.merge_policy.validate()?;
-    indexing_settings.resources.validate()?;
 
     if let Some(retention_policy) = retention_policy_opt {
         retention_policy.validate()?;
@@ -718,7 +672,6 @@ mod tests {
             index_config.doc_mapping.timestamp_field.unwrap(),
             "timestamp"
         );
-        assert_eq!(index_config.indexing_settings.commit_timeout_secs, 61);
         assert_eq!(
             index_config.indexing_settings.merge_policy,
             MergePolicyConfig::StableLog(crate::StableLogMergePolicyConfig {
@@ -732,7 +685,6 @@ mod tests {
             index_config.indexing_settings.resources,
             IndexingResources {
                 heap_size: ByteSize::gb(3),
-                ..Default::default()
             }
         );
         assert_eq!(index_config.ingest_settings.min_shards.get(), 12);
@@ -802,17 +754,7 @@ mod tests {
             assert_eq!(index_config.doc_mapping.field_mappings[0].name, "body");
             assert_eq!(index_config.doc_mapping.field_mappings[1].name, "timestamp");
             assert!(!index_config.doc_mapping.store_source);
-            assert_eq!(
-                index_config.indexing_settings,
-                IndexingSettings {
-                    commit_timeout_secs: 42,
-                    merge_policy: MergePolicyConfig::default(),
-                    resources: IndexingResources {
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
-            );
+            assert_eq!(index_config.indexing_settings, IndexingSettings::default());
             assert_eq!(
                 index_config.search_settings,
                 SearchSettings {

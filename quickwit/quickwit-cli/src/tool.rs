@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -417,7 +416,6 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
         .map(|vrl_script| TransformConfig::new(vrl_script, None));
     let source_config = SourceConfig {
         source_id: CLI_SOURCE_ID.to_string(),
-        num_pipelines: NonZeroUsize::MIN,
         enabled: true,
         source_params,
         transform_config,

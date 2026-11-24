@@ -34,7 +34,7 @@ use tracing::{Span, instrument};
 use crate::controlled_directory::ControlledDirectory;
 use crate::merge_policy::MergeTask;
 use crate::metrics::{DOCS_CLUSTER_GROUP_SIZE, INDEX_SOURCE};
-use crate::models::{ProcessedDoc, PublishLock, SplitAttrs};
+use crate::models::{ProcessedDoc, SplitAttrs};
 use crate::no_fsync_mmap_directory::open_split_scratch_directory;
 
 pub struct IndexedSplitBuilder {
@@ -287,9 +287,7 @@ fn record_timestamp(timestamp: DateTime, time_range: &mut Option<RangeInclusive<
 #[derive(Debug)]
 pub struct IndexedSplitBatch {
     pub splits: Vec<IndexedSplit>,
-    pub publish_lock: PublishLock,
-    /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
-    /// in the `MergePipeline` or `DeleteTaskPipeline`.
+    /// A [`MergeTask`] tracked by the `DeleteTaskPlanner` in `DeleteTaskPipeline`.
     pub merge_task_opt: Option<MergeTask>,
     pub batch_parent_span: Span,
 }

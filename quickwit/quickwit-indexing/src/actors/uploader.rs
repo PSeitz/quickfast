@@ -20,7 +20,6 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use fail::fail_point;
 use itertools::Itertools;
 use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::pubsub::EventBroker;
@@ -36,14 +35,12 @@ use quickwit_proto::types::IndexUid;
 use quickwit_storage::{SplitPayload, SplitPayloadBuilder};
 use serde::Serialize;
 use tokio::sync::{Semaphore, SemaphorePermit};
-use tracing::{Instrument, Span, debug, error, info, instrument, warn};
+use tracing::{Instrument, Span, debug, error, instrument, warn};
 
 use crate::actors::Publisher;
 use crate::merge_policy::{MergePolicy, MergeTask};
 use crate::metrics::{AVAILABLE_CONCURRENT_UPLOAD_PERMITS, COMPONENT};
-use crate::models::{
-    PackagedSplit, PackagedSplitBatch, PublishLock, SplitsUpdate, create_split_metadata,
-};
+use crate::models::{PackagedSplit, PackagedSplitBatch, SplitsUpdate, create_split_metadata};
 use crate::split_store::IndexingSplitStore;
 
 /// The following two semaphores ensures that, we have at most `max_concurrent_split_uploads` split
@@ -191,7 +188,6 @@ impl Handler<PackagedSplitBatch> for Uploader {
         batch: PackagedSplitBatch,
         ctx: &ActorContext<Self>,
     ) -> Result<(), ActorExitStatus> {
-        fail_point!("uploader:before");
         let publisher_mailbox = self.publisher_mailbox.clone();
 
         // The permit will be added back manually to the semaphore the task after it is finished.
@@ -220,18 +216,11 @@ impl Handler<PackagedSplitBatch> for Uploader {
         let event_broker = self.event_broker.clone();
         spawn_named_task(
             async move {
-                fail_point!("uploader:intask:before");
-
                 let mut split_metadata_list = Vec::with_capacity(batch.splits.len());
                 let mut split_payloads = Vec::with_capacity(batch.splits.len());
                 let mut report_splits: Vec<ReportSplit> = Vec::with_capacity(batch.splits.len());
 
                 for packaged_split in batch.splits.iter() {
-                    if batch.publish_lock.is_dead() {
-                        info!("splits' publish lock is dead");
-                        return;
-                    }
-
                     let (split_metadata, split_payload) = match prepare_split_for_upload(
                         packaged_split,
                         &merge_policy,
@@ -308,7 +297,6 @@ impl Handler<PackagedSplitBatch> for Uploader {
                 let splits_update = make_publish_operation(
                     index_uid,
                     packaged_splits_and_metadata,
-                    batch.publish_lock,
                     batch.merge_task_opt,
                     batch.batch_parent_span,
                 );
@@ -327,7 +315,6 @@ impl Handler<PackagedSplitBatch> for Uploader {
             .instrument(Span::current()),
             "upload_single_task",
         );
-        fail_point!("uploader:intask:after");
         Ok(())
     }
 }
@@ -412,7 +399,6 @@ pub fn prepare_split_for_upload(
 fn make_publish_operation(
     index_uid: IndexUid,
     packaged_splits_and_metadatas: Vec<(PackagedSplit, SplitMetadata)>,
-    publish_lock: PublishLock,
     merge_task: Option<MergeTask>,
     parent_span: Span,
 ) -> SplitsUpdate {
@@ -428,7 +414,6 @@ fn make_publish_operation(
             .map(|split_and_meta| split_and_meta.1)
             .collect_vec(),
         replaced_split_ids: Vec::from_iter(replaced_split_ids),
-        publish_lock,
         merge_task,
         parent_span,
     }
@@ -565,7 +550,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                PublishLock::default(),
                 None,
                 Span::none(),
             ))
@@ -688,7 +672,6 @@ mod tests {
         uploader_mailbox
             .send_message(PackagedSplitBatch::new(
                 vec![packaged_split_1, package_split_2],
-                PublishLock::default(),
                 None,
                 Span::none(),
             ))
@@ -786,7 +769,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                PublishLock::default(),
                 None,
                 Span::none(),
             ))
@@ -890,7 +872,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                PublishLock::default(),
                 None,
                 Span::none(),
             ))

@@ -20,15 +20,12 @@ use quickwit_proto::types::{IndexUid, SplitId};
 use tracing::Span;
 
 use crate::merge_policy::MergeTask;
-use crate::models::PublishLock;
 
 pub struct SplitsUpdate {
     pub index_uid: IndexUid,
     pub new_splits: Vec<SplitMetadata>,
     pub replaced_split_ids: Vec<SplitId>,
-    pub publish_lock: PublishLock,
-    /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
-    /// in the `MergePipeline` or `DeleteTaskPipeline`.
+    /// A [`MergeTask`] tracked by the `DeleteTaskPlanner` in `DeleteTaskPipeline`.
     pub merge_task: Option<MergeTask>,
     pub parent_span: Span,
 }

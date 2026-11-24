@@ -27,16 +27,6 @@ pub struct IndexingPipelineId {
     pub pipeline_uid: PipelineUid,
 }
 
-impl IndexingPipelineId {
-    pub fn merge_pipeline_id(&self) -> MergePipelineId {
-        MergePipelineId {
-            node_id: self.node_id.clone(),
-            index_uid: self.index_uid.clone(),
-            source_id: self.source_id.clone(),
-        }
-    }
-}
-
 impl Display for IndexingPipelineId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}:{}", self.index_uid, self.source_id)

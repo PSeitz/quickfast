@@ -16,7 +16,6 @@ pub(crate) mod serialize;
 
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 use std::str::FromStr;
 
 use anyhow::ensure;
@@ -44,9 +43,6 @@ pub const RESERVED_SOURCE_IDS: &[&str] = &[CLI_SOURCE_ID, INGEST_V2_SOURCE_ID];
 #[serde(try_from = "VersionedSourceConfig")]
 pub struct SourceConfig {
     pub source_id: SourceId,
-
-    /// Number of indexing pipelines to run on a cluster for the source.
-    pub num_pipelines: NonZeroUsize,
 
     // Denotes if this source is enabled.
     pub enabled: bool,
@@ -94,7 +90,6 @@ impl SourceConfig {
     pub fn cli() -> Self {
         Self {
             source_id: CLI_SOURCE_ID.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
             enabled: true,
             source_params: SourceParams::IngestCli,
             transform_config: None,
@@ -106,7 +101,6 @@ impl SourceConfig {
     pub fn ingest_v2() -> Self {
         Self {
             source_id: INGEST_V2_SOURCE_ID.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
             enabled: true,
             source_params: SourceParams::Ingest,
             transform_config: None,
@@ -122,7 +116,6 @@ impl SourceConfig {
     pub(crate) fn indexing_params_fingerprint(&self) -> u64 {
         let mut hasher = SipHasher::new();
         self.input_format.hash(&mut hasher);
-        self.num_pipelines.hash(&mut hasher);
         self.source_params.hash(&mut hasher);
         self.transform_config.hash(&mut hasher);
         hasher.finish()
@@ -132,7 +125,6 @@ impl SourceConfig {
     pub fn for_test(source_id: &str, source_params: SourceParams) -> Self {
         Self {
             source_id: source_id.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
             enabled: true,
             source_params,
             transform_config: None,
@@ -146,7 +138,6 @@ impl crate::TestableForRegression for SourceConfig {
     fn sample_for_regression() -> Self {
         SourceConfig {
             source_id: "kafka-source".to_string(),
-            num_pipelines: NonZeroUsize::new(2).unwrap(),
             enabled: true,
             source_params: SourceParams::Kafka(KafkaSourceParams {
                 topic: "kafka-topic".to_string(),
@@ -545,7 +536,6 @@ impl TransformConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZero;
     use std::str::FromStr;
 
     use quickwit_common::uri::Uri;
@@ -572,7 +562,6 @@ mod tests {
             load_source_config_from_user_config(config_format, file_content.as_bytes()).unwrap();
         let expected_source_config = SourceConfig {
             source_id: "hdfs-logs-kafka-source".to_string(),
-            num_pipelines: NonZeroUsize::new(2).unwrap(),
             enabled: true,
             source_params: SourceParams::Kafka(KafkaSourceParams {
                 topic: "cloudera-cluster-logs".to_string(),
@@ -587,7 +576,6 @@ mod tests {
             input_format: SourceInputFormat::Json,
         };
         assert_eq!(source_config, expected_source_config);
-        assert_eq!(source_config.num_pipelines.get(), 2);
     }
 
     #[test]
@@ -655,118 +643,6 @@ mod tests {
                     enable_backfill_mode: true,
                 }
             );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_load_invalid_source_config() {
-        {
-            let content = r#"
-            {
-                "version": "0.7",
-                "source_id": "hdfs-logs-void-source",
-                "desired_num_pipelines": 0,
-                "max_num_pipelines_per_indexer": 1,
-                "source_type": "void",
-                "params": {}
-            }
-            "#;
-            let error = load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                .unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("`desired_num_pipelines` must be")
-            );
-        }
-        // {
-        //     let content = r#"
-        //     {
-        //         "version": "0.7",
-        //         "source_id": "hdfs-logs-void-source",
-        //         "desired_num_pipelines": 1,
-        //         "max_num_pipelines_per_indexer": 0,
-        //         "source_type": "void",
-        //         "params": {}
-        //     }
-        //     "#;
-        //     let error = load_source_config_from_user_config(ConfigFormat::Json,
-        // content.as_bytes())         .unwrap_err();
-        //     assert!(error
-        //         .to_string()
-        //         .contains("`max_num_pipelines_per_indexer` must be"));
-        // }
-        {
-            let content = r#"
-            {
-                "version": "0.8",
-                "source_id": "hdfs-logs-void-source",
-                "num_pipelines": 2,
-                "source_type": "void",
-                "params": {}
-            }
-            "#;
-            let error = load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                .unwrap_err();
-            assert!(error.to_string().contains("supports multiple pipelines"));
-        }
-        {
-            let content = r#"
-            {
-                "version": "0.7",
-                "source_id": "hdfs-logs-void-source",
-                "desired_num_pipelines": 2,
-                "max_num_pipelines_per_indexer": 1,
-                "source_type": "void",
-                "params": {}
-            }
-            "#;
-            let error = load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                .unwrap_err();
-            assert!(error.to_string().contains("supports multiple pipelines"));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_load_valid_distributed_source_config_0_7() {
-        {
-            let content = r#"
-            {
-                "version": "0.7",
-                "source_id": "hdfs-logs-kafka-source",
-                "desired_num_pipelines": 3,
-                "max_num_pipelines_per_indexer": 3,
-                "source_type": "kafka",
-                "params": {
-                    "topic": "my-topic"
-                }
-            }
-            "#;
-            let source_config =
-                load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                    .unwrap();
-            assert_eq!(source_config.num_pipelines.get(), 3);
-        }
-    }
-
-    #[tokio::test]
-    async fn test_load_valid_distributed_source_config() {
-        {
-            let content = r#"
-            {
-                "version": "0.8",
-                "source_id": "hdfs-logs-kafka-source",
-                "num_pipelines": 3,
-                "source_type": "kafka",
-                "params": {
-                    "topic": "my-topic"
-                }
-            }
-            "#;
-            let source_config =
-                load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                    .unwrap();
-            assert_eq!(source_config.num_pipelines.get(), 3);
         }
     }
 
@@ -1019,14 +895,13 @@ mod tests {
         {
             let mut existing_source_config =
                 load_source_config_from_user_config(config_format, &file_content).unwrap();
-            existing_source_config.num_pipelines = NonZero::new(4).unwrap();
+            existing_source_config.enabled = false;
             let new_source_config =
                 load_source_config_update(config_format, &file_content, &existing_source_config)
                     .unwrap();
 
             let expected_source_config = SourceConfig {
                 source_id: "hdfs-logs-kafka-source".to_string(),
-                num_pipelines: NonZeroUsize::new(2).unwrap(),
                 enabled: true,
                 source_params: SourceParams::Kafka(KafkaSourceParams {
                     topic: "cloudera-cluster-logs".to_string(),
@@ -1041,7 +916,6 @@ mod tests {
                 input_format: SourceInputFormat::Json,
             };
             assert_eq!(new_source_config, expected_source_config);
-            assert_eq!(new_source_config.num_pipelines.get(), 2);
         }
         {
             // the source type cannot be updated

@@ -16,7 +16,6 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 bytesize = { workspace = true }
 crc32fast = { workspace = true }
-fail = { workspace = true, optional = true }
 futures = { workspace = true }
 http = { workspace = true }
 itertools = { workspace = true }
@@ -64,6 +63,4 @@ quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
 
 [features]
-failpoints = ["fail/failpoints"]
-no-failpoints = []
 testsuite = ["mockall"]

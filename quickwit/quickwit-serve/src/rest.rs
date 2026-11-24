@@ -776,7 +776,7 @@ mod tests {
     use quickwit_cluster::{ChitchatTransport, create_cluster_for_test};
     use quickwit_config::NodeConfig;
     use quickwit_index_management::IndexService;
-    use quickwit_proto::ingest::router::IngestRouterServiceClient;
+    use quickwit_ingest::router_client::IngestRouterClient;
     use quickwit_proto::metastore::MetastoreServiceClient;
     use quickwit_search::MockSearchService;
     use quickwit_storage::StorageResolver;
@@ -910,7 +910,7 @@ mod tests {
             compaction_service_client_opt: None,
             indexing_service_opt: None,
             index_manager: index_service,
-            ingest_router_service: IngestRouterServiceClient::mocked().into(),
+            ingest_router_service: IngestRouterClient::mocked(),
             ingesthree_service_opt: None,
             janitor_service_opt: None,
             otlp_logs_service_opt: None,

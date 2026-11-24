@@ -15,9 +15,7 @@
 use quickwit_common::{rate_limited_debug, rate_limited_error};
 use quickwit_index_management::IndexServiceError;
 use quickwit_ingest::IngestServiceError;
-use quickwit_ingest::router_client::IngestRouterError;
 use quickwit_proto::ServiceError;
-use quickwit_proto::ingest::IngestV2Error;
 use quickwit_search::SearchError;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -91,21 +89,6 @@ impl From<SearchError> for ElasticsearchError {
 impl From<IngestServiceError> for ElasticsearchError {
     fn from(ingest_service_error: IngestServiceError) -> Self {
         Self::from_service_error(ingest_service_error)
-    }
-}
-
-impl From<IngestRouterError> for ElasticsearchError {
-    fn from(error: IngestRouterError) -> Self {
-        match error {
-            IngestRouterError::V2(error) => error.into(),
-            IngestRouterError::Ingesthree(error) => error.into(),
-        }
-    }
-}
-
-impl From<IngestV2Error> for ElasticsearchError {
-    fn from(ingest_error: IngestV2Error) -> Self {
-        Self::from_service_error(ingest_error)
     }
 }
 

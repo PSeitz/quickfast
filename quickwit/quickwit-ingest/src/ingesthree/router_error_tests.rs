@@ -14,7 +14,7 @@
 
 use super::*;
 use crate::ingesthree::service::failure;
-use crate::router_client::{IngestRouterClient, IngestRouterError};
+use crate::router_client::IngestRouterClient;
 
 // The fixture returns index-specific failures to exercise mixed public requests.
 pub(super) fn index_response(
@@ -161,10 +161,7 @@ async fn test_ingesthree_client_rejects_request_errors_before_any_write() {
     malformed.subrequests.push(bad_batch);
     for request in [force, duplicate, malformed] {
         let error = client.ingest(request).await.unwrap_err();
-        assert!(matches!(
-            error,
-            IngestRouterError::Ingesthree(IngestServiceError::BadRequest(_))
-        ));
+        assert!(matches!(error, IngestServiceError::BadRequest(_)));
         assert_eq!(error.error_code().http_status_code(), 400);
     }
     assert_eq!(node.calls.load(Ordering::SeqCst), 0);

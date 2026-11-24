@@ -14,6 +14,12 @@
 
 include!("../codegen/quickwit/quickwit.ingest.router.rs");
 
+impl quickwit_common::tower::RpcName for IngestRequestV2 {
+    fn rpc_name() -> &'static str {
+        "ingest"
+    }
+}
+
 impl IngestRequestV2 {
     pub fn num_bytes(&self) -> usize {
         self.subrequests

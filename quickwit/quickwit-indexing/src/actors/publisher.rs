@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use fail::fail_point;
 use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, QueueCapacity};
 use quickwit_proto::metastore::{MetastoreService, MetastoreServiceClient, PublishSplitsRequest};
 use serde::Serialize;
@@ -88,13 +87,10 @@ impl Handler<SplitsUpdate> for Publisher {
         split_update: SplitsUpdate,
         ctx: &ActorContext<Self>,
     ) -> Result<(), ActorExitStatus> {
-        fail_point!("publisher:before");
-
         let SplitsUpdate {
             index_uid,
             new_splits,
             replaced_split_ids,
-            publish_lock,
             ..
         } = split_update;
 
@@ -104,13 +100,6 @@ impl Handler<SplitsUpdate> for Publisher {
             .map(|split| split.split_id.to_string())
             .collect();
 
-        let Some(guard) = publish_lock.acquire().await else {
-            info!(
-                split_ids=?split_ids,
-                "Splits' publish lock is dead."
-            );
-            return Ok(());
-        };
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: split_ids.clone(),
@@ -119,7 +108,6 @@ impl Handler<SplitsUpdate> for Publisher {
         ctx.protect_future(self.metastore.publish_splits(publish_splits_request))
             .await
             .map_err(|error| anyhow::Error::from(error).context("failed to publish splits"))?;
-        drop(guard);
 
         for split in &new_splits {
             record_published_split(&index_id, split);
@@ -143,7 +131,6 @@ impl Handler<SplitsUpdate> for Publisher {
         } else {
             self.counters.num_empty_splits += 1;
         }
-        fail_point!("publisher:after");
         Ok(())
     }
 }
@@ -156,7 +143,7 @@ mod tests {
     use quickwit_proto::types::{IndexUid, SplitId};
 
     use super::{Publisher, PublisherType};
-    use crate::models::{PublishLock, SplitsUpdate};
+    use crate::models::SplitsUpdate;
 
     #[tokio::test]
     async fn test_publisher_publish_operation() {
@@ -188,7 +175,6 @@ mod tests {
                     ..Default::default()
                 }],
                 replaced_split_ids: vec![SplitId::from("old_split")],
-                publish_lock: PublishLock::default(),
                 merge_task: None,
                 parent_span: tracing::Span::none(),
             })
@@ -197,38 +183,6 @@ mod tests {
 
         let publisher_observation = publisher_handle.process_pending_and_observe().await.state;
         assert_eq!(publisher_observation.num_replace_operations, 1);
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_publisher_ignores_dead_publish_lock() {
-        let universe = Universe::with_accelerated_time();
-        let mock_metastore = MockMetastoreService::new();
-        let publisher = Publisher::new(
-            PublisherType::MergePublisher,
-            MetastoreServiceClient::from_mock(mock_metastore),
-        );
-        let (publisher_mailbox, publisher_handle) = universe.spawn_builder().spawn(publisher);
-        let publish_lock = PublishLock::default();
-        publish_lock.kill().await;
-
-        publisher_mailbox
-            .send_message(SplitsUpdate {
-                index_uid: IndexUid::for_test("index", 1),
-                new_splits: vec![SplitMetadata {
-                    split_id: "split".into(),
-                    ..Default::default()
-                }],
-                replaced_split_ids: Vec::new(),
-                publish_lock,
-                merge_task: None,
-                parent_span: tracing::Span::none(),
-            })
-            .await
-            .unwrap();
-
-        let obs = publisher_handle.process_pending_and_observe().await.state;
-        assert_eq!(obs.num_published_splits, 0);
         universe.assert_quit().await;
     }
 }

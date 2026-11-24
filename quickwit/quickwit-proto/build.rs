@@ -104,7 +104,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run()
         .unwrap();
 
-    // Ingest service (metastore service proto should be generated before ingest).
+    // Ingest wire types (shared by IngesthreeService and internal routing).
+    println!("cargo:rerun-if-changed=protos/quickwit/ingest.proto");
+    println!("cargo:rerun-if-changed=protos/quickwit/router.proto");
     let mut prost_config = prost_build::Config::default();
     prost_config
         .bytes(["DocBatchV2.doc_buffer"])
@@ -114,19 +116,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .extern_path(".quickwit.common.DocUid", "crate::types::DocUid")
         .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid")
-        .file_descriptor_set_path("src/codegen/quickwit/ingest_descriptor.bin");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/router.proto"])
-        .with_includes(&["protos"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::ingest::IngestV2Result")
-        .with_error_type_path("crate::ingest::IngestV2Error")
-        .generate_rpc_name_impls()
-        .with_traced_request_field_debug("IngestRequestV2", "commit_type")
-        .run()
-        .unwrap();
+        .type_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
+        )
+        .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
+        .out_dir("src/codegen/quickwit");
+    prost_config.compile_protos(&["protos/quickwit/router.proto"], &["protos"])?;
 
     // Ingesthree has a distinct wire service and retains tonic request metadata so
     // the version guard runs before admission. Shared messages keep public adapters reusable.

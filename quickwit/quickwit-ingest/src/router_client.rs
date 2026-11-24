@@ -12,30 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Dispatch public ingest requests while retaining each backend's error semantics.
+//! Dispatch public ingest requests through [`IngesthreeRouter`].
 
 use std::sync::Arc;
 
-use quickwit_proto::ingest::IngestV2Error;
-use quickwit_proto::ingest::router::{
-    self, IngestRequestV2, IngestResponseV2, IngestRouterService, IngestRouterServiceClient,
-    IngestSuccess,
-};
-use quickwit_proto::{ServiceError, ServiceErrorCode};
+use quickwit_proto::ingest::router::{self, IngestRequestV2, IngestResponseV2, IngestSuccess};
 
 use crate::IngestServiceError;
 use crate::ingesthree::IngesthreeRouter;
 
-#[derive(Clone, Debug)]
-pub enum IngestRouterClient {
-    V2(IngestRouterServiceClient),
-    Ingesthree(Arc<IngesthreeRouter>),
+#[cfg(any(test, feature = "testsuite"))]
+mockall::mock! {
+    #[derive(Debug)]
+    pub IngestRouter {
+        pub fn ingest(
+            &self,
+            request: IngestRequestV2,
+        ) -> Result<IngestResponse, IngestServiceError>;
+    }
 }
 
-impl From<IngestRouterServiceClient> for IngestRouterClient {
-    fn from(client: IngestRouterServiceClient) -> Self {
-        Self::V2(client)
-    }
+#[derive(Clone, Debug)]
+pub enum IngestRouterClient {
+    Ingesthree(Arc<IngesthreeRouter>),
+    #[cfg(any(test, feature = "testsuite"))]
+    Mock(Arc<tokio::sync::Mutex<MockIngestRouter>>),
 }
 
 impl From<IngesthreeRouter> for IngestRouterClient {
@@ -45,13 +46,24 @@ impl From<IngesthreeRouter> for IngestRouterClient {
 }
 
 impl IngestRouterClient {
+    #[cfg(any(test, feature = "testsuite"))]
+    pub fn from_mock(mock: MockIngestRouter) -> Self {
+        Self::Mock(Arc::new(tokio::sync::Mutex::new(mock)))
+    }
+
+    #[cfg(any(test, feature = "testsuite"))]
+    pub fn mocked() -> Self {
+        Self::from_mock(MockIngestRouter::new())
+    }
+
     pub async fn ingest(
         &self,
         request: IngestRequestV2,
-    ) -> Result<IngestResponse, IngestRouterError> {
+    ) -> Result<IngestResponse, IngestServiceError> {
         match self {
-            Self::V2(client) => Ok(client.ingest(request).await?.into()),
-            Self::Ingesthree(router) => Ok(router.ingest(request).await?),
+            Self::Ingesthree(router) => router.ingest(request).await,
+            #[cfg(any(test, feature = "testsuite"))]
+            Self::Mock(mock) => mock.lock().await.ingest(request),
         }
     }
 }
@@ -110,37 +122,11 @@ impl From<IngestFailure> for IngestServiceError {
     }
 }
 
-/// Keep V2 request errors intact: ES exposes timeouts as 408, while REST maps them to 503.
-#[derive(Debug, thiserror::Error)]
-pub enum IngestRouterError {
-    #[error(transparent)]
-    V2(#[from] IngestV2Error),
-    #[error(transparent)]
-    Ingesthree(#[from] IngestServiceError),
-}
-
-impl ServiceError for IngestRouterError {
-    fn error_code(&self) -> ServiceErrorCode {
-        match self {
-            Self::V2(error) => error.error_code(),
-            Self::Ingesthree(error) => error.error_code(),
-        }
-    }
-}
-
-impl From<IngestRouterError> for IngestServiceError {
-    fn from(error: IngestRouterError) -> Self {
-        match error {
-            IngestRouterError::V2(error) => error.into(),
-            IngestRouterError::Ingesthree(error) => error,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use quickwit_proto::ingest::RateLimitingCause;
     use quickwit_proto::ingest::router::IngestFailureReason;
+    use quickwit_proto::{ServiceError, ServiceErrorCode};
 
     use super::*;
 
@@ -161,12 +147,10 @@ mod tests {
             ),
         ] {
             let message = error.to_string();
-            let request_error = IngestRouterError::Ingesthree(error.clone());
             assert_eq!(
-                request_error.error_code().http_status_code(),
+                error.error_code().http_status_code(),
                 code.http_status_code()
             );
-            assert_eq!(IngestServiceError::from(request_error).to_string(), message);
             let failure = IngestFailure::Ingesthree {
                 subrequest_id: 7,
                 index_id: "logs".into(),
@@ -184,15 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ingesthree_client_preserves_v2_errors_and_partial_results() {
-        let error = IngestRouterError::V2(IngestV2Error::Timeout("deadline".into()));
-        assert_eq!(error.error_code().http_status_code(), 408);
-        assert_eq!(
-            IngestServiceError::from(error)
-                .error_code()
-                .http_status_code(),
-            503
-        );
+    fn test_ingesthree_response_preserves_partial_results() {
         let response = IngestResponse::from(IngestResponseV2 {
             successes: vec![IngestSuccess {
                 subrequest_id: 1,

@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use async_trait::async_trait;
-use fail::fail_point;
 use itertools::Itertools;
 use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::Progress;
@@ -33,7 +32,7 @@ use tantivy::index::FieldMetadata;
 use tantivy::schema::{FieldType, Type};
 use tantivy::{IndexMeta, InvertedIndexReader, ReloadPolicy};
 use tokio::runtime::Handle;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, instrument, warn};
 
 /// Maximum distinct values allowed for a tag field within a split.
 const MAX_VALUES_PER_TAG_FIELD: usize = if cfg!(any(test, feature = "testsuite")) {
@@ -131,17 +130,8 @@ impl Handler<IndexedSplitBatch> for Packager {
             split_ids=?split_ids,
             "start-packaging-splits"
         );
-        fail_point!("packager:before");
         let mut packaged_splits = Vec::with_capacity(batch.splits.len());
         for split in batch.splits {
-            if batch.publish_lock.is_dead() {
-                // TODO: Remove the junk right away?
-                info!(
-                    split_ids=?split_ids,
-                    "Splits' publish lock is dead."
-                );
-                return Ok(());
-            }
             let packaged_split = self.process_indexed_split(split, ctx)?;
             packaged_splits.push(packaged_split);
         }
@@ -149,13 +139,11 @@ impl Handler<IndexedSplitBatch> for Packager {
             &self.uploader_mailbox,
             PackagedSplitBatch::new(
                 packaged_splits,
-                batch.publish_lock,
                 batch.merge_task_opt,
                 batch.batch_parent_span,
             ),
         )
         .await?;
-        fail_point!("packager:after");
         Ok(())
     }
 }
@@ -390,7 +378,7 @@ mod tests {
 
     use super::*;
     use crate::controlled_directory::ControlledDirectory;
-    use crate::models::{PublishLock, SplitAttrs};
+    use crate::models::SplitAttrs;
 
     #[test]
     fn serialize_field_metadata_test() {
@@ -600,7 +588,6 @@ mod tests {
         packager_mailbox
             .send_message(IndexedSplitBatch {
                 splits: vec![indexed_split],
-                publish_lock: PublishLock::default(),
                 merge_task_opt: None,
                 batch_parent_span: Span::none(),
             })

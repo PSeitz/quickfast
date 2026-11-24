@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
-
 use quickwit_common::rand::append_random_suffix;
 use quickwit_config::{
     IndexConfig, SourceConfig, SourceInputFormat, SourceParams, TransformConfig,
@@ -50,7 +48,6 @@ pub async fn test_metastore_add_source<MetastoreToTest: MetastoreServiceExt + De
 
     let source = SourceConfig {
         source_id: source_id.to_string(),
-        num_pipelines: NonZeroUsize::MIN,
         enabled: true,
         source_params: SourceParams::void(),
         transform_config: None,
@@ -134,7 +131,6 @@ pub async fn test_metastore_update_source<MetastoreToTest: MetastoreServiceExt +
 
     let mut source = SourceConfig {
         source_id: source_id.to_string(),
-        num_pipelines: NonZeroUsize::MIN,
         enabled: true,
         source_params: SourceParams::void(),
         transform_config: None,
@@ -223,7 +219,6 @@ pub async fn test_metastore_toggle_source<MetastoreToTest: MetastoreServiceExt +
     let source_id = format!("{index_id}--source");
     let source = SourceConfig {
         source_id: source_id.to_string(),
-        num_pipelines: NonZeroUsize::MIN,
         enabled: true,
         source_params: SourceParams::void(),
         transform_config: None,
@@ -289,7 +284,6 @@ pub async fn test_metastore_delete_source<MetastoreToTest: MetastoreServiceExt +
 
     let source = SourceConfig {
         source_id: source_id.to_string(),
-        num_pipelines: NonZeroUsize::MIN,
         enabled: true,
         source_params: SourceParams::void(),
         transform_config: None,

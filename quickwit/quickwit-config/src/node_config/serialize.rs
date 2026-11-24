@@ -864,8 +864,6 @@ mod tests {
                 split_store_max_num_bytes: ByteSize::tb(1),
                 split_store_max_num_splits: 10_000,
                 max_concurrent_split_uploads: 8,
-                merge_concurrency: NonZeroUsize::new(2).unwrap(),
-                max_merge_write_throughput: Some(ByteSize::mb(100)),
             }
         );
         assert_eq!(config.ingest_api_config, IngestApiConfig::default());

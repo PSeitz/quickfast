@@ -18,7 +18,6 @@ mod indexed_split;
 mod merge_scratch;
 mod packaged_split;
 mod processed_doc;
-mod publish_lock;
 mod publisher_message;
 mod split_attrs;
 
@@ -26,6 +25,5 @@ pub use indexed_split::{IndexedSplit, IndexedSplitBatch, IndexedSplitBuilder};
 pub use merge_scratch::MergeScratch;
 pub use packaged_split::{PackagedSplit, PackagedSplitBatch};
 pub use processed_doc::ProcessedDoc;
-pub use publish_lock::{NewPublishLock, PublishLock};
 pub use publisher_message::SplitsUpdate;
 pub use split_attrs::{SplitAttrs, create_split_metadata};
