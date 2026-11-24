@@ -17,10 +17,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use quickwit_actors::{Mailbox, Universe};
+use quickwit_actors::Universe;
 use quickwit_common::Progress;
 use quickwit_common::io::IoControls;
-use quickwit_common::pubsub::EventBroker;
 use quickwit_common::rand::append_random_suffix;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_common::uri::Uri;
@@ -42,12 +41,10 @@ use quickwit_proto::types::{IndexUid, NodeId, PipelineUid, SourceId};
 use quickwit_storage::{Storage, StorageResolver};
 use serde_json::Value as JsonValue;
 
-use crate::actors::{
-    DocumentConverter, MergePipeline, MergePipelineParams, MergePlanner, MergeSchedulerService,
-    create_packaged_split, prepare_split_for_upload,
-};
+use crate::actors::{DocumentConverter, create_packaged_split, prepare_split_for_upload};
+use crate::local_merge::run_local_merges;
 use crate::merge_policy::{MergePolicy, merge_policy_from_settings};
-use crate::models::{IndexedSplitBuilder, IndexingStatistics, NewSplits};
+use crate::models::IndexedSplitBuilder;
 use crate::split_store::{IndexingSplitCache, IndexingSplitStore};
 
 /// Creates a test environment backed by RAM storage and a local scratch directory.
@@ -62,7 +59,6 @@ pub struct TestSandbox {
     storage_resolver: StorageResolver,
     storage: Arc<dyn Storage>,
     split_store: IndexingSplitStore,
-    merge_planner_mailbox: Mailbox<MergePlanner>,
     universe: Universe,
     _temp_dir: tempfile::TempDir,
 }
@@ -115,31 +111,6 @@ impl TestSandbox {
         let split_store =
             IndexingSplitStore::new(storage.clone(), Arc::new(IndexingSplitCache::no_caching()));
         let universe = Universe::with_accelerated_time();
-        let merge_scheduler_mailbox: Mailbox<MergeSchedulerService> = universe.get_or_spawn_one();
-        let merge_scratch_dir = TempDirectory::for_test();
-        let merge_pipeline = MergePipeline::new(
-            MergePipelineParams {
-                pipeline_id: MergePipelineId {
-                    node_id: node_id.clone(),
-                    index_uid: index_uid.clone(),
-                    source_id: INGEST_V2_SOURCE_ID.to_string(),
-                },
-                doc_mapper: doc_mapper.clone(),
-                indexing_directory: merge_scratch_dir,
-                metastore: metastore.clone(),
-                merge_scheduler_service: merge_scheduler_mailbox,
-                split_store: split_store.clone(),
-                merge_policy: merge_policy.clone(),
-                retention_policy: index_config.retention_policy_opt.clone(),
-                max_concurrent_split_uploads: 4,
-                merge_io_throughput_limiter_opt: None,
-                event_broker: EventBroker::default(),
-            },
-            Some(Vec::new()),
-            universe.spawn_ctx(),
-        );
-        let merge_planner_mailbox = merge_pipeline.merge_planner_mailbox().clone();
-        universe.spawn_builder().spawn(merge_pipeline);
         Ok(TestSandbox {
             node_id,
             index_uid,
@@ -151,14 +122,13 @@ impl TestSandbox {
             storage_resolver,
             storage,
             split_store,
-            merge_planner_mailbox,
             universe,
             _temp_dir: temp_dir,
         })
     }
 
     /// Indexes, uploads, and publishes `json_docs` directly as new split(s).
-    pub async fn add_documents<I>(&self, json_docs: I) -> anyhow::Result<IndexingStatistics>
+    pub async fn add_documents<I>(&self, json_docs: I) -> anyhow::Result<Vec<SplitMetadata>>
     where
         I: IntoIterator<Item = JsonValue> + 'static,
         I::IntoIter: Send,
@@ -214,7 +184,6 @@ impl TestSandbox {
         let tag_fields = self.doc_mapper.tag_named_fields()?;
         let progress = Progress::default();
         let mut new_splits = Vec::with_capacity(builders.len());
-        let mut total_size_splits = 0u64;
         for (_, builder) in builders {
             let indexed_split = builder.finalize()?;
             let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
@@ -223,7 +192,6 @@ impl TestSandbox {
                 &self.merge_policy,
                 self.index_config.retention_policy_opt.as_ref(),
             )?;
-            total_size_splits += split_metadata.footer_offsets.end;
             self.metastore
                 .stage_splits(StageSplitsRequest::try_from_split_metadata(
                     self.index_uid.clone(),
@@ -252,29 +220,28 @@ impl TestSandbox {
                     replaced_split_ids: Vec::new(),
                 })
                 .await?;
-            let _ = self
-                .merge_planner_mailbox
-                .send_message(NewSplits {
-                    new_splits: new_splits.clone(),
-                })
-                .await;
         }
 
-        let counters = converter.counters();
-        let num_splits = new_splits.len() as u64;
-        Ok(IndexingStatistics {
-            num_docs: counters.num_processed_docs(),
-            num_invalid_docs: counters.num_invalid_docs(),
-            num_local_splits: num_splits,
-            num_staged_splits: num_splits,
-            num_uploaded_splits: num_splits,
-            num_published_splits: num_splits,
-            total_bytes_processed: counters
-                .num_bytes_total
-                .load(std::sync::atomic::Ordering::Relaxed),
-            total_size_splits,
-            ..Default::default()
-        })
+        Ok(new_splits)
+    }
+
+    /// Runs all pending merge operations for this sandbox index.
+    pub async fn run_merges(&self) -> anyhow::Result<()> {
+        run_local_merges(
+            MergePipelineId {
+                node_id: self.node_id.clone(),
+                index_uid: self.index_uid.clone(),
+                source_id: self.source_id.clone(),
+            },
+            self.doc_mapper.clone(),
+            TempDirectory::for_test(),
+            self.metastore.clone(),
+            self.split_store.clone(),
+            self.merge_policy.clone(),
+            self.index_config.retention_policy_opt.clone(),
+            4,
+        )
+        .await
     }
 
     pub fn metastore(&self) -> MetastoreServiceClient {
@@ -383,13 +350,13 @@ mod tests {
         "#;
         let test_sandbox =
             TestSandbox::create("test_index", doc_mapping_yaml, "{}", &["body"]).await?;
-        let statistics = test_sandbox
+        let new_splits = test_sandbox
             .add_documents(vec![
                 serde_json::json!({"title": "Hurricane Fay", "body": "...", "url": "http://hurricane-fay"}),
                 serde_json::json!({"title": "Ganimede", "body": "...", "url": "http://ganimede"}),
             ])
             .await?;
-        assert_eq!(statistics.num_uploaded_splits, 1);
+        assert_eq!(new_splits.len(), 1);
         let metastore = test_sandbox.metastore();
         {
             let splits = metastore

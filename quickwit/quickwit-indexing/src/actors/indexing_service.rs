@@ -46,7 +46,7 @@ static INDEXING_IO_THROUGHPUT_LIMITER: LazyLock<Option<io::Limiter>> = LazyLock:
 });
 
 /// Observable counters for [`IndexingService`].
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IndexingServiceCounters {
     pub num_running_s3_indexers: usize,
     pub source_forwarder_running: bool,
@@ -63,7 +63,6 @@ pub struct IndexingService {
     indexing_io_throughput_limiter_opt: Option<io::Limiter>,
     clustering_config: Option<DocsClusteringConfig>,
     ingest_router_opt: Option<IngestRouterClient>,
-    ingesthree_enabled: bool,
     s3_indexers: Vec<S3IndexerSupervisor>,
     source_forwarder_manager_opt: Option<SourceForwarderManager>,
 }
@@ -73,7 +72,6 @@ impl Debug for IndexingService {
         formatter
             .debug_struct("IndexingService")
             .field("node_id", &self.node_id)
-            .field("ingesthree_enabled", &self.ingesthree_enabled)
             .field("num_s3_indexers", &self.s3_indexers.len())
             .finish()
     }
@@ -120,7 +118,6 @@ impl IndexingService {
             indexing_io_throughput_limiter_opt: INDEXING_IO_THROUGHPUT_LIMITER.clone(),
             clustering_config,
             ingest_router_opt,
-            ingesthree_enabled: false,
             s3_indexers: Vec::new(),
             source_forwarder_manager_opt: None,
         })

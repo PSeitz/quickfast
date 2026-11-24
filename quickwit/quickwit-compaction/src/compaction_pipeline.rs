@@ -25,11 +25,11 @@ use quickwit_common::pubsub::EventBroker;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::RetentionPolicy;
 use quickwit_doc_mapper::DocMapper;
+use quickwit_indexing::IndexingSplitStore;
 use quickwit_indexing::actors::{
     MergeExecutor, MergeSplitDownloader, Packager, Publisher, Uploader, UploaderType,
 };
 use quickwit_indexing::merge_policy::{MergeOperation, MergeSource};
-use quickwit_indexing::{IndexingSplitStore, SplitsUpdateMailbox};
 use quickwit_metrics::{counter, gauge, histogram, label_values};
 use quickwit_proto::indexing::MergePipelineId;
 use quickwit_proto::metastore::MetastoreServiceClient;
@@ -283,11 +283,9 @@ impl CompactionPipeline {
             "spawning compaction pipeline"
         );
 
-        // Publisher (no merge planner feedback, no source)
         let merge_publisher = Publisher::new(
             quickwit_indexing::PublisherType::MergePublisher,
             self.metastore.clone(),
-            None,
         );
         let (merge_publisher_mailbox, merge_publisher_handle) = spawn_ctx
             .spawn_builder()
@@ -301,7 +299,7 @@ impl CompactionPipeline {
             self.merge_policy.clone(),
             self.retention_policy.clone(),
             self.split_store.clone(),
-            SplitsUpdateMailbox::from(merge_publisher_mailbox),
+            merge_publisher_mailbox,
             self.max_concurrent_split_uploads.get(),
             self.event_broker.clone(),
         );

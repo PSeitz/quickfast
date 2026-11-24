@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use futures::StreamExt;
 use quickwit_cluster::{ChitchatTransport, TestClusterBuilder};
 use quickwit_config::INGEST_V2_SOURCE_ID;
 use quickwit_config::service::QuickwitService;
@@ -99,7 +98,7 @@ impl Drop for Destination {
 
 async fn destination(
     name: &str,
-    ingesthree: bool,
+    is_indexer: bool,
     ready: bool,
     zone: &str,
     error: Option<Code>,
@@ -125,19 +124,23 @@ async fn destination(
             .unwrap();
     });
     let transport = ChitchatTransport::default();
+    let service = if is_indexer {
+        QuickwitService::Indexer
+    } else {
+        QuickwitService::Searcher
+    };
     let cluster = TestClusterBuilder::new(NodeId::from_str(name), port - 1, &transport)
-        .with_services(HashSet::from([QuickwitService::Indexer]))
+        .with_services(HashSet::from([service]))
         .build()
         .await
         .unwrap();
-    cluster.set_self_ingesthree_enabled(ingesthree).await;
     cluster.set_self_ingesthree_capacity(10).await;
     cluster.set_self_key_value("availability_zone", zone).await;
     cluster.set_self_node_readiness(ready).await;
     let node = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if let Some(node) = cluster.live_nodes().await.into_iter().find(|node| {
-                node.is_ingesthree() == ingesthree
+                node.is_indexer() == is_indexer
                     && node.ingesthree_capacity() == Some(10)
                     && node.is_ready == ready
                     && node.availability_zone().as_deref() == Some(zone)
@@ -197,14 +200,14 @@ async fn test_ingesthree_destinations_require_capability_readiness_and_prefer_sa
 }
 
 #[tokio::test]
-async fn test_ingesthree_router_never_falls_back_to_v2_and_tracks_capability_updates() {
-    let node = destination("v2", false, true, "zone-a", None, false).await;
+async fn test_ingesthree_router_rejects_when_no_ready_indexer_exists() {
+    let node = destination("searcher", false, true, "zone-a", None, false).await;
     let router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));
     let request = IngestRequestV2 {
         subrequests: vec![subrequest()],
         commit_type: CommitTypeV2::Auto as i32,
     };
-    let response = router.ingest(request.clone()).await.unwrap();
+    let response = router.ingest(request).await.unwrap();
     assert_eq!(
         IngestServiceError::from(response.failures[0].clone())
             .error_code()
@@ -212,30 +215,6 @@ async fn test_ingesthree_router_never_falls_back_to_v2_and_tracks_capability_upd
         503
     );
     assert_eq!(node.calls.load(Ordering::SeqCst), 0);
-
-    let mut changes = node.cluster.change_stream();
-    // Consume the initial v2 Add, then observe the gossip capability update.
-    assert!(changes.next().await.is_some());
-    node.cluster.set_self_ingesthree_enabled(true).await;
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if node
-                .cluster
-                .ready_nodes()
-                .await
-                .iter()
-                .any(ClusterNode::is_ingesthree)
-            {
-                break;
-            }
-            changes.next().await.unwrap();
-        }
-    })
-    .await
-    .unwrap();
-    let response = router.ingest(request).await.unwrap();
-    assert_eq!(response.successes.len(), 1);
-    assert_eq!(node.calls.load(Ordering::SeqCst), 1);
 }
 
 async fn update_capacity(destination: &Destination, score: Option<usize>) -> ClusterNode {

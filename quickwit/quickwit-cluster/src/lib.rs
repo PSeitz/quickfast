@@ -32,8 +32,6 @@ use chitchat::transport::{RecvOutcome, SendOutcome, Socket, Transport, UdpSocket
 pub use chitchat::{FailureDetectorConfig, KeyChangeEvent, ListenerHandle};
 pub use grpc_service::cluster_grpc_server;
 use quickwit_config::NodeConfig;
-use quickwit_config::service::QuickwitService;
-use quickwit_proto::indexing::CpuCapacity;
 use quickwit_transport::ChannelFactory;
 use time::OffsetDateTime;
 
@@ -46,7 +44,7 @@ pub use crate::cluster::{
     TestClusterBuilder, create_cluster_for_test, create_cluster_for_test_with_id,
     grpc_addr_from_listen_addr_for_test,
 };
-pub use crate::member::{ClusterMember, INDEXING_CPU_CAPACITY_KEY};
+pub use crate::member::ClusterMember;
 use crate::metrics::{
     GOSSIP_RECV_BYTES_TOTAL, GOSSIP_RECV_MESSAGES_TOTAL, GOSSIP_SENT_BYTES_TOTAL,
     GOSSIP_SENT_MESSAGES_TOTAL,
@@ -119,11 +117,6 @@ pub async fn start_cluster_service(node_config: &NodeConfig) -> anyhow::Result<C
     let node_id = node_config.node_id.clone();
     let generation_id = GenerationId::now();
     let is_ready = false;
-    let indexing_cpu_capacity = if node_config.is_service_enabled(QuickwitService::Indexer) {
-        node_config.indexer_config.cpu_capacity
-    } else {
-        CpuCapacity::zero()
-    };
     let self_node = ClusterMember {
         node_id,
         generation_id,
@@ -131,16 +124,14 @@ pub async fn start_cluster_service(node_config: &NodeConfig) -> anyhow::Result<C
         enabled_services: node_config.enabled_services.clone(),
         gossip_advertise_addr: node_config.gossip_advertise_addr,
         grpc_advertise_addr: node_config.grpc_advertise_addr,
-        indexing_cpu_capacity,
         availability_zone: node_config.availability_zone.clone(),
-        enable_standalone_compactors: node_config.enable_standalone_compactors,
     };
     let failure_detector_config = FailureDetectorConfig {
         dead_node_grace_period: Duration::from_mins(15),
         ..Default::default()
     };
     let channel_factory = ChannelFactory::for_grpc(&node_config.grpc_config)?;
-    let cluster = Cluster::join(
+    Cluster::join(
         cluster_id,
         node_config.extra_cluster_ids.iter().cloned().collect(),
         self_node,
@@ -152,14 +143,5 @@ pub async fn start_cluster_service(node_config: &NodeConfig) -> anyhow::Result<C
         &CountingUdpTransport,
         channel_factory,
     )
-    .await?;
-    if node_config
-        .enabled_services
-        .contains(&QuickwitService::Indexer)
-    {
-        cluster
-            .set_self_key_value(INDEXING_CPU_CAPACITY_KEY, indexing_cpu_capacity)
-            .await;
-    }
-    Ok(cluster)
+    .await
 }

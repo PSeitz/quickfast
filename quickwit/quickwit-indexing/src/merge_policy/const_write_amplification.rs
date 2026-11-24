@@ -275,9 +275,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::ConstWriteAmplificationMergePolicy;
-    use crate::MergePolicy;
-    use crate::merge_policy::MergeOperation;
     use crate::merge_policy::tests::create_splits;
+    use crate::merge_policy::{MergeOperation, MergePolicy};
 
     #[test]
     fn test_split_is_mature() {

@@ -19,17 +19,13 @@ use std::sync::Arc;
 use quickwit_actors::{Mailbox, Universe};
 use quickwit_config::NodeConfig;
 use quickwit_ingest::router_client::IngestRouterClient;
-use quickwit_proto::indexing::{CpuCapacity, PipelineMetrics};
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_storage::StorageResolver;
 use tracing::info;
 
-pub use crate::actors::{
-    FinishPendingMergesAndShutdownPipeline, IndexingService, MergePipeline, MergePipelineParams,
-    PublisherType, Sequencer, SplitsUpdateMailbox,
-};
+pub use crate::actors::{IndexingService, IndexingServiceCounters, PublisherType};
 pub use crate::controlled_directory::ControlledDirectory;
-use crate::models::IndexingStatistics;
+pub use crate::local_merge::run_local_merges;
 pub use crate::split_store::{
     IndexingSplitCache, IndexingSplitStore, SplitStoreQuota,
     get_tantivy_directory_from_split_bundle,
@@ -39,6 +35,7 @@ pub mod actors;
 mod controlled_directory;
 mod docs_clustering;
 pub mod ingesthree;
+mod local_merge;
 pub mod merge_policy;
 mod metrics;
 pub mod models;
@@ -53,11 +50,10 @@ mod test_utils;
 #[cfg(any(test, feature = "testsuite"))]
 pub use test_utils::{MockSplitBuilder, TestSandbox, mock_split, mock_split_meta};
 
-use self::merge_policy::MergePolicy;
 pub use self::source::check_source_connectivity;
 
 #[derive(utoipa::OpenApi)]
-#[openapi(components(schemas(IndexingStatistics, PipelineMetrics, CpuCapacity)))]
+#[openapi(components(schemas(IndexingServiceCounters)))]
 /// Schema used for OpenAPI generation.
 pub struct IndexingApiSchemas;
 
@@ -69,12 +65,8 @@ pub async fn start_indexing_service(
     indexing_split_cache: Arc<IndexingSplitCache>,
     ingest_router: IngestRouterClient,
 ) -> anyhow::Result<Mailbox<IndexingService>> {
-    anyhow::ensure!(
-        !config.ingest_api_config.enable_ingesthree || config.enable_standalone_compactors,
-        "ingesthree indexers require enable_standalone_compactors: true"
-    );
     info!("starting indexer service");
-    let mut indexing_service = IndexingService::new(
+    let indexing_service = IndexingService::new(
         config.node_id.clone(),
         config.data_dir_path.to_path_buf(),
         config.indexer_config.clone(),
@@ -85,9 +77,6 @@ pub async fn start_indexing_service(
         Some(ingest_router),
     )
     .await?;
-    if config.ingest_api_config.enable_ingesthree {
-        indexing_service.enable_ingesthree()?;
-    }
     let (indexing_service, _) = universe.spawn_builder().spawn(indexing_service);
     Ok(indexing_service)
 }

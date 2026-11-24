@@ -21,7 +21,6 @@ use quickwit_actors::Mailbox;
 use quickwit_cluster::Cluster;
 use quickwit_common::pubsub::{Event, EventBroker, EventSubscriber, EventSubscriptionHandle};
 use quickwit_config::NodeConfig;
-use quickwit_config::service::QuickwitService;
 use quickwit_indexing::actors::IndexingService;
 use quickwit_indexing::ingesthree::StopS3Indexers;
 use quickwit_ingest::ingesthree::{Uploader, WriteQueue};
@@ -70,18 +69,6 @@ pub(crate) fn publish_metadata_changes(
         broker.subscribe::<ToggleSourceRequest>(publisher.clone()),
         broker.subscribe::<DeleteSourceRequest>(publisher),
     ]
-}
-
-/// File indexing publishes durable splits for the standalone planner to discover.
-/// Router-only nodes do not produce splits and can use either compaction setting.
-pub(crate) fn validate_config(config: &NodeConfig) -> anyhow::Result<()> {
-    anyhow::ensure!(
-        !config.ingest_api_config.enable_ingesthree
-            || !config.is_service_enabled(QuickwitService::Indexer)
-            || config.enable_standalone_compactors,
-        "ingesthree-enabled indexers require enable_standalone_compactors=true"
-    );
-    Ok(())
 }
 
 /// Completes recovered handoffs before exposing intake. The upload prefix must remain
@@ -162,8 +149,7 @@ mod tests {
 
     use futures::poll;
     use quickwit_common::uri::Uri;
-    use quickwit_config::service::QuickwitService;
-    use quickwit_config::{IndexConfig, NodeConfig};
+    use quickwit_config::IndexConfig;
     use quickwit_ingest::ingesthree::{
         DocumentFileReader, IngestError, Ingester, Uploader, WriteQueue,
     };
@@ -188,32 +174,6 @@ mod tests {
         )
         .await?;
         super::watch_writer(&cluster, queue, shutdown).await
-    }
-
-    #[tokio::test]
-    async fn test_ingesthree_rejects_local_merging_before_server_startup() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut config = NodeConfig::for_test();
-        config.enabled_services = [QuickwitService::Indexer].into_iter().collect();
-        config.ingest_api_config.enable_ingesthree = true;
-        config.enable_standalone_compactors = false;
-        config.data_dir_path = directory.path().join("unused");
-        let error = crate::serve_quickwit(
-            config,
-            quickwit_common::runtimes::RuntimesConfig::light_for_tests(),
-            quickwit_metastore::MetastoreResolver::unconfigured(),
-            quickwit_storage::StorageResolver::unconfigured(),
-            crate::tcp_listener::for_tests::TestTcpListenerResolver::default(),
-            Box::pin(std::future::pending()),
-            crate::do_nothing_env_filter_reload_fn(),
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "ingesthree-enabled indexers require enable_standalone_compactors=true"
-        );
-        assert!(!directory.path().join("unused").try_exists().unwrap());
     }
 
     const BUDGET: u64 = 1024 * 1024;

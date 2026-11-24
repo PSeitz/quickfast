@@ -14,14 +14,13 @@
 
 use async_trait::async_trait;
 use fail::fail_point;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
+use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, QueueCapacity};
 use quickwit_proto::metastore::{MetastoreService, MetastoreServiceClient, PublishSplitsRequest};
 use serde::Serialize;
 use tracing::{info, instrument};
 
-use crate::actors::MergePlanner;
 use crate::metrics::record_published_split;
-use crate::models::{NewSplits, SplitsUpdate};
+use crate::models::SplitsUpdate;
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PublisherCounters {
@@ -43,28 +42,18 @@ impl PublisherType {
     }
 }
 
-/// Disconnects the merge planner loop back to let the merge pipeline terminate.
-#[derive(Debug)]
-pub(crate) struct DisconnectMergePlanner;
-
 #[derive(Clone)]
 pub struct Publisher {
     publisher_type: PublisherType,
     metastore: MetastoreServiceClient,
-    merge_planner_mailbox_opt: Option<Mailbox<MergePlanner>>,
     counters: PublisherCounters,
 }
 
 impl Publisher {
-    pub fn new(
-        publisher_type: PublisherType,
-        metastore: MetastoreServiceClient,
-        merge_planner_mailbox_opt: Option<Mailbox<MergePlanner>>,
-    ) -> Publisher {
+    pub fn new(publisher_type: PublisherType, metastore: MetastoreServiceClient) -> Publisher {
         Publisher {
             publisher_type,
             metastore,
-            merge_planner_mailbox_opt,
             counters: PublisherCounters::default(),
         }
     }
@@ -86,20 +75,6 @@ impl Actor for Publisher {
         match self.publisher_type {
             PublisherType::MergePublisher => QueueCapacity::Unbounded,
         }
-    }
-}
-
-#[async_trait]
-impl Handler<DisconnectMergePlanner> for Publisher {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: DisconnectMergePlanner,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        self.merge_planner_mailbox_opt = None;
-        Ok(())
     }
 }
 
@@ -128,6 +103,7 @@ impl Handler<SplitsUpdate> for Publisher {
             .iter()
             .map(|split| split.split_id.to_string())
             .collect();
+
         let Some(guard) = publish_lock.acquire().await else {
             info!(
                 split_ids=?split_ids,
@@ -159,12 +135,6 @@ impl Handler<SplitsUpdate> for Publisher {
         );
 
         if !new_splits.is_empty() {
-            if let Some(merge_planner_mailbox) = self.merge_planner_mailbox_opt.as_ref() {
-                let _ = ctx
-                    .send_message(merge_planner_mailbox, NewSplits { new_splits })
-                    .await;
-            }
-
             if replaced_split_ids.is_empty() {
                 self.counters.num_published_splits += 1;
             } else {
@@ -186,7 +156,7 @@ mod tests {
     use quickwit_proto::types::{IndexUid, SplitId};
 
     use super::{Publisher, PublisherType};
-    use crate::models::{NewSplits, PublishLock, SplitsUpdate};
+    use crate::models::{PublishLock, SplitsUpdate};
 
     #[tokio::test]
     async fn test_publisher_publish_operation() {
@@ -203,12 +173,10 @@ mod tests {
             })
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
-        let (merge_planner_mailbox, merge_planner_inbox) = universe.create_test_mailbox();
 
         let publisher = Publisher::new(
             PublisherType::MergePublisher,
             MetastoreServiceClient::from_mock(mock_metastore),
-            Some(merge_planner_mailbox),
         );
         let (publisher_mailbox, publisher_handle) = universe.spawn_builder().spawn(publisher);
 
@@ -229,10 +197,6 @@ mod tests {
 
         let publisher_observation = publisher_handle.process_pending_and_observe().await.state;
         assert_eq!(publisher_observation.num_replace_operations, 1);
-
-        let merger_msgs: Vec<NewSplits> = merge_planner_inbox.drain_for_test_typed::<NewSplits>();
-        assert_eq!(merger_msgs.len(), 1);
-        assert_eq!(merger_msgs[0].new_splits.len(), 1);
         universe.assert_quit().await;
     }
 
@@ -243,7 +207,6 @@ mod tests {
         let publisher = Publisher::new(
             PublisherType::MergePublisher,
             MetastoreServiceClient::from_mock(mock_metastore),
-            None,
         );
         let (publisher_mailbox, publisher_handle) = universe.spawn_builder().spawn(publisher);
         let publish_lock = PublishLock::default();

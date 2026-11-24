@@ -26,7 +26,7 @@ use super::{
     Admission, AppendRequest, AppendResponse, CompressedBatch, FileWriter, IngestError,
     PreparedRequest, ValidationMetrics, WriterRequest,
 };
-use crate::ingest_v2::{is_document_validation_enabled, validate_doc_batch_impl};
+use crate::doc_mapper::{is_document_validation_enabled, validate_doc_batch_impl};
 use crate::ingesthree::handoff::FileHandoffs;
 use crate::ingesthree::{OpenFileLimit, Uploader};
 

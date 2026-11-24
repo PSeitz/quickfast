@@ -15,7 +15,6 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use bytesize::ByteSize;
 use tracing::warn;
 
 /// Field name reserved for storing the dynamically indexed fields.
@@ -66,15 +65,6 @@ pub const SPLIT_FIELDS_FILE_NAME: &str = "split_fields";
 
 /// Name of the recovery metadata entry embedded in split bundles.
 pub const SPLIT_RECOVERY_METADATA_FILE_NAME: &str = "split_recovery_metadata";
-
-/// More or less the indexing throughput of a core
-/// i.e. PIPELINE_THROUGHPUT / PIPELINE_FULL_CAPACITY
-pub const DEFAULT_SHARD_THROUGHPUT_LIMIT: ByteSize = ByteSize::mib(5);
-/// Large enough to absorb small bursts but should remain defensive against unbalanced shards.
-pub const DEFAULT_SHARD_BURST_LIMIT: ByteSize = ByteSize::mib(50);
-
-/// A compromise between "exponential" scale up and moderate shard count increase.
-pub const DEFAULT_SHARD_SCALE_UP_FACTOR: f32 = 1.5;
 
 // (Just a reexport).
 pub use bytesize::MIB;

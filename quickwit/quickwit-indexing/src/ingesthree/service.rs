@@ -57,15 +57,7 @@ fn indexer_max_wait_secs() -> anyhow::Result<u32> {
 }
 
 impl IndexingService {
-    pub(crate) fn enable_ingesthree(&mut self) -> anyhow::Result<()> {
-        self.ingesthree_enabled = true;
-        Ok(())
-    }
-
     pub(super) fn start_s3_indexers(&mut self) -> anyhow::Result<()> {
-        if !self.ingesthree_enabled {
-            return Ok(());
-        }
         let max_num_bytes = indexer_batch_bytes()?;
         let max_wait_secs = indexer_max_wait_secs()?;
         let num_workers = quickwit_common::num_cpus();
@@ -91,7 +83,6 @@ impl IndexingService {
     }
 
     pub(super) async fn stop_s3_indexers(&mut self) {
-        self.ingesthree_enabled = false;
         futures::future::join_all(self.s3_indexers.drain(..).map(S3IndexerSupervisor::stop)).await;
     }
 }
@@ -228,12 +219,8 @@ mod tests {
         directory: &Path,
         universe: &Universe,
         worker: &S3Indexer,
-        enabled: bool,
     ) -> (Mailbox<IndexingService>, ActorHandle<IndexingService>) {
-        let mut service = new_service(directory, worker).await;
-        if enabled {
-            service.enable_ingesthree().unwrap();
-        }
+        let service = new_service(directory, worker).await;
         universe.spawn_builder().spawn(service)
     }
 
@@ -285,29 +272,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn file_indexing_is_opt_in_and_stop_is_idempotent() {
+    async fn file_indexing_publishes_splits_and_stop_is_idempotent() {
         let (mut worker, index_uid) = fixture().await;
         register(&mut worker, &index_uid).await;
         let directory = tempfile::tempdir().unwrap();
         let universe = Universe::new();
-        let (service, _) = spawn_service(directory.path(), &universe, &worker, false).await;
-        assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
-        assert!(published_splits(&mut worker, &index_uid).await.is_empty());
-        service.ask(StopS3Indexers).await.unwrap();
-        service.ask(StopS3Indexers).await.unwrap();
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn file_indexing_publishes_splits_and_stops() {
-        let (mut worker, index_uid) = fixture().await;
-        register(&mut worker, &index_uid).await;
-        let directory = tempfile::tempdir().unwrap();
-        let universe = Universe::new();
-        let (service, _) = spawn_service(directory.path(), &universe, &worker, true).await;
+        let (service, _) = spawn_service(directory.path(), &universe, &worker).await;
         assert!(service.ask(InspectS3Indexers).await.unwrap() >= 1);
         let splits = wait_for_publications(&mut worker, &index_uid, 1).await;
         assert_eq!(splits[0].num_docs, 1);
+        service.ask(StopS3Indexers).await.unwrap();
         service.ask(StopS3Indexers).await.unwrap();
         assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
         universe.assert_quit().await;
@@ -329,7 +303,7 @@ mod tests {
         worker.metastore = MetastoreServiceClient::from_mock(mock);
         let directory = tempfile::tempdir().unwrap();
         let universe = Universe::new();
-        let (service, _) = spawn_service(directory.path(), &universe, &worker, true).await;
+        let (service, _) = spawn_service(directory.path(), &universe, &worker).await;
         tokio::time::timeout(Duration::from_secs(5), entered_rx)
             .await
             .unwrap()

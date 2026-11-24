@@ -26,12 +26,12 @@ use quickwit_common::pubsub::EventBroker;
 use quickwit_common::temp_dir::{self};
 use quickwit_common::uri::Uri;
 use quickwit_config::build_doc_mapper;
+use quickwit_indexing::IndexingSplitStore;
 use quickwit_indexing::actors::{
     MergeExecutor, MergeSchedulerService, MergeSplitDownloader, Packager, Publisher,
     PublisherCounters, Uploader, UploaderCounters, UploaderType,
 };
 use quickwit_indexing::merge_policy::merge_policy_from_settings;
-use quickwit_indexing::{IndexingSplitStore, SplitsUpdateMailbox};
 use quickwit_metastore::IndexMetadataResponseExt;
 use quickwit_proto::indexing::MergePipelineId;
 use quickwit_proto::metastore::{IndexMetadataRequest, MetastoreService, MetastoreServiceClient};
@@ -164,7 +164,6 @@ impl DeleteTaskPipeline {
         let publisher = Publisher::new(
             quickwit_indexing::PublisherType::MergePublisher,
             self.metastore.clone(),
-            None,
         );
         let (publisher_mailbox, publisher_supervisor_handler) =
             ctx.spawn_actor().supervise(publisher);
@@ -177,7 +176,7 @@ impl DeleteTaskPipeline {
             merge_policy,
             index_config.retention_policy_opt.clone(),
             split_store.clone(),
-            SplitsUpdateMailbox::Publisher(publisher_mailbox),
+            publisher_mailbox,
             self.max_concurrent_split_uploads,
             self.event_broker.clone(),
         );

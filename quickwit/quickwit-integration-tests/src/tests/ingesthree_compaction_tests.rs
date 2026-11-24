@@ -127,7 +127,7 @@ async fn stop_node(sandbox: &mut ClusterSandbox, service: QuickwitService) -> No
 
 #[tokio::test]
 async fn test_ingesthree_compaction_recovers_outputs_after_planner_restart() {
-    let mut sandbox = start_cluster(&[true]).await;
+    let mut sandbox = start_cluster(1).await;
     let compactor = stop_node(&mut sandbox, QuickwitService::Compactor).await;
     let planner = stop_node(&mut sandbox, QuickwitService::Janitor).await;
     let index_id = "ingesthree-compaction-restart";

@@ -14,10 +14,8 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use quickwit_common::shared_consts::SPLIT_RECOVERY_METADATA_FILE_NAME;
-use quickwit_common::test_utils::wait_until_predicate;
 use quickwit_config::IndexConfig;
 use quickwit_metastore::{
     CreateIndexRequestExt, FileBackedMetastore, ListSplitsQuery, ListSplitsRequestExt,
@@ -190,30 +188,7 @@ async fn test_recover_merged_split_from_bundle_and_publish_it() {
         .await
         .unwrap();
 
-    wait_until_predicate(
-        || {
-            let metastore = test_sandbox.metastore();
-            let index_uid = test_sandbox.index_uid();
-            async move {
-                let query =
-                    ListSplitsQuery::for_index(index_uid).with_split_state(SplitState::Published);
-                let Ok(request) = ListSplitsRequest::try_from_list_splits_query(&query) else {
-                    return false;
-                };
-                let Ok(split_stream) = metastore.list_splits(request).await else {
-                    return false;
-                };
-                let Ok(splits) = split_stream.collect_splits().await else {
-                    return false;
-                };
-                splits.len() == 1 && splits[0].split_metadata.num_merge_ops == 1
-            }
-        },
-        Duration::from_secs(10),
-        Duration::from_millis(25),
-    )
-    .await
-    .unwrap();
+    test_sandbox.run_merges().await.unwrap();
 
     let published_query = ListSplitsQuery::for_index(test_sandbox.index_uid())
         .with_split_state(SplitState::Published);

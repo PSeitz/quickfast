@@ -25,15 +25,11 @@ use anyhow::{bail, ensure};
 use bytesize::ByteSize;
 use http::HeaderMap;
 use quickwit_common::net::HostAddr;
-use quickwit_common::shared_consts::{
-    DEFAULT_SHARD_BURST_LIMIT, DEFAULT_SHARD_SCALE_UP_FACTOR, DEFAULT_SHARD_THROUGHPUT_LIMIT,
-};
 use quickwit_common::uri::Uri;
-use quickwit_proto::indexing::CpuCapacity;
 use quickwit_proto::tonic::codec::CompressionEncoding;
 use quickwit_proto::types::{AvailabilityZone, NodeId};
 use serde::{Deserialize, Deserializer, Serialize};
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::docs_clustering::DocsClusteringConfig;
 use crate::node_config::serialize::load_node_config_with_env;
@@ -215,17 +211,9 @@ pub struct IndexerConfig {
     /// Protocol (OTLP).
     #[serde(default = "IndexerConfig::default_enable_otlp_endpoint")]
     pub enable_otlp_endpoint: bool,
-    #[serde(default = "IndexerConfig::default_enable_cooperative_indexing")]
-    pub enable_cooperative_indexing: bool,
-    #[serde(default = "IndexerConfig::default_cpu_capacity")]
-    pub cpu_capacity: CpuCapacity,
 }
 
 impl IndexerConfig {
-    fn default_enable_cooperative_indexing() -> bool {
-        false
-    }
-
     fn default_enable_otlp_endpoint() -> bool {
         #[cfg(any(test, feature = "testsuite"))]
         {
@@ -253,20 +241,13 @@ impl IndexerConfig {
         NonZeroUsize::new(quickwit_common::num_cpus() * 2 / 3).unwrap_or(NonZeroUsize::MIN)
     }
 
-    fn default_cpu_capacity() -> CpuCapacity {
-        CpuCapacity::one_cpu_thread() * (quickwit_common::num_cpus() as u32)
-    }
-
     #[cfg(any(test, feature = "testsuite"))]
     pub fn for_test() -> anyhow::Result<Self> {
-        use quickwit_proto::indexing::PIPELINE_FULL_CAPACITY;
         let indexer_config = IndexerConfig {
-            enable_cooperative_indexing: false,
             enable_otlp_endpoint: true,
             split_store_max_num_bytes: ByteSize::mb(1),
             split_store_max_num_splits: 3,
             max_concurrent_split_uploads: 4,
-            cpu_capacity: PIPELINE_FULL_CAPACITY * 4u32,
             max_merge_write_throughput: None,
             merge_concurrency: NonZeroUsize::new(3).unwrap(),
         };
@@ -277,12 +258,10 @@ impl IndexerConfig {
 impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
-            enable_cooperative_indexing: Self::default_enable_cooperative_indexing(),
             enable_otlp_endpoint: Self::default_enable_otlp_endpoint(),
             split_store_max_num_bytes: Self::default_split_store_max_num_bytes(),
             split_store_max_num_splits: Self::default_split_store_max_num_splits(),
             max_concurrent_split_uploads: Self::default_max_concurrent_split_uploads(),
-            cpu_capacity: Self::default_cpu_capacity(),
             merge_concurrency: Self::default_merge_concurrency(),
             max_merge_write_throughput: None,
         }
@@ -750,31 +729,15 @@ pub enum CompressionAlgorithm {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct IngestApiConfig {
-    /// Use ingesthree routing and file intake on this node. Indexers also run a file-indexing
-    /// worker and require `enable_standalone_compactors`. Enabled by default.
-    pub enable_ingesthree: bool,
-    /// Maximum memory space taken by the ingest WAL
+    /// Maximum memory space taken by the ingest queue
     pub max_queue_memory_usage: ByteSize,
-    /// Maximum disk space taken by the ingest WAL
+    /// Maximum disk space taken by the ingest queue
     pub max_queue_disk_usage: ByteSize,
-    /// Deprecated: ingest replication is no longer supported.
-    #[serde(default, rename = "replication_factor", skip_serializing)]
-    _replication_factor: Option<serde::de::IgnoredAny>,
     /// Maximum size of a request body on the wire, i.e. before decompression.
     #[serde(alias = "content_length_limit")]
     pub max_body_size: ByteSize,
     /// Maximum size of a request body after decompression.
     pub max_decompressed_body_size: ByteSize,
-    /// (hidden) Targeted throughput for each shard
-    pub shard_throughput_limit: ByteSize,
-    /// (hidden) Maximum accumulated throughput capacity for underutilized
-    /// shards, allowing the throughput limit to be temporarily exceeded
-    pub shard_burst_limit: ByteSize,
-    /// (hidden) new_shard_count = ceil(old_shard_count * shard_scale_up_factor)
-    ///
-    /// Setting this too high will be cancelled out by the arbiter that prevents
-    /// creating too many shards at once.
-    pub shard_scale_up_factor: f32,
     #[serde(default)]
     pub grpc_compression_algorithm: Option<CompressionAlgorithm>,
     /// Maximum amount of time to wait for the ingester to finish decommissioning gracefully
@@ -786,15 +749,10 @@ pub struct IngestApiConfig {
 impl Default for IngestApiConfig {
     fn default() -> Self {
         Self {
-            enable_ingesthree: true,
             max_queue_memory_usage: ByteSize::gib(2),
             max_queue_disk_usage: ByteSize::gib(4),
-            _replication_factor: None,
             max_body_size: ByteSize::mib(10),
             max_decompressed_body_size: ByteSize::mib(256),
-            shard_throughput_limit: DEFAULT_SHARD_THROUGHPUT_LIMIT,
-            shard_burst_limit: DEFAULT_SHARD_BURST_LIMIT,
-            shard_scale_up_factor: DEFAULT_SHARD_SCALE_UP_FACTOR,
             grpc_compression_algorithm: None,
             decommission_timeout: HumanDuration::try_from("300s".to_string())
                 .expect("`300s` should be a valid human duration"),
@@ -803,20 +761,6 @@ impl Default for IngestApiConfig {
 }
 
 impl IngestApiConfig {
-    fn warn_if_replication_factor_is_set(&self) {
-        if env::var_os("QW_INGEST_REPLICATION_FACTOR").is_some() {
-            warn!(
-                "ignoring environment variable `QW_INGEST_REPLICATION_FACTOR`: ingest replication \
-                 is no longer supported"
-            );
-        } else if self._replication_factor.is_some() {
-            warn!(
-                "ignoring ingest config parameter `ingest_api.replication_factor`: ingest \
-                 replication is no longer supported"
-            );
-        }
-    }
-
     /// Returns the ingester decommission timeout, as defined in the environment variable or in
     /// the configuration, in that order (the environment variable overrides the configuration).
     pub fn decommission_timeout(&self) -> Duration {
@@ -836,7 +780,6 @@ impl IngestApiConfig {
     }
 
     fn validate(&self) -> anyhow::Result<()> {
-        self.warn_if_replication_factor_is_set();
         ensure!(
             self.max_queue_disk_usage > ByteSize::mib(256),
             "max_queue_disk_usage must be at least 256 MiB, got `{}`",
@@ -848,16 +791,6 @@ impl IngestApiConfig {
             self.max_queue_disk_usage.display().si(),
             self.max_queue_memory_usage.display().si()
         );
-        info!(
-            "ingestion shard throughput limit: {}",
-            self.shard_throughput_limit.display().si()
-        );
-        ensure!(
-            self.shard_throughput_limit >= ByteSize::mib(1)
-                && self.shard_throughput_limit <= ByteSize::mib(20),
-            "shard_throughput_limit ({}) must be within 1mb and 20mb",
-            self.shard_throughput_limit.display().si()
-        );
         ensure!(
             self.max_decompressed_body_size <= ByteSize::gib(4),
             "max_decompressed_body_size ({}) must be at most 4GiB",
@@ -868,20 +801,6 @@ impl IngestApiConfig {
             "max_decompressed_body_size ({}) must be at least max_body_size ({})",
             self.max_decompressed_body_size.display().iec(),
             self.max_body_size.display().iec()
-        );
-        // The newline delimited format is persisted as something a bit larger
-        // (lines prefixed with their length)
-        let estimated_persist_size = ByteSize::b(3 * self.max_body_size.as_u64() / 2);
-        ensure!(
-            self.shard_burst_limit >= estimated_persist_size,
-            "shard_burst_limit ({}) must be at least 1.5*max_body_size ({})",
-            self.shard_burst_limit,
-            estimated_persist_size,
-        );
-        ensure!(
-            self.shard_scale_up_factor > 1.0,
-            "shard_scale_up_factor ({}) must be greater than 1",
-            self.shard_scale_up_factor,
         );
         Ok(())
     }
@@ -990,8 +909,6 @@ pub struct NodeConfig {
     pub ingest_api_config: IngestApiConfig,
     pub jaeger_config: JaegerConfig,
     pub compactor_config: CompactorConfig,
-    #[serde(skip_serializing)]
-    pub enable_standalone_compactors: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs_clustering_config: Option<DocsClusteringConfig>,
 }
@@ -1075,20 +992,10 @@ impl NodeConfig {
     pub fn for_test_from_ports(rest_listen_port: u16, grpc_listen_port: u16) -> Self {
         serialize::node_config_for_tests_from_ports(rest_listen_port, grpc_listen_port)
     }
-
-    /// Test config with `enable_standalone_compactors = true`.
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn for_test_with_standalone_compactors() -> Self {
-        let mut node_config = Self::for_test();
-        node_config.enable_standalone_compactors = true;
-        node_config
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use quickwit_proto::indexing::CpuCapacity;
-
     use super::*;
     use crate::IndexerConfig;
 
@@ -1114,46 +1021,8 @@ mod tests {
 
     #[test]
     fn test_indexer_config_serialization() {
-        {
-            let indexer_config: IndexerConfig = serde_json::from_str(r#"{}"#).unwrap();
-            assert_eq!(&indexer_config, &IndexerConfig::default());
-            assert!(indexer_config.cpu_capacity.cpu_millis() > 0);
-            assert_eq!(indexer_config.cpu_capacity.cpu_millis() % 1_000, 0);
-        }
-        {
-            let indexer_config: IndexerConfig =
-                serde_yaml::from_str(r#"cpu_capacity: 1.5"#).unwrap();
-            assert_eq!(
-                indexer_config.cpu_capacity,
-                CpuCapacity::from_cpu_millis(1500)
-            );
-            let indexer_config_json = serde_json::to_value(&indexer_config).unwrap();
-            assert_eq!(
-                indexer_config_json
-                    .get("cpu_capacity")
-                    .unwrap()
-                    .as_str()
-                    .unwrap(),
-                "1500m"
-            );
-        }
-        {
-            let indexer_config: IndexerConfig =
-                serde_yaml::from_str(r#"cpu_capacity: 1500m"#).unwrap();
-            assert_eq!(
-                indexer_config.cpu_capacity,
-                CpuCapacity::from_cpu_millis(1500)
-            );
-            let indexer_config_json = serde_json::to_value(&indexer_config).unwrap();
-            assert_eq!(
-                indexer_config_json
-                    .get("cpu_capacity")
-                    .unwrap()
-                    .as_str()
-                    .unwrap(),
-                "1500m"
-            );
-        }
+        let indexer_config: IndexerConfig = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(&indexer_config, &IndexerConfig::default());
     }
 
     #[test]
@@ -1280,19 +1149,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ingesthree_enabled_by_default() {
-        let default: IngestApiConfig = serde_yaml::from_str("").unwrap();
-        assert!(default.enable_ingesthree);
-        assert!(default.validate().is_ok());
-        let disabled: IngestApiConfig = serde_yaml::from_str("enable_ingesthree: false").unwrap();
-        assert!(!disabled.enable_ingesthree);
-        assert!(disabled.validate().is_ok());
-        let roundtrip: IngestApiConfig =
-            serde_yaml::from_str(&serde_yaml::to_string(&disabled).unwrap()).unwrap();
-        assert_eq!(roundtrip, disabled);
-    }
-
-    #[test]
     fn test_validate_ingest_api_config() {
         {
             let ingest_api_config: IngestApiConfig = serde_yaml::from_str(
@@ -1323,18 +1179,6 @@ mod tests {
                 ingest_api_config.validate().unwrap_err().to_string(),
                 "max_queue_disk_usage (500.0 MB) must be at least max_queue_memory_usage (600.0 \
                  MB)"
-            );
-        }
-        {
-            let ingest_api_config: IngestApiConfig = serde_yaml::from_str(
-                r#"
-                    shard_throughput_limit: 21M
-                "#,
-            )
-            .unwrap();
-            assert_eq!(
-                ingest_api_config.validate().unwrap_err().to_string(),
-                "shard_throughput_limit (21.0 MB) must be within 1mb and 20mb"
             );
         }
     }

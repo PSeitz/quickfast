@@ -15,15 +15,14 @@
 use std::collections::HashSet;
 use std::mem::size_of;
 use std::net::SocketAddr;
-use std::str::FromStr;
 
 use anyhow::Context;
 use chitchat::{ChitchatId, NodeState, Version};
-use quickwit_proto::indexing::CpuCapacity;
+use quickwit_config::service::QuickwitService;
 use quickwit_proto::types::{AvailabilityZone, NodeId};
-use tracing::{error, warn};
+use tracing::warn;
 
-use crate::{GenerationId, QuickwitService};
+use crate::GenerationId;
 
 // Keys used to store member's data in chitchat state.
 pub(crate) const GRPC_ADVERTISE_ADDR_KEY: &str = "grpc_advertise_addr";
@@ -36,10 +35,6 @@ pub(crate) const READINESS_VALUE_NOT_READY: &str = "NOT_READY";
 
 pub(crate) const AVAILABILITY_ZONE_KEY: &str = "availability_zone";
 
-pub(crate) const STANDALONE_COMPACTORS_KEY: &str = "standalone_compactors";
-
-pub const INDEXING_CPU_CAPACITY_KEY: &str = "indexing_cpu_capacity";
-
 pub(crate) trait NodeStateExt {
     fn grpc_advertise_addr(&self) -> anyhow::Result<SocketAddr>;
 
@@ -48,8 +43,6 @@ pub(crate) trait NodeStateExt {
     fn size_bytes(&self) -> usize;
 
     fn availability_zone(&self) -> Option<AvailabilityZone>;
-
-    fn enable_standalone_compactors(&self) -> bool;
 }
 
 impl NodeStateExt for NodeState {
@@ -84,10 +77,6 @@ impl NodeStateExt for NodeState {
     fn availability_zone(&self) -> Option<AvailabilityZone> {
         self.get(AVAILABILITY_ZONE_KEY).map(AvailabilityZone::from)
     }
-
-    fn enable_standalone_compactors(&self) -> bool {
-        matches!(self.get(STANDALONE_COMPACTORS_KEY), Some(value) if value == "true")
-    }
 }
 
 /// Cluster member.
@@ -108,14 +97,10 @@ pub struct ClusterMember {
     /// gRPC advertise address, i.e. the address that other nodes should use to communicate with
     /// the node via gRPC.
     pub grpc_advertise_addr: SocketAddr,
-    /// Indexing cpu capacity of the node expressed in milli cpu.
-    pub indexing_cpu_capacity: CpuCapacity,
     /// Whether the node is ready to serve requests.
     pub is_ready: bool,
     /// Availability zone the node is running in, if enabled.
     pub availability_zone: Option<AvailabilityZone>,
-    /// Whether the node was started with standalone compactors enabled.
-    pub enable_standalone_compactors: bool,
 }
 
 impl ClusterMember {
@@ -135,10 +120,6 @@ impl ClusterMember {
         self.is_service_enabled(QuickwitService::Indexer)
     }
 
-    pub fn is_ingester(&self) -> bool {
-        self.is_service_enabled(QuickwitService::Indexer)
-    }
-
     pub fn is_searcher(&self) -> bool {
         self.is_service_enabled(QuickwitService::Searcher)
     }
@@ -147,18 +128,6 @@ impl ClusterMember {
 impl From<ClusterMember> for ChitchatId {
     fn from(member: ClusterMember) -> Self {
         member.chitchat_id()
-    }
-}
-
-fn parse_indexing_cpu_capacity(node_state: &NodeState) -> CpuCapacity {
-    let Some(indexing_capacity_str) = node_state.get(INDEXING_CPU_CAPACITY_KEY) else {
-        return CpuCapacity::zero();
-    };
-    if let Ok(indexing_capacity) = CpuCapacity::from_str(indexing_capacity_str) {
-        indexing_capacity
-    } else {
-        error!(indexing_capacity=?indexing_capacity_str, "received an unparsable indexing capacity from node");
-        CpuCapacity::zero()
     }
 }
 
@@ -181,9 +150,7 @@ pub(crate) fn build_cluster_member(
             parse_enabled_services_str(enabled_services_str, &chitchat_id.node_id)
         })?;
     let grpc_advertise_addr = node_state.grpc_advertise_addr()?;
-    let indexing_cpu_capacity = parse_indexing_cpu_capacity(node_state);
     let availability_zone = node_state.availability_zone();
-    let enable_standalone_compactors = node_state.enable_standalone_compactors();
 
     let member = ClusterMember {
         node_id: NodeId::from_arc_str(chitchat_id.node_id.clone()),
@@ -192,9 +159,7 @@ pub(crate) fn build_cluster_member(
         enabled_services,
         gossip_advertise_addr: chitchat_id.gossip_advertise_addr,
         grpc_advertise_addr,
-        indexing_cpu_capacity,
         availability_zone,
-        enable_standalone_compactors,
     };
     Ok(member)
 }
@@ -225,25 +190,4 @@ fn parse_enabled_services_str(
         )
     }
     enabled_services
-}
-
-#[cfg(test)]
-mod tests {
-    use chitchat::NodeState;
-
-    use super::{NodeStateExt, STANDALONE_COMPACTORS_KEY};
-
-    #[test]
-    fn test_enable_standalone_compactors_parsing() {
-        let absent = NodeState::for_test();
-        assert!(!absent.enable_standalone_compactors());
-
-        let mut enabled = NodeState::for_test();
-        enabled.set(STANDALONE_COMPACTORS_KEY, "true");
-        assert!(enabled.enable_standalone_compactors());
-
-        let mut disabled = NodeState::for_test();
-        disabled.set(STANDALONE_COMPACTORS_KEY, "false");
-        assert!(!disabled.enable_standalone_compactors());
-    }
 }

@@ -266,18 +266,14 @@ pub mod tests {
     use std::ops::RangeInclusive;
 
     use proptest::prelude::*;
-    use quickwit_actors::Universe;
-    use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
-    use quickwit_proto::types::{IndexUid, NodeId, PipelineUid};
+    use quickwit_proto::indexing::MergePipelineId;
+    use quickwit_proto::types::{IndexUid, NodeId};
     use rand::seq::SliceRandom;
     use time::OffsetDateTime;
 
     use super::*;
-    use crate::actors::{
-        MergePlanner, MergeSchedulerService, MergeSplitDownloader, RunFinalizeMergePolicyAndQuit,
-        merge_split_attrs,
-    };
-    use crate::models::{NewSplits, create_split_metadata};
+    use crate::actors::merge_split_attrs;
+    use crate::models::create_split_metadata;
 
     #[test]
     fn test_score() {
@@ -472,71 +468,36 @@ pub mod tests {
         incoming_splits: Vec<SplitMetadata>,
         check_final_configuration: &dyn Fn(&[SplitMetadata]),
     ) -> anyhow::Result<Vec<SplitMetadata>> {
-        let universe = Universe::new();
-        let (merge_task_mailbox, merge_task_inbox) =
-            universe.create_test_mailbox::<MergeSplitDownloader>();
-        let pipeline_id = IndexingPipelineId {
-            index_uid: IndexUid::new_with_random_ulid("test-index"),
-            source_id: "test-source".to_string(),
-            node_id: NodeId::from_str("test-node"),
-            pipeline_uid: PipelineUid::default(),
-        };
-        let merge_planner = MergePlanner::new(
-            &pipeline_id.merge_pipeline_id(),
-            Vec::new(),
-            merge_policy.clone(),
-            merge_task_mailbox,
-            universe.get_or_spawn_one::<MergeSchedulerService>(),
-        );
         let mut split_index: HashMap<String, SplitMetadata> = HashMap::default();
-        let (merge_planner_mailbox, merge_planner_handler) =
-            universe.spawn_builder().spawn(merge_planner);
+        let mut immature: Vec<SplitMetadata> = Vec::new();
+        let now = OffsetDateTime::now_utc();
 
         for split in incoming_splits {
             split_index.insert(split.split_id().to_string(), split.clone());
-            merge_planner_mailbox
-                .send_message(NewSplits {
-                    new_splits: vec![split],
-                })
-                .await?;
+            if !split.is_mature(now) {
+                immature.push(split);
+            }
             loop {
-                let obs = merge_planner_handler.process_pending_and_observe().await;
-                assert_eq!(obs.obs_type, quickwit_actors::ObservationType::Alive);
-                let merge_sources = merge_task_inbox.drain_for_test_typed::<MergeSource>();
-                if merge_sources.is_empty() {
+                let operations = merge_policy.operations(&mut immature);
+                if operations.is_empty() {
                     break;
                 }
-                let new_splits: Vec<SplitMetadata> = merge_sources
-                    .into_iter()
-                    .map(|source| {
-                        apply_merge(&merge_policy, &mut split_index, source.as_operation())
-                    })
-                    .collect();
-                merge_planner_mailbox
-                    .send_message(NewSplits { new_splits })
-                    .await?;
+                for operation in operations {
+                    let merged = apply_merge(&merge_policy, &mut split_index, &operation);
+                    if !merged.is_mature(now) {
+                        immature.push(merged);
+                    }
+                }
             }
             let split_metadatas: Vec<SplitMetadata> = split_index.values().cloned().collect();
             check_final_configuration(&split_metadatas);
         }
 
-        merge_planner_mailbox
-            .send_message(RunFinalizeMergePolicyAndQuit)
-            .await
-            .unwrap();
-
-        let obs = merge_planner_handler.process_pending_and_observe().await;
-        assert_eq!(obs.obs_type, quickwit_actors::ObservationType::PostMortem);
-
-        let merge_sources = merge_task_inbox.drain_for_test_typed::<MergeSource>();
-        for source in merge_sources {
-            apply_merge(&merge_policy, &mut split_index, source.as_operation());
+        for operation in merge_policy.finalize_operations(&mut immature) {
+            apply_merge(&merge_policy, &mut split_index, &operation);
         }
 
-        let split_metadatas: Vec<SplitMetadata> = split_index.values().cloned().collect();
-
-        universe.assert_quit().await;
-        Ok(split_metadatas)
+        Ok(split_index.into_values().collect())
     }
 
     /// Mock split meta helper.

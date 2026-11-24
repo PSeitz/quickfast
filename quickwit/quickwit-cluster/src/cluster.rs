@@ -42,7 +42,6 @@ use crate::grpc_gossip::spawn_catchup_callback_task;
 use crate::member::{
     AVAILABILITY_ZONE_KEY, ClusterMember, ENABLED_SERVICES_KEY, GRPC_ADVERTISE_ADDR_KEY,
     NodeStateExt, READINESS_KEY, READINESS_VALUE_NOT_READY, READINESS_VALUE_READY,
-    STANDALONE_COMPACTORS_KEY,
 };
 use crate::metrics::spawn_metrics_task;
 use crate::{ClusterChangeStream, ClusterNode};
@@ -233,10 +232,6 @@ impl Cluster {
         if let Some(az) = &self_node.availability_zone {
             initial_key_values.push((AVAILABILITY_ZONE_KEY.to_string(), az.to_string()));
         }
-        initial_key_values.push((
-            STANDALONE_COMPACTORS_KEY.to_string(),
-            self_node.enable_standalone_compactors.to_string(),
-        ));
         let chitchat_handle =
             spawn_chitchat(chitchat_config, initial_key_values, transport).await?;
 
@@ -368,21 +363,7 @@ impl Cluster {
             .await
     }
 
-    #[cfg(any(test, feature = "testsuite"))]
-    pub async fn set_self_enable_standalone_compactors(&self, enable: bool) {
-        self.set_self_key_value(STANDALONE_COMPACTORS_KEY, enable)
-            .await;
-    }
-
-    /// Advertises ingesthree intake and excludes this node from v2 ingester discovery.
-    /// Set this before marking an ingesthree indexer ready. Updating the gossip key
-    /// emits a cluster update even though ClusterMember has no corresponding field.
-    pub async fn set_self_ingesthree_enabled(&self, enabled: bool) {
-        self.set_self_key_value(crate::node::INGESTHREE_ENABLED_KEY, enabled)
-            .await;
-    }
-
-    /// Advertises node-wide ingesthree capacity independently of v2 shard state.
+    /// Advertises node-wide ingesthree capacity.
     pub async fn set_self_ingesthree_capacity(&self, score: usize) {
         assert!(score <= 10, "invalid ingesthree capacity: {score}");
         self.set_self_key_value(crate::node::INGESTHREE_CAPACITY_KEY, score)
@@ -648,8 +629,6 @@ pub struct TestClusterBuilder<'a> {
 #[cfg(any(test, feature = "testsuite"))]
 impl<'a> TestClusterBuilder<'a> {
     pub fn new(node_id: NodeId, gossip_advertise_port: u16, transport: &'a dyn Transport) -> Self {
-        use quickwit_proto::indexing::PIPELINE_FULL_CAPACITY;
-
         let gossip_advertise_addr: SocketAddr = ([127, 0, 0, 1], gossip_advertise_port).into();
         Self {
             cluster_id: "test-cluster".to_string(),
@@ -661,9 +640,7 @@ impl<'a> TestClusterBuilder<'a> {
                 enabled_services: HashSet::new(),
                 gossip_advertise_addr,
                 grpc_advertise_addr: grpc_addr_from_listen_addr_for_test(gossip_advertise_addr),
-                indexing_cpu_capacity: PIPELINE_FULL_CAPACITY,
                 availability_zone: None,
-                enable_standalone_compactors: false,
             },
             peer_seed_addrs: Vec::new(),
             transport,

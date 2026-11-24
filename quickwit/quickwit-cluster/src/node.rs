@@ -22,7 +22,6 @@ use tonic::transport::Channel;
 
 use crate::member::{ClusterMember, build_cluster_member};
 
-pub(crate) const INGESTHREE_ENABLED_KEY: &str = "ingesthree_enabled";
 pub(crate) const INGESTHREE_CAPACITY_KEY: &str = "ingesthree_capacity";
 
 #[derive(Clone)]
@@ -39,11 +38,6 @@ impl ClusterNode {
         is_self_node: bool,
     ) -> anyhow::Result<Self> {
         let member = build_cluster_member(chitchat_id, node_state)?;
-        let ingesthree_enabled = match node_state.get(INGESTHREE_ENABLED_KEY) {
-            None | Some("false") => false,
-            Some("true") => true,
-            Some(value) => anyhow::bail!("invalid ingesthree capability: {value}"),
-        };
         let ingesthree_capacity = match node_state.get(INGESTHREE_CAPACITY_KEY) {
             Some(value) => {
                 let score: usize = value.parse()?;
@@ -57,7 +51,6 @@ impl ClusterNode {
             member,
             channel,
             is_self_node,
-            ingesthree_enabled,
         };
         Ok(ClusterNode {
             inner: Arc::new(inner),
@@ -102,19 +95,8 @@ impl ClusterNode {
         self.is_service_enabled(QuickwitService::Indexer)
     }
 
-    /// Whether this node serves v2 shard ingestion. Ingest versions never share destinations.
-    pub fn is_ingester(&self) -> bool {
-        self.is_indexer() && !self.inner.ingesthree_enabled
-    }
-
-    /// Whether this node serves ingesthree file intake. Missing gossip state defaults to v2.
-    /// Callers must also require readiness before routing requests.
-    pub fn is_ingesthree(&self) -> bool {
-        self.is_indexer() && self.inner.ingesthree_enabled
-    }
-
     /// Advisory intake capacity, from zero (saturated) to ten. Missing feedback
-    /// keeps ingesthree intake ineligible until its first capacity advertisement.
+    /// keeps intake ineligible until its first capacity advertisement.
     pub fn ingesthree_capacity(&self) -> Option<usize> {
         self.inner.ingesthree_capacity
     }
@@ -129,10 +111,6 @@ impl ClusterNode {
 
     pub fn availability_zone(&self) -> Option<AvailabilityZone> {
         self.inner.member.availability_zone.clone()
-    }
-
-    pub fn enable_standalone_compactors(&self) -> bool {
-        self.inner.member.enable_standalone_compactors
     }
 }
 
@@ -151,7 +129,6 @@ impl Debug for ClusterNode {
             .field("enabled_services", &self.inner.member.enabled_services)
             .field("is_ready", &self.inner.member.is_ready)
             .field("ingesthree_capacity", &self.inner.ingesthree_capacity)
-            .field("ingesthree_enabled", &self.inner.ingesthree_enabled)
             .finish()
     }
 }
@@ -161,7 +138,6 @@ impl PartialEq for ClusterNode {
     fn eq(&self, other: &Self) -> bool {
         self.inner.member == other.inner.member
             && self.inner.is_self_node == other.inner.is_self_node
-            && self.inner.ingesthree_enabled == other.inner.ingesthree_enabled
             && self.inner.ingesthree_capacity == other.inner.ingesthree_capacity
     }
 }
@@ -171,5 +147,4 @@ struct InnerNode {
     member: ClusterMember,
     channel: Channel,
     is_self_node: bool,
-    ingesthree_enabled: bool,
 }

@@ -35,12 +35,11 @@ mod compaction_tests;
 
 // Node 0 routes public requests and hosts the metastore/searcher, followed by indexers,
 // a janitor hosting the planner, and a separate compactor. Real files preserve durable state.
-async fn start_cluster(indexer_modes: &[bool]) -> ClusterSandbox {
+async fn start_cluster(num_indexers: usize) -> ClusterSandbox {
     quickwit_common::setup_logging_for_tests();
     let mut builder = ClusterSandboxBuilder::default()
-        .enable_standalone_compactors()
         .add_node([QuickwitService::Metastore, QuickwitService::Searcher]);
-    for _ in indexer_modes {
+    for _ in 0..num_indexers {
         builder = builder.add_node([QuickwitService::Indexer]);
     }
     let mut config = builder
@@ -48,17 +47,13 @@ async fn start_cluster(indexer_modes: &[bool]) -> ClusterSandbox {
         .add_node([QuickwitService::Compactor])
         .build_config()
         .await;
-    // A router without an indexer needs no compaction opt-in.
-    config.node_configs[0].0.enable_standalone_compactors = false;
     let root = config.node_configs[0]
         .0
         .data_dir_path
         .parent()
         .unwrap()
         .to_owned();
-    for (idx, (node, _)) in config.node_configs.iter_mut().enumerate() {
-        node.ingest_api_config.enable_ingesthree =
-            idx == 0 || indexer_modes.get(idx - 1) == Some(&true);
+    for (node, _) in &mut config.node_configs {
         node.metastore_uri = root.join("metastore").to_str().unwrap().parse().unwrap();
         node.default_index_root_uri = root.join("indexes").to_str().unwrap().parse().unwrap();
     }
@@ -175,7 +170,7 @@ fn payload(index_id: &str, commit: CommitTypeV2) -> IngestRequestV2 {
 
 #[tokio::test]
 async fn test_ingesthree_http_and_bulk_compact_through_router() {
-    let sandbox = start_cluster(&[true]).await;
+    let sandbox = start_cluster(1).await;
     let index_id = "ingesthree-http";
     create_index(&sandbox, index_id).await;
     accept(&sandbox, index_id, r#"{"body":"native"}"#).await;
@@ -218,7 +213,7 @@ async fn test_ingesthree_http_and_bulk_compact_through_router() {
 
 #[tokio::test]
 async fn test_ingesthree_guards_reject_before_writes() {
-    let sandbox = start_cluster(&[true]).await;
+    let sandbox = start_cluster(1).await;
     let index_id = "ingesthree-guards";
     create_index(&sandbox, index_id).await;
     let local = sandbox.node_configs[1].0.data_dir_path.join("ingesthree");
@@ -305,7 +300,7 @@ async fn test_ingesthree_guards_reject_before_writes() {
 
 #[tokio::test]
 async fn test_ingesthree_shutdown_uploads_tail_and_restart_indexes_it() {
-    let mut sandbox = start_cluster(&[true]).await;
+    let mut sandbox = start_cluster(1).await;
     let index_id = "ingesthree-restart";
     let index_uid = create_index(&sandbox, index_id).await;
     let producer = sandbox.node_configs[1].0.clone();

@@ -114,11 +114,6 @@ quickwit-metastore = { workspace = true, features = ["testsuite"] }
 quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
 
-[[test]]
-name = "failpoints"
-path = "failpoints/mod.rs"
-required-features = ["fail/failpoints"]
-
 [[bench]]
 name = "doc_process_vrl_bench"
 harness = false

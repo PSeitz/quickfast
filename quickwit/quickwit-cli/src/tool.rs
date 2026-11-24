@@ -25,10 +25,8 @@ use anyhow::{Context, bail};
 use clap::{ArgMatches, Command, arg};
 use colored::Colorize;
 use humantime::format_duration;
-use quickwit_actors::{ActorExitStatus, Mailbox, Universe};
 use quickwit_common::Progress;
 use quickwit_common::io::IoControls;
-use quickwit_common::pubsub::EventBroker;
 use quickwit_common::runtimes::RuntimesConfig;
 use quickwit_common::uri::Uri;
 use quickwit_config::service::QuickwitService;
@@ -37,14 +35,13 @@ use quickwit_config::{
 };
 use quickwit_index_management::{IndexService, clear_cache_directory};
 use quickwit_indexing::actors::{
-    DocumentConverter, MergePipeline, MergePipelineParams, MergeSchedulerService,
-    create_packaged_split, prepare_split_for_upload,
+    DocumentConverter, create_packaged_split, prepare_split_for_upload,
 };
 use quickwit_indexing::merge_policy::merge_policy_from_settings;
 use quickwit_indexing::models::IndexedSplitBuilder;
 use quickwit_indexing::source::BATCH_NUM_BYTES_LIMIT;
 use quickwit_indexing::source::doc_file_reader::DocFileReader;
-use quickwit_indexing::{IndexingSplitCache, IndexingSplitStore};
+use quickwit_indexing::{IndexingSplitCache, IndexingSplitStore, run_local_merges};
 use quickwit_metastore::{IndexMetadataResponseExt, StageSplitsRequestExt};
 use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
 use quickwit_proto::metastore::{
@@ -63,8 +60,7 @@ use tracing::debug;
 
 use crate::checklist::{GREEN_COLOR, RED_COLOR};
 use crate::{
-    config_cli_arg, get_resolvers, info, load_node_config, run_index_checklist,
-    start_actor_runtimes,
+    config_cli_arg, get_resolvers, load_node_config, run_index_checklist, start_actor_runtimes,
 };
 
 pub fn build_tool_command() -> Command {
@@ -661,57 +657,21 @@ pub async fn merge_cli(args: MergeArgs) -> anyhow::Result<()> {
         .join("merge")
         .tempdir_in(scratch_root.path())?;
 
-    let universe = Universe::new();
-    let merge_scheduler_service: Mailbox<MergeSchedulerService> = universe.get_or_spawn_one();
-    let merge_pipeline = MergePipeline::new(
-        MergePipelineParams {
-            pipeline_id: MergePipelineId {
-                node_id: config.node_id,
-                index_uid: index_metadata.index_uid,
-                source_id: args.source_id,
-            },
-            doc_mapper,
-            indexing_directory,
-            metastore,
-            merge_scheduler_service,
-            split_store,
-            merge_policy,
-            retention_policy: index_config.retention_policy_opt,
-            max_concurrent_split_uploads: config.indexer_config.max_concurrent_split_uploads,
-            merge_io_throughput_limiter_opt: None,
-            event_broker: EventBroker::default(),
+    run_local_merges(
+        MergePipelineId {
+            node_id: config.node_id,
+            index_uid: index_metadata.index_uid,
+            source_id: args.source_id,
         },
-        None,
-        universe.spawn_ctx(),
-    );
-    let (_pipeline_mailbox, pipeline_handle) = universe.spawn_builder().spawn(merge_pipeline);
-
-    let mut check_interval = tokio::time::interval(Duration::from_secs(1));
-    loop {
-        check_interval.tick().await;
-
-        pipeline_handle.refresh_observe();
-        let observation = pipeline_handle.last_observation();
-
-        if observation.num_ongoing_merges == 0 {
-            info!("merge pipeline has no more ongoing merges, exiting");
-            break;
-        }
-
-        if pipeline_handle.state().is_exit() {
-            info!("merge pipeline has exited, exiting");
-            break;
-        }
-    }
-
-    let (pipeline_exit_status, _pipeline_statistics) = pipeline_handle.quit().await;
-    universe.quit().await;
-    if !matches!(
-        pipeline_exit_status,
-        ActorExitStatus::Success | ActorExitStatus::Quit
-    ) {
-        bail!(pipeline_exit_status);
-    }
+        doc_mapper,
+        indexing_directory,
+        metastore,
+        split_store,
+        merge_policy,
+        index_config.retention_policy_opt,
+        config.indexer_config.max_concurrent_split_uploads,
+    )
+    .await?;
     println!("{} Merge successful.", "✔".color(GREEN_COLOR));
     Ok(())
 }

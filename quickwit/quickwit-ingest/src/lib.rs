@@ -14,15 +14,16 @@
 
 #![deny(clippy::disallowed_methods)]
 
+mod batch_builder;
+mod doc_mapper;
 pub mod error;
-mod ingest_v2;
 pub mod ingesthree;
 mod metrics;
 mod ndjson;
 pub mod router_client;
 
+pub use batch_builder::{DocBatchV2Builder, IngestRequestV2Builder, JsonDocBatchV2Builder};
 pub use error::IngestServiceError;
-pub use ingest_v2::*;
 pub use ndjson::{doc_batch_v2_from_ndjson, split_ndjson_lines};
 
 pub type Result<T> = std::result::Result<T, IngestServiceError>;

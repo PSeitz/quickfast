@@ -104,7 +104,7 @@ fn destinations<'a>(
 ) -> Vec<&'a ClusterNode> {
     let mut destinations: Vec<_> = nodes
         .iter()
-        .filter(|node| node.is_ready && node.is_ingesthree())
+        .filter(|node| node.is_ready && node.is_indexer())
         .collect();
     destinations.sort_by_cached_key(|node| {
         let same_zone =

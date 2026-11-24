@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod doc_mapper;
-
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::fmt;
-use std::ops::{Add, AddAssign};
 
 use bytes::buf::Writer;
 use bytes::{BufMut, BytesMut};
@@ -26,9 +22,7 @@ use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
 use quickwit_proto::types::{DocUid, DocUidGenerator, IndexId, SubrequestId};
 use serde::Serialize;
 
-pub(crate) use self::doc_mapper::{is_document_validation_enabled, validate_doc_batch_impl};
-
-/// Helper struct to build a [`DocBatchV2`]`.
+/// Helper struct to build a [`DocBatchV2`].
 #[derive(Debug, Default)]
 pub struct DocBatchV2Builder {
     doc_uids: Vec<DocUid>,
@@ -66,7 +60,7 @@ impl DocBatchV2Builder {
     }
 }
 
-/// Batch builder that can append [`Serialize`] structs without an extra copy
+/// Batch builder that can append [`Serialize`] structs without an extra copy.
 pub struct JsonDocBatchV2Builder {
     doc_uids: Vec<DocUid>,
     doc_buffer: Writer<BytesMut>,
@@ -167,37 +161,6 @@ impl IngestRequestV2Builder {
             commit_type: commit_type as i32,
         };
         Some(ingest_request)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RateMibPerSec(pub u16);
-
-impl fmt::Display for RateMibPerSec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}MiB/s", self.0)
-    }
-}
-
-impl PartialEq<u16> for RateMibPerSec {
-    fn eq(&self, other: &u16) -> bool {
-        self.0 == *other
-    }
-}
-
-impl Add<RateMibPerSec> for RateMibPerSec {
-    type Output = RateMibPerSec;
-
-    #[inline(always)]
-    fn add(self, rhs: RateMibPerSec) -> Self::Output {
-        RateMibPerSec(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign<RateMibPerSec> for RateMibPerSec {
-    #[inline(always)]
-    fn add_assign(&mut self, rhs: RateMibPerSec) {
-        self.0 += rhs.0;
     }
 }
 

@@ -165,12 +165,7 @@ async fn balance_channel_for_service(
     let cluster_change_stream = cluster.change_stream();
     let service_change_stream = cluster_change_stream.filter_map(move |cluster_change| {
         Box::pin(async move {
-            // The Indexer channel here serves legacy ingest. Ingesthree nodes mount a
-            // separate intake RPC. Indexing-service clients use setup_indexer_pool.
-            let accepts_node = |node: &ClusterNode| {
-                node.is_service_enabled(service)
-                    && (service != QuickwitService::Indexer || node.is_ingester())
-            };
+            let accepts_node = |node: &ClusterNode| node.is_service_enabled(service);
             match cluster_change {
                 ClusterChange::Add(node) if accepts_node(&node) => {
                     let chitchat_id = node.chitchat_id();
@@ -230,16 +225,13 @@ async fn get_compaction_planner_client_if_needed(
     Option<CompactionPlannerServiceClient>,
     Option<ActorHandle<CompactionPlanner>>,
 )> {
-    if !node_config.enable_standalone_compactors {
-        return Ok((None, None));
-    }
     let is_janitor = node_config.is_service_enabled(QuickwitService::Janitor);
     let is_compactor = node_config.is_service_enabled(QuickwitService::Compactor);
     if !is_janitor && !is_compactor {
         return Ok((None, None));
     }
     if is_janitor {
-        let planner = CompactionPlanner::new(metastore_client.clone(), cluster.clone());
+        let planner = CompactionPlanner::new(metastore_client.clone());
         let (mailbox, handle) = universe.spawn_builder().spawn(planner);
         info!("compaction planner actor started on janitor node");
         let planner_client = CompactionPlannerServiceClient::tower()
@@ -270,17 +262,13 @@ async fn get_compaction_planner_client_if_needed(
     Ok((Some(planner_client), None))
 }
 
-/// The split cache is used when a node both indexes and merges its own splits. Split compactors
-/// never do; indexers only do if split compaction is disabled. The third case is a node running
-/// both services, in which case the two services share it.
+/// The split cache is shared when a node runs both indexer and compactor services locally.
 async fn indexing_split_cache_for_config(
     node_config: &NodeConfig,
 ) -> anyhow::Result<Arc<IndexingSplitCache>> {
     let runs_indexer = node_config.is_service_enabled(QuickwitService::Indexer);
     let runs_local_compactor = node_config.is_service_enabled(QuickwitService::Compactor);
-    let merges_own_splits =
-        runs_indexer && (!node_config.enable_standalone_compactors || runs_local_compactor);
-    if merges_own_splits {
+    if runs_indexer && runs_local_compactor {
         let cache = IndexingSplitCache::from_config(
             &node_config.indexer_config,
             &node_config.data_dir_path,
@@ -367,8 +355,6 @@ pub async fn serve_quickwit(
     mut shutdown_signal: BoxFutureInfaillible<()>,
     env_filter_reload_fn: EnvFilterReloadFn,
 ) -> anyhow::Result<HashMap<String, ActorExitStatus>> {
-    ingesthree::validate_config(&node_config)?;
-
     let cluster = start_cluster_service(&node_config)
         .await
         .context("failed to start cluster service")?;
@@ -451,7 +437,6 @@ pub async fn serve_quickwit(
         };
         queue.publish_initial_capacity(&cluster).await;
         ingesthree_queue_opt = Some(queue);
-        cluster.set_self_ingesthree_enabled(true).await;
     }
 
     // Any node can serve index management requests (create/update/delete index, etc.),
@@ -586,9 +571,7 @@ pub async fn serve_quickwit(
         None
     };
 
-    let compactor_service_opt = if node_config.is_service_enabled(QuickwitService::Compactor)
-        && node_config.enable_standalone_compactors
-    {
+    let compactor_service_opt = if node_config.is_service_enabled(QuickwitService::Compactor) {
         let compaction_dir = node_config.data_dir_path.join("compaction");
         fs::create_dir_all(&compaction_dir)?;
         let compaction_root_directory = quickwit_common::temp_dir::Builder::default()
@@ -1189,8 +1172,8 @@ mod tests {
         let universe = Universe::new();
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
 
-        // Janitor + indexer with standalone compactors enabled: planner client is returned.
-        let mut node_config = NodeConfig::for_test_with_standalone_compactors();
+        // Janitor + indexer: planner client is returned.
+        let mut node_config = NodeConfig::for_test();
         node_config.enabled_services =
             HashSet::from([QuickwitService::Janitor, QuickwitService::Indexer]);
         let (client_opt, handle_opt) =
@@ -1222,29 +1205,16 @@ mod tests {
         assert!(client_opt.is_none());
         assert!(handle_opt.is_none());
 
-        // Standalone compactors disabled: short-circuit returns (None, None) regardless of
-        // which services are enabled.
-        node_config.enable_standalone_compactors = false;
-        node_config.enabled_services =
-            HashSet::from([QuickwitService::Janitor, QuickwitService::Indexer]);
-        let (client_opt, handle_opt) =
-            get_compaction_planner_client_if_needed(&node_config, &cluster, &universe, &metastore)
-                .await
-                .unwrap();
-        assert!(client_opt.is_none());
-        assert!(handle_opt.is_none());
-
         universe.assert_quit().await;
     }
 
     #[tokio::test]
     async fn test_indexing_split_cache_for_config() {
-        async fn cache_created(services: &[QuickwitService], standalone_compactors: bool) -> bool {
+        async fn cache_created(services: &[QuickwitService]) -> bool {
             let temp_dir = tempfile::tempdir().unwrap();
             let mut node_config = NodeConfig::for_test();
             node_config.data_dir_path = temp_dir.path().to_path_buf();
             node_config.enabled_services = services.iter().copied().collect();
-            node_config.enable_standalone_compactors = standalone_compactors;
             indexing_split_cache_for_config(&node_config).await.unwrap();
             temp_dir
                 .path()
@@ -1253,22 +1223,14 @@ mod tests {
                 .is_dir()
         }
 
-        // Indexer merging its own splits in-pipeline → real cache.
-        assert!(cache_created(&[QuickwitService::Indexer], false).await);
         // Indexer co-located with a compactor → shared real cache.
-        assert!(
-            cache_created(
-                &[QuickwitService::Indexer, QuickwitService::Compactor],
-                true
-            )
-            .await
-        );
+        assert!(cache_created(&[QuickwitService::Indexer, QuickwitService::Compactor]).await);
         // Indexer offloading merges to remote compactors → no cache.
-        assert!(!cache_created(&[QuickwitService::Indexer], true).await);
+        assert!(!cache_created(&[QuickwitService::Indexer]).await);
         // Standalone compactor → no cache by default.
-        assert!(!cache_created(&[QuickwitService::Compactor], true).await);
+        assert!(!cache_created(&[QuickwitService::Compactor]).await);
         // Node that neither produces nor merges splits → no cache.
-        assert!(!cache_created(&[QuickwitService::Searcher], false).await);
+        assert!(!cache_created(&[QuickwitService::Searcher]).await);
     }
 
     #[tokio::test]
@@ -1310,7 +1272,7 @@ mod tests {
         let universe = Universe::new();
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
 
-        let mut node_config = NodeConfig::for_test_with_standalone_compactors();
+        let mut node_config = NodeConfig::for_test();
         node_config.enabled_services =
             HashSet::from([QuickwitService::Indexer, QuickwitService::Compactor]);
         let result =

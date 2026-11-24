@@ -15,13 +15,10 @@
 mod doc_processor;
 mod indexing_service;
 mod merge_executor;
-pub(crate) mod merge_pipeline;
-mod merge_planner;
 mod merge_scheduler_service;
 mod merge_split_downloader;
 mod packager;
 mod publisher;
-mod sequencer;
 mod uploader;
 #[cfg(feature = "vrl")]
 mod vrl_processing;
@@ -29,21 +26,12 @@ mod vrl_processing;
 pub use doc_processor::{DocProcessorCounters, DocumentConverter};
 pub use indexing_service::{INDEXING_DIR_NAME, IndexingService, IndexingServiceCounters};
 pub use merge_executor::{MergeExecutor, combine_partition_ids, merge_split_attrs};
-pub use merge_pipeline::{
-    FinishPendingMergesAndShutdownPipeline, MergePipeline, MergePipelineParams,
-};
-pub(crate) use merge_planner::MergePlanner;
-#[cfg(test)]
-pub(crate) use merge_planner::RunFinalizeMergePolicyAndQuit;
 pub use merge_scheduler_service::{MergePermit, MergeSchedulerService, schedule_merge};
 pub use merge_split_downloader::MergeSplitDownloader;
 pub use packager::{Packager, create_packaged_split};
 pub use publisher::{Publisher, PublisherCounters, PublisherType};
-pub use sequencer::Sequencer;
 pub(crate) use uploader::acquire_indexing_upload_permit;
-pub use uploader::{
-    SplitsUpdateMailbox, Uploader, UploaderCounters, UploaderType, prepare_split_for_upload,
-};
+pub use uploader::{Uploader, UploaderCounters, UploaderType, prepare_split_for_upload};
 
 /// Partition ID assigned to overflow splits when the number of partitions exceeds the split limit.
 pub(crate) const OTHER_PARTITION_ID: u64 = 3264326757911759461u64;

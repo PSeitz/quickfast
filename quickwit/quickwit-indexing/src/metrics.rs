@@ -19,7 +19,6 @@ use quickwit_metrics::{
     label_values, lazy_counter, lazy_gauge, lazy_histogram,
 };
 
-pub(crate) const ACTOR_NAME: LabelNames<1> = label_names!("actor_name");
 pub(crate) const COMPONENT: LabelNames<1> = label_names!("component");
 pub(crate) const INDEX_SOURCE: LabelNames<2> = label_names!("index", "source");
 pub(crate) const PUBLISHED_SPLIT: LabelNames<3> = label_names!("index", "source", "merge_ops");
@@ -98,12 +97,6 @@ pub(crate) fn record_published_split(index_id: &str, split: &SplitMetadata) {
     histogram!(parent: PUBLISHED_SPLIT_SIZE_BYTES, labels: [labels])
         .observe(split_size_bytes as f64);
 }
-
-pub(crate) static BACKPRESSURE_MICROS: LazyCounter = lazy_counter!(
-        name: "backpressure_micros",
-        description: "Amount of time spent in backpressure (in micros). This time only includes the amount of time spent waiting for a place in the queue of another actor.",
-        subsystem: "indexing",
-);
 
 pub(crate) static AVAILABLE_CONCURRENT_UPLOAD_PERMITS: LazyGauge = lazy_gauge!(
         name: "concurrent_upload_available_permits_num",

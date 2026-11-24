@@ -24,7 +24,6 @@ use crate::test_utils::ClusterSandboxBuilder;
 #[tokio::test]
 async fn test_standalone_compactor_graceful_decommission() {
     let mut sandbox = ClusterSandboxBuilder::default()
-        .enable_standalone_compactors()
         .add_node([QuickwitService::Metastore, QuickwitService::Janitor])
         .add_node([QuickwitService::Compactor])
         .build_and_start()
