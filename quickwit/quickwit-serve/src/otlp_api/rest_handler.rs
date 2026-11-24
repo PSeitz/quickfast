@@ -293,10 +293,10 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use prost::Message;
-    use quickwit_ingest::CommitType;
     use quickwit_opentelemetry::otlp::{
         OtlpGrpcLogsService, OtlpGrpcTracesService, make_resource_spans_for_test,
     };
+    use quickwit_proto::ingest::CommitTypeV2;
     use quickwit_proto::ingest::router::{
         IngestResponseV2, IngestRouterServiceClient, IngestSuccess, MockIngestRouterService,
     };
@@ -370,7 +370,7 @@ mod tests {
             });
         let ingest_router = IngestRouterServiceClient::from_mock(mock_ingest_router);
         let logs_service = OtlpGrpcLogsService::new(ingest_router.clone());
-        let traces_service = OtlpGrpcTracesService::new(ingest_router, Some(CommitType::Force));
+        let traces_service = OtlpGrpcTracesService::new(ingest_router, Some(CommitTypeV2::Force));
         let export_logs_request = ExportLogsServiceRequest {
             resource_logs: vec![ResourceLogs {
                 resource: Some(Resource {
@@ -543,7 +543,7 @@ mod tests {
             });
         let ingest_router = IngestRouterServiceClient::from_mock(mock_ingest_router);
         let logs_service = OtlpGrpcLogsService::new(ingest_router.clone());
-        let traces_service = OtlpGrpcTracesService::new(ingest_router, Some(CommitType::Force));
+        let traces_service = OtlpGrpcTracesService::new(ingest_router, Some(CommitTypeV2::Force));
         let export_trace_request = ExportTraceServiceRequest {
             resource_spans: make_resource_spans_for_test(),
         };

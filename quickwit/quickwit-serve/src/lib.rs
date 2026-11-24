@@ -37,7 +37,6 @@ mod metrics_api;
 mod node_info_handler;
 mod openapi;
 mod otlp_api;
-mod rate_modulator;
 mod rest;
 mod rest_api_request_span;
 mod rest_api_response;
@@ -51,12 +50,10 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::fs;
 use std::net::SocketAddr;
-use std::num::NonZeroUsize;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use bytesize::ByteSize;
 pub(crate) use decompression::Body;
 pub use format::BodyFormat;
 use futures::StreamExt;
@@ -68,8 +65,7 @@ use quickwit_cluster::{
 use quickwit_common::pubsub::{EventBroker, EventSubscriptionHandle};
 use quickwit_common::runtimes::RuntimesConfig;
 use quickwit_common::tower::{
-    BalanceChannel, BoxFutureInfaillible, BufferLayer, Change, ConstantRate, EstimateRateLayer,
-    GrpcMetricsLayer, RateLimitLayer, SmaRateEstimator, TimeoutLayer,
+    BalanceChannel, BoxFutureInfaillible, Change, GrpcMetricsLayer, TimeoutLayer,
 };
 use quickwit_common::{get_bool_from_env, spawn_named_task};
 use quickwit_compaction::planner::CompactionPlanner;
@@ -77,15 +73,12 @@ use quickwit_compaction::{
     CompactorService, notify_compactor_decommission, start_compactor_service,
     wait_for_compactor_decommission,
 };
+use quickwit_config::NodeConfig;
 use quickwit_config::service::QuickwitService;
-use quickwit_config::{NodeConfig, disable_ingest_v1};
 use quickwit_index_management::{IndexService as IndexManager, IndexServiceError};
 use quickwit_indexing::actors::IndexingService;
 use quickwit_indexing::{IndexingSplitCache, start_indexing_service};
 use quickwit_ingest::router_client::IngestRouterClient;
-use quickwit_ingest::{
-    GetMemoryCapacity, IngestRequest, IngestServiceClient, start_ingest_api_service,
-};
 use quickwit_jaeger::JaegerService;
 use quickwit_janitor::{JanitorService, start_janitor_service};
 use quickwit_metastore::{ListIndexesMetadataResponseExt, MetastoreResolver};
@@ -108,7 +101,6 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tonic_health::ServingStatus;
 use tonic_health::server::HealthReporter;
-use tower::ServiceBuilder;
 use tower::timeout::Timeout;
 use tracing::{debug, error, info, warn};
 use warp::{Filter, Rejection};
@@ -117,7 +109,6 @@ pub use crate::build_info::{BuildInfo, RuntimeInfo};
 pub use crate::index_api::{ListSplitsQueryParams, ListSplitsResponse};
 pub use crate::ingest_api::{RestIngestResponse, RestParseFailure};
 use crate::metastore::start_metastore_service_if_needed;
-use crate::rate_modulator::RateModulator;
 #[cfg(test)]
 use crate::rest::recover_fn;
 pub use crate::search_api::{SearchRequestQueryString, SortBy, search_request_from_api_request};
@@ -147,7 +138,6 @@ struct QuickwitServices {
     pub metastore_client: MetastoreServiceClient,
     pub index_manager: IndexManager,
     pub indexing_service_opt: Option<Mailbox<IndexingService>>,
-    pub ingest_service: IngestServiceClient,
     pub ingest_router_service: IngestRouterClient,
     ingesthree_service_opt: Option<quickwit_ingest::ingesthree::IngesthreeService>,
 
@@ -302,58 +292,6 @@ async fn indexing_split_cache_for_config(
     }
 }
 
-async fn start_ingest_client_if_needed(
-    node_config: &NodeConfig,
-    universe: &Universe,
-    cluster: &Cluster,
-) -> anyhow::Result<IngestServiceClient> {
-    if disable_ingest_v1() || node_config.ingest_api_config.enable_ingesthree {
-        debug!("returning no-op ingest service because ingest v1 is disabled");
-        let (balance_channel, _change_tx) = BalanceChannel::new();
-        let ingest_service = IngestServiceClient::from_balance_channel(
-            balance_channel,
-            node_config.grpc_config.max_message_size,
-            node_config.ingest_api_config.grpc_compression_encoding(),
-        );
-        return Ok(ingest_service);
-    }
-    if node_config.is_service_enabled(QuickwitService::Indexer) {
-        let ingest_api_service = start_ingest_api_service(
-            universe,
-            &node_config.data_dir_path,
-            &node_config.ingest_api_config,
-        )
-        .await?;
-        let num_buckets = NonZeroUsize::new(60).expect("60 should be non-zero");
-        let rate_estimator = SmaRateEstimator::new(
-            num_buckets,
-            Duration::from_secs(10),
-            Duration::from_millis(100),
-        );
-        let memory_capacity = ingest_api_service.ask(GetMemoryCapacity).await?;
-        let min_rate = ConstantRate::new(ByteSize::mib(1).as_u64(), Duration::from_millis(100));
-        let rate_modulator = RateModulator::new(rate_estimator.clone(), memory_capacity, min_rate);
-        let ingest_service = IngestServiceClient::tower()
-            .stack_ingest_layer(
-                ServiceBuilder::new()
-                    .layer(EstimateRateLayer::<IngestRequest, _>::new(rate_estimator))
-                    .layer(BufferLayer::new(100))
-                    .layer(RateLimitLayer::new(rate_modulator))
-                    .into_inner(),
-            )
-            .build_from_mailbox(ingest_api_service);
-        Ok(ingest_service)
-    } else {
-        let balance_channel = balance_channel_for_service(cluster, QuickwitService::Indexer).await;
-        let ingest_service = IngestServiceClient::from_balance_channel(
-            balance_channel,
-            node_config.grpc_config.max_message_size,
-            node_config.ingest_api_config.grpc_compression_encoding(),
-        );
-        Ok(ingest_service)
-    }
-}
-
 /// Waits for an external shutdown signal or for the server supervisor to exit, then notifies all
 /// other services.
 ///
@@ -459,11 +397,6 @@ pub async fn serve_quickwit(
         primary_metastore_client.clone(),
     )
     .await?;
-
-    // Setup ingest service v1.
-    let ingest_service = start_ingest_client_if_needed(&node_config, &universe, &cluster)
-        .await
-        .context("failed to start ingest v1 service")?;
 
     let (compaction_service_client_opt, compaction_planner_handle_opt) =
         get_compaction_planner_client_if_needed(
@@ -727,7 +660,6 @@ pub async fn serve_quickwit(
         index_manager,
         indexing_service_opt: indexing_service_opt.clone(),
         ingest_router_service,
-        ingest_service,
         ingesthree_service_opt: match ingesthree_queue_opt.as_ref() {
             Some(queue) => Some(
                 quickwit_ingest::ingesthree::IngesthreeService::new(
@@ -1071,7 +1003,6 @@ mod tests {
     use quickwit_common::uri::Uri;
     use quickwit_config::SearcherConfig;
     use quickwit_metastore::{IndexMetadata, metastore_for_test};
-    use quickwit_proto::ingest::ingester::IngesterStatus;
     use quickwit_proto::metastore::{ListIndexesMetadataResponse, MockMetastoreService};
     use quickwit_search::Job;
     use tonic::transport::{Channel, Server};
@@ -1221,15 +1152,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        let self_node = ClusterNode::for_test(
-            "node-1",
-            1337,
-            true,
-            &["searcher"],
-            &[],
-            IngesterStatus::Ready,
-        )
-        .await;
+        let self_node = ClusterNode::for_test("node-1", 1337, true, &["searcher"]).await;
         change_stream_tx
             .send(ClusterChange::Add(self_node.clone()))
             .unwrap();
@@ -1245,15 +1168,7 @@ mod tests {
             .send(ClusterChange::Remove(self_node))
             .unwrap();
 
-        let node = ClusterNode::for_test(
-            "node-1",
-            1337,
-            false,
-            &["searcher"],
-            &[],
-            IngesterStatus::Ready,
-        )
-        .await;
+        let node = ClusterNode::for_test("node-1", 1337, false, &["searcher"]).await;
         change_stream_tx.send(ClusterChange::Add(node)).unwrap();
         tokio::time::sleep(Duration::from_millis(1)).await;
 

@@ -26,7 +26,6 @@ quickwit-cluster = { workspace = true }
 quickwit-common = { workspace = true }
 quickwit-config = { workspace = true }
 quickwit-indexing = { workspace = true }
-quickwit-ingest = { workspace = true }
 quickwit-metastore = { workspace = true }
 quickwit-proto = { workspace = true }
 quickwit-serve = { workspace = true }

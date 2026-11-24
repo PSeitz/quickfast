@@ -78,35 +78,6 @@ pub(crate) async fn start_grpc_server(
     } else {
         None
     };
-    // Mount gRPC ingest service if `QuickwitService::Indexer` is enabled on node.
-    let ingest_api_grpc_service = if services
-        .node_config
-        .is_service_enabled(QuickwitService::Indexer)
-        && !services.node_config.ingest_api_config.enable_ingesthree
-    {
-        enabled_grpc_services.insert("ingest-api");
-        Some(
-            services
-                .ingest_service
-                .as_grpc_service(grpc_config.max_message_size),
-        )
-    } else {
-        None
-    };
-    let ingest_router_grpc_service = if services
-        .node_config
-        .is_service_enabled(QuickwitService::Indexer)
-    {
-        match &services.ingest_router_service {
-            quickwit_ingest::router_client::IngestRouterClient::V2(client) => {
-                enabled_grpc_services.insert("ingest-router");
-                Some(client.as_grpc_service(grpc_config.max_message_size))
-            }
-            quickwit_ingest::router_client::IngestRouterClient::Ingesthree(_) => None,
-        }
-    } else {
-        None
-    };
 
     let ingesthree_grpc_service = services.ingesthree_service_opt.clone().map(|service| {
         enabled_grpc_services.insert("ingesthree");
@@ -216,8 +187,6 @@ pub(crate) async fn start_grpc_server(
         .add_service(health_service)
         .add_service(reflection_service)
         .add_optional_service(compaction_grpc_service)
-        .add_optional_service(ingest_api_grpc_service)
-        .add_optional_service(ingest_router_grpc_service)
         .add_optional_service(ingesthree_grpc_service)
         .add_optional_service(jaeger_grpc_service)
         .add_optional_service(jaeger_v2_grpc_service)

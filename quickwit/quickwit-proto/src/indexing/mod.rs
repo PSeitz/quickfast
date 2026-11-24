@@ -16,104 +16,12 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 use std::ops::{Add, Mul, Sub};
+use std::str::FromStr;
 
 use bytesize::ByteSize;
-use quickwit_actors::AskError;
-use quickwit_common::pubsub::Event;
-use quickwit_common::rate_limited_error;
-use quickwit_common::tower::{MakeLoadShedError, RpcName, TimeoutExceeded};
 use serde::{Deserialize, Serialize};
-use thiserror;
 
-use crate::metastore::MetastoreError;
-use crate::types::{IndexUid, NodeId, PipelineUid, Position, ShardId, SourceId, SourceUid};
-use crate::{GrpcServiceError, ServiceError, ServiceErrorCode};
-
-include!("../codegen/quickwit/quickwit.indexing.rs");
-
-pub const INDEXING_FILE_DESCRIPTOR_SET: &[u8] =
-    include_bytes!("../codegen/quickwit/indexing_descriptor.bin");
-
-pub type IndexingResult<T> = std::result::Result<T, IndexingError>;
-
-#[derive(Debug, thiserror::Error, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IndexingError {
-    #[error("internal error: {0}")]
-    Internal(String),
-    #[error("metastore error: {0}")]
-    Metastore(#[from] MetastoreError),
-    #[error("request timed out: {0}")]
-    Timeout(String),
-    #[error("too many requests")]
-    TooManyRequests,
-    #[error("service unavailable: {0}")]
-    Unavailable(String),
-}
-impl From<TimeoutExceeded> for IndexingError {
-    fn from(_timeout_exceeded: TimeoutExceeded) -> Self {
-        Self::Timeout("tower layer timeout".to_string())
-    }
-}
-
-impl ServiceError for IndexingError {
-    fn error_code(&self) -> ServiceErrorCode {
-        match self {
-            Self::Internal(err_msg) => {
-                rate_limited_error!(limit_per_min = 6, "indexing error: {err_msg}");
-                ServiceErrorCode::Internal
-            }
-            Self::Metastore(metastore_error) => metastore_error.error_code(),
-            Self::Timeout(_) => ServiceErrorCode::Timeout,
-            Self::TooManyRequests => ServiceErrorCode::TooManyRequests,
-            Self::Unavailable(_) => ServiceErrorCode::Unavailable,
-        }
-    }
-}
-
-impl quickwit_common::tower::GrpcStatusCode for IndexingError {
-    fn grpc_status_code(&self) -> tonic::Code {
-        self.error_code().grpc_status_code()
-    }
-}
-
-impl GrpcServiceError for IndexingError {
-    fn new_internal(message: String) -> Self {
-        Self::Internal(message)
-    }
-
-    fn new_timeout(message: String) -> Self {
-        Self::Timeout(message)
-    }
-
-    fn new_too_many_requests() -> Self {
-        Self::TooManyRequests
-    }
-
-    fn new_unavailable(message: String) -> Self {
-        Self::Unavailable(message)
-    }
-}
-
-impl MakeLoadShedError for IndexingError {
-    fn make_load_shed_error() -> Self {
-        Self::TooManyRequests
-    }
-}
-
-impl From<AskError<IndexingError>> for IndexingError {
-    fn from(error: AskError<IndexingError>) -> Self {
-        match error {
-            AskError::ErrorReply(error) => error,
-            AskError::MessageNotDelivered => {
-                Self::new_unavailable("request could not be delivered to actor".to_string())
-            }
-            AskError::ProcessMessageError => {
-                Self::new_internal("an error occurred while processing the request".to_string())
-            }
-        }
-    }
-}
+use crate::types::{IndexUid, NodeId, PipelineUid, SourceId};
 
 /// Uniquely identifies an indexing pipeline. There can be multiple indexing pipelines per
 /// source `(index_uid, source_id)` running simultaneously on an indexer.
@@ -157,23 +65,6 @@ impl Display for MergePipelineId {
     }
 }
 
-impl Display for IndexingTask {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.index_uid(), self.source_id)
-    }
-}
-
-impl Eq for IndexingTask {}
-
-// TODO: This implementation conflicts with the default derived implementation. It would be better
-// to use a wrapper over `IndexingTask` where we need to group indexing tasks by index UID and
-// source ID.
-impl Hash for IndexingTask {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.index_uid.hash(state);
-        self.source_id.hash(state);
-    }
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 pub struct PipelineMetrics {
     pub cpu_load: CpuCapacity,
@@ -327,24 +218,6 @@ impl FromStr for CpuCapacity {
 impl From<CpuCapacity> for CpuCapacityForSerialization {
     fn from(cpu_capacity: CpuCapacity) -> CpuCapacityForSerialization {
         CpuCapacityForSerialization::MilliCpuWithUnit(format!("{}m", cpu_capacity.0))
-    }
-}
-
-/// Whenever a shard position update is detected (whether it is emit by an indexing pipeline local
-/// to the cluster or received via chitchat), the shard positions service publishes a
-/// `ShardPositionsUpdate` event through the cluster's `EventBroker`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShardPositionsUpdate {
-    pub source_uid: SourceUid,
-    // Only shards that received an update are listed here.
-    pub updated_shard_positions: Vec<(ShardId, Position)>,
-}
-
-impl Event for ShardPositionsUpdate {}
-
-impl RpcName for ApplyIndexingPlanRequest {
-    fn rpc_name() -> &'static str {
-        "apply_indexing_plan"
     }
 }
 

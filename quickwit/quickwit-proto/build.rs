@@ -67,27 +67,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run()
         .unwrap();
 
-    // Indexing Service.
-    let mut prost_config = prost_build::Config::default();
-    prost_config
-        .extern_path(
-            ".quickwit.indexing.PipelineUid",
-            "crate::types::PipelineUid",
-        )
-        .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid")
-        .extern_path(".quickwit.ingest.ShardId", "crate::types::ShardId")
-        .file_descriptor_set_path("src/codegen/quickwit/indexing_descriptor.bin");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/indexing.proto"])
-        .with_includes(&["protos"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::indexing::IndexingResult")
-        .with_error_type_path("crate::indexing::IndexingError")
-        .run()
-        .unwrap();
-
     // Metastore service.
     let mut prost_config = prost_build::Config::default();
     prost_config
@@ -129,12 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ingest service (metastore service proto should be generated before ingest).
     let mut prost_config = prost_build::Config::default();
     prost_config
-        .bytes([
-            "DocBatchV2.doc_buffer",
-            "DocMRecord.doc",
-            "MRecordBatch.mrecord_buffer",
-            "Position.position",
-        ])
+        .bytes(["DocBatchV2.doc_buffer", "Position.position"])
         .extern_path(
             ".quickwit.common.DocMappingUid",
             "crate::types::DocMappingUid",
@@ -167,22 +141,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Codegen::builder()
         .with_prost_config(prost_config)
-        .with_protos(&[
-            "protos/quickwit/ingester.proto",
-            "protos/quickwit/router.proto",
-        ])
+        .with_protos(&["protos/quickwit/router.proto"])
         .with_includes(&["protos"])
         .with_output_dir("src/codegen/quickwit")
         .with_result_type_path("crate::ingest::IngestV2Result")
         .with_error_type_path("crate::ingest::IngestV2Error")
         .generate_rpc_name_impls()
-        // Surface a couple of top-level scalar fields on the generated tracing
-        // spans so traces are immediately filterable by ingester / commit type.
-        // `ingester_id` is `String` (Display ok); `commit_type` is the prost
-        // enum `CommitTypeV2` which only derives `Debug`.
         .with_traced_request_field_debug("IngestRequestV2", "commit_type")
-        .with_traced_request_field("PersistRequest", "ingester_id")
-        .with_traced_request_field_debug("PersistRequest", "commit_type")
         .run()
         .unwrap();
 

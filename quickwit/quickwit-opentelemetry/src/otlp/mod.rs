@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 use quickwit_common::rate_limited_warn;
 use quickwit_config::{INGEST_V2_SOURCE_ID, validate_identifier, validate_index_id_pattern};
+use quickwit_ingest::IngestServiceError;
 use quickwit_ingest::router_client::IngestRouterClient;
-use quickwit_ingest::{CommitType, IngestServiceError};
 use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
 use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
 use quickwit_proto::opentelemetry::proto::common::v1::any_value::Value as OtlpValue;
@@ -215,7 +215,7 @@ pub async fn ingest_doc_batch_v2(
     ingest_router: IngestRouterClient,
     index_id: String,
     doc_batch: DocBatchV2,
-    commit_type: CommitType,
+    commit_type: CommitTypeV2,
 ) -> Result<(), IngestServiceError> {
     let subrequest = IngestSubrequest {
         subrequest_id: 0,
@@ -223,13 +223,8 @@ pub async fn ingest_doc_batch_v2(
         source_id: INGEST_V2_SOURCE_ID.to_string(),
         doc_batch: Some(doc_batch),
     };
-    let commit_type_v2 = match commit_type {
-        CommitType::Auto => CommitTypeV2::Auto,
-        CommitType::WaitFor => CommitTypeV2::WaitFor,
-        CommitType::Force => CommitTypeV2::Force,
-    };
     let request = IngestRequestV2 {
-        commit_type: commit_type_v2 as i32,
+        commit_type: commit_type as i32,
         subrequests: vec![subrequest],
     };
     let mut response = ingest_router.ingest(request).await?;

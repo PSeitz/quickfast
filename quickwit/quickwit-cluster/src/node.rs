@@ -17,10 +17,6 @@ use std::sync::Arc;
 
 use chitchat::{ChitchatId, NodeState};
 use quickwit_config::service::QuickwitService;
-#[cfg(any(test, feature = "testsuite"))]
-use quickwit_proto::indexing::IndexingTask;
-#[cfg(any(test, feature = "testsuite"))]
-use quickwit_proto::ingest::ingester::IngesterStatus;
 use quickwit_proto::types::AvailabilityZone;
 use tonic::transport::Channel;
 
@@ -74,13 +70,8 @@ impl ClusterNode {
         port: u16,
         is_self_node: bool,
         enabled_services: &[&str],
-        indexing_tasks: &[IndexingTask],
-        ingester_status: IngesterStatus,
     ) -> Self {
-        use quickwit_common::shared_consts::INGESTER_STATUS_KEY;
-
         use crate::change::for_test::channel_factory_for_test;
-        use crate::cluster::set_indexing_tasks_in_node_state;
         use crate::member::{ENABLED_SERVICES_KEY, GRPC_ADVERTISE_ADDR_KEY};
 
         let gossip_advertise_addr = ([127, 0, 0, 1], port).into();
@@ -92,8 +83,6 @@ impl ClusterNode {
         let mut node_state = NodeState::for_test();
         node_state.set(ENABLED_SERVICES_KEY, enabled_services.join(","));
         node_state.set(GRPC_ADVERTISE_ADDR_KEY, grpc_advertise_addr.to_string());
-        node_state.set(INGESTER_STATUS_KEY, ingester_status.as_json_str_name());
-        set_indexing_tasks_in_node_state(indexing_tasks, &mut node_state);
         Self::try_new(chitchat_id, &node_state, channel, is_self_node).unwrap()
     }
 

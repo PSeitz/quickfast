@@ -34,7 +34,6 @@ pub use grpc_service::cluster_grpc_server;
 use quickwit_config::NodeConfig;
 use quickwit_config::service::QuickwitService;
 use quickwit_proto::indexing::CpuCapacity;
-use quickwit_proto::ingest::ingester::IngesterStatus;
 use quickwit_transport::ChannelFactory;
 use time::OffsetDateTime;
 
@@ -116,7 +115,6 @@ pub async fn start_cluster_service(node_config: &NodeConfig) -> anyhow::Result<C
     let cluster_id = node_config.cluster_id.clone();
     let gossip_listen_addr = node_config.gossip_listen_addr;
     let peer_seed_addrs = node_config.peer_seed_addrs().await?;
-    let indexing_tasks = Vec::new();
 
     let node_id = node_config.node_id.clone();
     let generation_id = GenerationId::now();
@@ -133,9 +131,7 @@ pub async fn start_cluster_service(node_config: &NodeConfig) -> anyhow::Result<C
         enabled_services: node_config.enabled_services.clone(),
         gossip_advertise_addr: node_config.gossip_advertise_addr,
         grpc_advertise_addr: node_config.grpc_advertise_addr,
-        indexing_tasks,
         indexing_cpu_capacity,
-        ingester_status: IngesterStatus::default(),
         availability_zone: node_config.availability_zone.clone(),
         enable_standalone_compactors: node_config.enable_standalone_compactors,
     };

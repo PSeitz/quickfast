@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::indexing::*;
-use crate::ingest::ingester::*;
 use crate::ingest::router::*;
 use crate::ingest::*;
 use crate::metastore::*;
@@ -87,24 +85,12 @@ generate_copy_getters! {
 // [`IndexUid`] getters
 generate_getters! {
     impl fn index_uid() -> &IndexUid {} for
-    // Indexing API
-    IndexingTask,
-
     // Ingest API
-    FetchEof,
-    FetchPayload,
     IngestSuccess,
-    OpenFetchStreamRequest,
-    PersistFailure,
-    PersistSubrequest,
-    PersistSuccess,
-    RetainShardsForSource,
     Shard,
     ShardIdPositions,
     ShardIds,
     ShardPKey,
-    TruncateShardsSubrequest,
-    SourceShardUpdate,
 
     // Metastore API
     AcquireShardsRequest,
@@ -136,44 +122,12 @@ generate_getters! {
     UpdateSplitsDeleteOpstampRequest
 }
 
-// [`PipelineUid`] getters
-generate_copy_getters! {
-    impl fn pipeline_uid() -> PipelineUid {} for
-
-    IndexingTask
-}
-
 // [`Position`] getters. We use `clone` because `Position` is an `Arc` under the hood.
-generate_clone_getters! {
-    impl fn eof_position() -> Position {} for
-
-    FetchEof
-}
-
-generate_clone_getters! {
-    impl fn from_position_exclusive() -> Position {} for
-
-    FetchPayload,
-    OpenFetchStreamRequest
-}
-
-generate_clone_getters! {
-    impl fn to_position_inclusive() -> Position {} for
-
-    FetchPayload
-}
-
 generate_clone_getters! {
     impl fn publish_position_inclusive() -> Position {} for
 
     Shard,
     ShardIdPosition
-}
-
-generate_clone_getters! {
-    impl fn truncate_up_to_position_inclusive() -> Position {} for
-
-    TruncateShardsSubrequest
 }
 
 // [`Shard`] getters
@@ -183,25 +137,12 @@ generate_getters! {
     OpenShardSubresponse
 }
 
-generate_getters! {
-    impl fn shard() -> &Shard {} for
-
-    InitShardSubrequest,
-    InitShardSuccess
-}
-
 // [`ShardId`] getters
 generate_getters! {
     impl fn shard_id() -> &ShardId {} for
 
-    FetchEof,
-    FetchPayload,
-    InitShardFailure,
-    OpenFetchStreamRequest,
     OpenShardSubrequest,
-    PersistSuccess,
     Shard,
     ShardIdPosition,
-    ShardPKey,
-    TruncateShardsSubrequest
+    ShardPKey
 }

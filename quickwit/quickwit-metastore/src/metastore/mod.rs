@@ -1117,14 +1117,10 @@ fn use_shard_api(params: &SourceParams) -> bool {
         SourceParams::File(FileSourceParams::Filepath(_)) => false,
         SourceParams::File(FileSourceParams::Notifications(_)) => true,
         SourceParams::Ingest => true,
-        SourceParams::IngestApi => false,
         SourceParams::IngestCli => false,
         SourceParams::Kafka(_) => false,
-        SourceParams::Kinesis(_) => false,
         SourceParams::PubSub(_) => false,
-        SourceParams::Pulsar(_) => false,
         SourceParams::Stdin => panic!("stdin cannot be checkpointed"),
-        SourceParams::Vec(_) => false,
         SourceParams::Void(_) => false,
     }
 }

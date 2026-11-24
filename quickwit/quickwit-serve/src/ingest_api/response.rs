@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use quickwit_ingest::IngestServiceError;
 use quickwit_ingest::router_client::IngestResponse as RouterResponse;
-use quickwit_ingest::{IngestResponse, IngestServiceError};
 use quickwit_proto::ingest::{DocBatchV2, ParseFailureReason};
 use quickwit_proto::types::DocUid;
 use serde::{Deserialize, Serialize};
@@ -45,13 +45,6 @@ pub struct RestIngestResponse {
 }
 
 impl RestIngestResponse {
-    pub(crate) fn from_ingest_v1(ingest_response: IngestResponse) -> Self {
-        Self {
-            num_docs_for_processing: ingest_response.num_docs_for_processing,
-            ..Default::default()
-        }
-    }
-
     /// Converts a router response into [`RestIngestResponse`].
     ///
     /// Generates a detailed failure description (`parse_failures`) if
@@ -134,18 +127,6 @@ mod tests {
     use quickwit_proto::types::IndexUid;
 
     use super::*;
-
-    #[test]
-    fn test_from_ingest_v1() {
-        let ingest_response = IngestResponse {
-            num_docs_for_processing: 10,
-        };
-        let rest_response = RestIngestResponse::from_ingest_v1(ingest_response);
-        assert_eq!(rest_response.num_docs_for_processing, 10);
-        assert_eq!(rest_response.num_ingested_docs, None);
-        assert_eq!(rest_response.num_rejected_docs, None);
-        assert_eq!(rest_response.parse_failures, None);
-    }
 
     #[test]
     fn test_from_ingest_v2_success() {

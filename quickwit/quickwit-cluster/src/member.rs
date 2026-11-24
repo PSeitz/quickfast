@@ -19,19 +19,15 @@ use std::str::FromStr;
 
 use anyhow::Context;
 use chitchat::{ChitchatId, NodeState, Version};
-use quickwit_common::shared_consts::INGESTER_STATUS_KEY;
-use quickwit_proto::indexing::{CpuCapacity, IndexingTask};
-use quickwit_proto::ingest::ingester::IngesterStatus;
+use quickwit_proto::indexing::CpuCapacity;
 use quickwit_proto::types::{AvailabilityZone, NodeId};
 use tracing::{error, warn};
 
-use crate::cluster::parse_indexing_tasks;
 use crate::{GenerationId, QuickwitService};
 
 // Keys used to store member's data in chitchat state.
 pub(crate) const GRPC_ADVERTISE_ADDR_KEY: &str = "grpc_advertise_addr";
 pub(crate) const ENABLED_SERVICES_KEY: &str = "enabled_services";
-pub(crate) const PIPELINE_METRICS_PREFIX: &str = "pipeline_metrics:";
 
 // Readiness key and values used to store node's readiness in Chitchat state.
 pub(crate) const READINESS_KEY: &str = "readiness";
@@ -50,8 +46,6 @@ pub(crate) trait NodeStateExt {
     fn is_ready(&self) -> bool;
 
     fn size_bytes(&self) -> usize;
-
-    fn ingester_status(&self) -> IngesterStatus;
 
     fn availability_zone(&self) -> Option<AvailabilityZone>;
 
@@ -87,12 +81,6 @@ impl NodeStateExt for NodeState {
             .sum()
     }
 
-    fn ingester_status(&self) -> IngesterStatus {
-        self.get(INGESTER_STATUS_KEY)
-            .and_then(IngesterStatus::from_json_str_name)
-            .unwrap_or(IngesterStatus::Ready)
-    }
-
     fn availability_zone(&self) -> Option<AvailabilityZone> {
         self.get(AVAILABILITY_ZONE_KEY).map(AvailabilityZone::from)
     }
@@ -120,15 +108,8 @@ pub struct ClusterMember {
     /// gRPC advertise address, i.e. the address that other nodes should use to communicate with
     /// the node via gRPC.
     pub grpc_advertise_addr: SocketAddr,
-    /// Running indexing plan.
-    /// None if the node is not an indexer or the indexer has not yet started some indexing
-    /// pipelines.
-    pub indexing_tasks: Vec<IndexingTask>,
     /// Indexing cpu capacity of the node expressed in milli cpu.
     pub indexing_cpu_capacity: CpuCapacity,
-    /// Status of the ingester service running on the node. `IngesterStatus::Unspecified` if the
-    /// node is not an ingester.
-    pub ingester_status: IngesterStatus,
     /// Whether the node is ready to serve requests.
     pub is_ready: bool,
     /// Availability zone the node is running in, if enabled.
@@ -200,9 +181,7 @@ pub(crate) fn build_cluster_member(
             parse_enabled_services_str(enabled_services_str, &chitchat_id.node_id)
         })?;
     let grpc_advertise_addr = node_state.grpc_advertise_addr()?;
-    let indexing_tasks = parse_indexing_tasks(node_state);
     let indexing_cpu_capacity = parse_indexing_cpu_capacity(node_state);
-    let ingester_status = node_state.ingester_status();
     let availability_zone = node_state.availability_zone();
     let enable_standalone_compactors = node_state.enable_standalone_compactors();
 
@@ -213,9 +192,7 @@ pub(crate) fn build_cluster_member(
         enabled_services,
         gossip_advertise_addr: chitchat_id.gossip_advertise_addr,
         grpc_advertise_addr,
-        indexing_tasks,
         indexing_cpu_capacity,
-        ingester_status,
         availability_zone,
         enable_standalone_compactors,
     };
@@ -253,15 +230,8 @@ fn parse_enabled_services_str(
 #[cfg(test)]
 mod tests {
     use chitchat::NodeState;
-    use quickwit_proto::ingest::ingester::IngesterStatus;
 
     use super::{NodeStateExt, STANDALONE_COMPACTORS_KEY};
-
-    #[test]
-    fn test_ingester_status_defaults_to_ready_when_key_absent() {
-        let node_state = NodeState::for_test();
-        assert_eq!(node_state.ingester_status(), IngesterStatus::Ready);
-    }
 
     #[test]
     fn test_enable_standalone_compactors_parsing() {

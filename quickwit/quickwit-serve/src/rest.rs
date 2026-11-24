@@ -24,7 +24,6 @@ use hyper_util::server::conn::auto::Builder;
 use hyper_util::server::graceful::GracefulConnection;
 use hyper_util::service::TowerToHyperService;
 use quickwit_common::tower::BoxFutureInfaillible;
-use quickwit_config::{disable_ingest_v1, enable_ingest_v2};
 use quickwit_metrics::{counter, histogram, labels};
 use quickwit_search::SearchService;
 use tokio::net::{TcpListener, TcpStream};
@@ -511,23 +510,14 @@ fn api_v1_routes(
     quickwit_services: Arc<QuickwitServices>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     let api_v1_root_url = warp::path!("api" / "v1" / ..);
-    let ingesthree_enabled = quickwit_services
-        .node_config
-        .ingest_api_config
-        .enable_ingesthree;
-    let legacy_ingest_enabled = !ingesthree_enabled && !disable_ingest_v1();
-    let router_ingest_enabled = ingesthree_enabled || enable_ingest_v2();
     api_v1_root_url.and(
         elastic_api_handlers(
             quickwit_services.cluster.clone(),
             quickwit_services.node_config.clone(),
             quickwit_services.search_service.clone(),
-            quickwit_services.ingest_service.clone(),
             quickwit_services.ingest_router_service.clone(),
             quickwit_services.metastore_client.clone(),
             quickwit_services.index_manager.clone(),
-            legacy_ingest_enabled,
-            router_ingest_enabled,
         )
         .or(cluster_handler(quickwit_services.cluster.clone()))
         .boxed()
@@ -545,10 +535,7 @@ fn api_v1_routes(
         .boxed()
         .or(ingest_api_handlers(
             quickwit_services.ingest_router_service.clone(),
-            quickwit_services.ingest_service.clone(),
             quickwit_services.node_config.ingest_api_config.clone(),
-            legacy_ingest_enabled,
-            router_ingest_enabled,
         ))
         .boxed()
         .or(otlp_ingest_api_handlers(
@@ -789,7 +776,6 @@ mod tests {
     use quickwit_cluster::{ChitchatTransport, create_cluster_for_test};
     use quickwit_config::NodeConfig;
     use quickwit_index_management::IndexService;
-    use quickwit_ingest::{IngestApiService, IngestServiceClient};
     use quickwit_proto::ingest::router::IngestRouterServiceClient;
     use quickwit_proto::metastore::MetastoreServiceClient;
     use quickwit_search::MockSearchService;
@@ -800,12 +786,6 @@ mod tests {
 
     use super::*;
     use crate::rest::recover_fn_final;
-
-    pub(crate) fn ingest_service_client() -> IngestServiceClient {
-        let universe = quickwit_actors::Universe::new();
-        let (ingest_service_mailbox, _) = universe.create_test_mailbox::<IngestApiService>();
-        IngestServiceClient::from_mailbox(ingest_service_mailbox)
-    }
 
     #[tokio::test]
     async fn test_cors() {
@@ -930,7 +910,6 @@ mod tests {
             compaction_service_client_opt: None,
             indexing_service_opt: None,
             index_manager: index_service,
-            ingest_service: ingest_service_client(),
             ingest_router_service: IngestRouterServiceClient::mocked().into(),
             ingesthree_service_opt: None,
             janitor_service_opt: None,

@@ -143,7 +143,6 @@ impl IndexService {
 
         // Add default sources.
         let source_configs_json = vec![
-            serde_utils::to_json_str(&SourceConfig::ingest_api_default())?,
             serde_utils::to_json_str(&SourceConfig::ingest_v2())?,
             serde_utils::to_json_str(&SourceConfig::cli())?,
         ];
@@ -589,9 +588,7 @@ pub async fn validate_storage_uri(
 mod tests {
 
     use quickwit_common::uri::Uri;
-    use quickwit_config::{
-        CLI_SOURCE_ID, INGEST_API_SOURCE_ID, INGEST_V2_SOURCE_ID, IndexConfig, RetentionPolicy,
-    };
+    use quickwit_config::{CLI_SOURCE_ID, INGEST_V2_SOURCE_ID, IndexConfig, RetentionPolicy};
     use quickwit_metastore::{
         MetastoreServiceExt, SplitMetadata, StageSplitsRequestExt, metastore_for_test,
     };
@@ -615,9 +612,8 @@ mod tests {
         assert_eq!(index_metadata_0.index_id(), index_id);
         assert_eq!(index_metadata_0.index_uri(), &index_uri);
 
-        assert_eq!(index_metadata_0.sources.len(), 3);
+        assert_eq!(index_metadata_0.sources.len(), 2);
         assert!(index_metadata_0.sources.contains_key(CLI_SOURCE_ID));
-        assert!(index_metadata_0.sources.contains_key(INGEST_API_SOURCE_ID));
         assert!(index_metadata_0.sources.contains_key(INGEST_V2_SOURCE_ID));
 
         assert!(

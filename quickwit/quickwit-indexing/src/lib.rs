@@ -25,8 +25,8 @@ use quickwit_storage::StorageResolver;
 use tracing::info;
 
 pub use crate::actors::{
-    FinishPendingMergesAndShutdownPipeline, IndexingError, IndexingService, MergePipeline,
-    MergePipelineParams, PublisherType, Sequencer, SplitsUpdateMailbox,
+    FinishPendingMergesAndShutdownPipeline, IndexingService, MergePipeline, MergePipelineParams,
+    PublisherType, Sequencer, SplitsUpdateMailbox,
 };
 pub use crate::controlled_directory::ControlledDirectory;
 use crate::models::IndexingStatistics;

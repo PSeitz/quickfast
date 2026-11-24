@@ -1,9 +1,0 @@
-{
-  "version": "0.7",
-  "source_id": "_ingest-api-source",
-  "enabled": true,
-  "source_type": "ingest-api",
-  "transform": {
-    "script": ".message = downcase(string!(.message))"
-  }
-}

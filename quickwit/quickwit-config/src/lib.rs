@@ -58,10 +58,9 @@ use siphasher::sip::SipHasher;
 use source_config::FileSourceParamsForSerde;
 pub use source_config::{
     CLI_SOURCE_ID, FileSourceMessageType, FileSourceNotification, FileSourceParams, FileSourceSqs,
-    INGEST_API_SOURCE_ID, INGEST_V2_SOURCE_ID, KafkaSourceParams, KinesisSourceParams,
-    PubSubSourceParams, PulsarSourceAuth, PulsarSourceParams, RegionOrEndpoint, SourceConfig,
-    SourceInputFormat, SourceParams, TransformConfig, VecSourceParams, VoidSourceParams,
-    load_source_config_from_user_config, load_source_config_update,
+    INGEST_V2_SOURCE_ID, KafkaSourceParams, PubSubSourceParams, SourceConfig, SourceInputFormat,
+    SourceParams, TransformConfig, VoidSourceParams, load_source_config_from_user_config,
+    load_source_config_update,
 };
 use tracing::warn;
 
@@ -87,16 +86,6 @@ pub use crate::storage_config::{
     StorageConfigs,
 };
 
-/// Returns true if the ingest API v2 is enabled.
-pub fn enable_ingest_v2() -> bool {
-    quickwit_common::get_bool_from_env_cached!("QW_ENABLE_INGEST_V2", true)
-}
-
-/// Returns true if the ingest API v1 is disabled.
-pub fn disable_ingest_v1() -> bool {
-    quickwit_common::get_bool_from_env_cached!("QW_DISABLE_INGEST_V1", false)
-}
-
 #[derive(utoipa::OpenApi)]
 #[openapi(components(schemas(
     ConstWriteAmplificationMergePolicyConfig,
@@ -111,12 +100,8 @@ pub fn disable_ingest_v1() -> bool {
     IndexTemplateV0_8,
     IngestSettings,
     KafkaSourceParams,
-    KinesisSourceParams,
     MergePolicyConfig,
     PubSubSourceParams,
-    PulsarSourceAuth,
-    PulsarSourceParams,
-    RegionOrEndpoint,
     RetentionPolicy,
     SearchSettings,
     SourceConfigV0_7,
@@ -125,7 +110,6 @@ pub fn disable_ingest_v1() -> bool {
     SourceParams,
     StableLogMergePolicyConfig,
     TransformConfig,
-    VecSourceParams,
     VersionedIndexConfig,
     VersionedIndexTemplate,
     VersionedSourceConfig,

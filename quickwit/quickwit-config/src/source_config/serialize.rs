@@ -115,15 +115,9 @@ impl SourceConfigForSerialization {
             }
             SourceParams::File(_)
             | SourceParams::Kafka(_)
-            | SourceParams::Kinesis(_)
-            | SourceParams::Pulsar(_) => {
-                // TODO consider any validation opportunity
-            }
-            SourceParams::PubSub(_)
+            | SourceParams::PubSub(_)
             | SourceParams::Ingest
-            | SourceParams::IngestApi
             | SourceParams::IngestCli
-            | SourceParams::Vec(_)
             | SourceParams::Void(_) => {}
         }
         match &self.source_params {

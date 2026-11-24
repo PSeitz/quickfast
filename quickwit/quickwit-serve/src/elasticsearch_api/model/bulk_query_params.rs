@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use quickwit_ingest::CommitType;
 use quickwit_proto::ingest::CommitTypeV2;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -21,8 +20,6 @@ use serde::{Deserialize, Deserializer};
 pub struct ElasticBulkOptions {
     #[serde(default)]
     pub refresh: ElasticRefresh,
-    #[serde(default)]
-    pub use_legacy_ingest: bool,
 }
 
 /// ?refresh parameter for elasticsearch bulk request
@@ -81,16 +78,6 @@ impl<'de> Deserialize<'de> for ElasticRefresh {
             }
         }
         deserializer.deserialize_any(ElasticRefreshVisitor)
-    }
-}
-
-impl From<ElasticRefresh> for CommitType {
-    fn from(val: ElasticRefresh) -> Self {
-        match val {
-            ElasticRefresh::False => Self::Auto,
-            ElasticRefresh::True => Self::Force,
-            ElasticRefresh::WaitFor => Self::WaitFor,
-        }
     }
 }
 

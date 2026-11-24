@@ -14,10 +14,8 @@
 
 use std::io;
 
-use mrecordlog::error::*;
 use quickwit_actors::AskError;
 use quickwit_common::rate_limited_error;
-pub(crate) use quickwit_proto::error::{grpc_error_to_grpc_status, grpc_status_to_service_error};
 use quickwit_proto::ingest::router::{IngestFailure, IngestFailureReason};
 use quickwit_proto::ingest::{IngestV2Error, RateLimitingCause};
 use quickwit_proto::types::IndexId;
@@ -212,49 +210,5 @@ impl From<IngestServiceError> for tonic::Status {
         };
         let message = error.to_string();
         tonic::Status::new(code, message)
-    }
-}
-
-impl From<ReadRecordError> for IngestServiceError {
-    fn from(error: ReadRecordError) -> IngestServiceError {
-        match error {
-            ReadRecordError::IoError(io_error) => io_error.into(),
-            ReadRecordError::Corruption => {
-                IngestServiceError::Corruption("failed to read record".to_string())
-            }
-        }
-    }
-}
-
-impl From<AppendError> for IngestServiceError {
-    fn from(err: AppendError) -> IngestServiceError {
-        match err {
-            AppendError::IoError(io_error) => io_error.into(),
-            AppendError::MissingQueue(index_id) => IngestServiceError::IndexNotFound { index_id },
-            // these errors can't be reached right now
-            AppendError::Past => IngestServiceError::InvalidPosition(
-                "attempted to append a record in the past".to_string(),
-            ),
-        }
-    }
-}
-
-impl From<DeleteQueueError> for IngestServiceError {
-    fn from(err: DeleteQueueError) -> IngestServiceError {
-        match err {
-            DeleteQueueError::IoError(io_error) => io_error.into(),
-            DeleteQueueError::MissingQueue(index_id) => {
-                IngestServiceError::IndexNotFound { index_id }
-            }
-        }
-    }
-}
-
-impl From<TruncateError> for IngestServiceError {
-    fn from(err: TruncateError) -> IngestServiceError {
-        match err {
-            TruncateError::IoError(io_error) => io_error.into(),
-            TruncateError::MissingQueue(index_id) => IngestServiceError::IndexNotFound { index_id },
-        }
     }
 }

@@ -22,7 +22,6 @@ http = { workspace = true }
 itertools = { workspace = true }
 memchr = { workspace = true }
 mockall = { workspace = true, optional = true }
-mrecordlog = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
@@ -50,9 +49,7 @@ quickwit-proto = { workspace = true }
 quickwit-storage = { workspace = true }
 
 [dev-dependencies]
-criterion = { workspace = true }
 mockall = { workspace = true }
-mrecordlog = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
@@ -65,13 +62,6 @@ quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
 quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
-
-[[bench]]
-name = "mrecord_bench"
-harness = false
-
-[build-dependencies]
-quickwit-codegen = { workspace = true }
 
 [features]
 failpoints = ["fail/failpoints"]

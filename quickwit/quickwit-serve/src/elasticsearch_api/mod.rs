@@ -25,7 +25,6 @@ pub use filter::ElasticCompatibleApi;
 use quickwit_cluster::Cluster;
 use quickwit_config::NodeConfig;
 use quickwit_index_management::IndexService;
-use quickwit_ingest::IngestServiceClient;
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_search::SearchService;
@@ -56,17 +55,13 @@ use crate::{BodyFormat, BuildInfo};
 ///
 /// This is where all newly supported Elasticsearch handlers
 /// should be registered.
-#[allow(clippy::too_many_arguments)] // Will go away when we remove ingest v1.
 pub fn elastic_api_handlers(
     cluster: Cluster,
     node_config: Arc<NodeConfig>,
     search_service: Arc<dyn SearchService>,
-    ingest_service: IngestServiceClient,
     ingest_router: impl Into<IngestRouterClient>,
     metastore: MetastoreServiceClient,
     index_service: IndexService,
-    enable_ingest_v1: bool,
-    enable_ingest_v2: bool,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     let ingest_router = ingest_router.into();
     let max_body_size = node_config.ingest_api_config.max_body_size;
@@ -75,21 +70,15 @@ pub fn elastic_api_handlers(
         .or(es_compat_nodes_handler(node_config.clone()))
         .or(es_compat_search_handler(search_service.clone()))
         .or(es_compat_bulk_handler(
-            ingest_service.clone(),
             ingest_router.clone(),
             max_body_size,
             max_decompressed_body_size,
-            enable_ingest_v1,
-            enable_ingest_v2,
         ))
         .boxed()
         .or(es_compat_index_bulk_handler(
-            ingest_service,
             ingest_router,
             max_body_size,
             max_decompressed_body_size,
-            enable_ingest_v1,
-            enable_ingest_v2,
         ))
         .or(es_compat_index_search_handler(search_service.clone()))
         .or(es_compat_index_count_handler(search_service.clone()))
@@ -171,7 +160,6 @@ mod tests {
     use quickwit_cluster::{ChitchatTransport, Cluster, create_cluster_for_test};
     use quickwit_config::NodeConfig;
     use quickwit_index_management::IndexService;
-    use quickwit_ingest::{IngestApiService, IngestServiceClient};
     use quickwit_metastore::metastore_for_test;
     use quickwit_proto::ingest::router::IngestRouterServiceClient;
     use quickwit_proto::metastore::MetastoreServiceClient;
@@ -185,12 +173,6 @@ mod tests {
     use crate::BuildInfo;
     use crate::elasticsearch_api::rest_handler::es_compat_cluster_info_handler;
     use crate::rest::recover_fn;
-
-    fn ingest_service_client() -> IngestServiceClient {
-        let universe = quickwit_actors::Universe::new();
-        let (ingest_service_mailbox, _) = universe.create_test_mailbox::<IngestApiService>();
-        IngestServiceClient::from_mailbox(ingest_service_mailbox)
-    }
 
     pub async fn mock_cluster() -> Cluster {
         let transport = ChitchatTransport::default();
@@ -223,12 +205,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index":"index-1"}
@@ -288,12 +267,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index":"index-1"}
@@ -338,12 +314,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index":"index-1"
@@ -377,12 +350,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index":"index-1"}
@@ -416,12 +386,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index":"index-1"}
@@ -454,12 +421,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {}
@@ -503,12 +467,9 @@ mod tests {
             mock_cluster().await,
             config,
             Arc::new(mock_search_service),
-            ingest_service_client(),
             ingest_router,
             MetastoreServiceClient::mocked(),
             index_service,
-            true,
-            false,
         );
         let msearch_payload = r#"
             {"index": ["index-1", "index-2"]}

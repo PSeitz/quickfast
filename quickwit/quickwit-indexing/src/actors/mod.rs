@@ -39,7 +39,6 @@ pub use merge_scheduler_service::{MergePermit, MergeSchedulerService, schedule_m
 pub use merge_split_downloader::MergeSplitDownloader;
 pub use packager::{Packager, create_packaged_split};
 pub use publisher::{Publisher, PublisherCounters, PublisherType};
-pub use quickwit_proto::indexing::IndexingError;
 pub use sequencer::Sequencer;
 pub(crate) use uploader::acquire_indexing_upload_permit;
 pub use uploader::{

@@ -20,34 +20,24 @@ use std::num::NonZeroUsize;
 use std::str::FromStr;
 
 use anyhow::ensure;
-use bytes::Bytes;
 use quickwit_common::is_false;
 use quickwit_common::uri::Uri;
 use quickwit_proto::metastore::SourceType;
 use quickwit_proto::types::SourceId;
-use regex::Regex;
-use serde::de::Error;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 // For backward compatibility.
 use serialize::VersionedSourceConfig;
 pub use serialize::{load_source_config_from_user_config, load_source_config_update};
 use siphasher::sip::SipHasher;
 
-use crate::{disable_ingest_v1, enable_ingest_v2};
-
 /// Reserved source ID for the `quickwit index ingest` CLI command.
 pub const CLI_SOURCE_ID: &str = "_ingest-cli-source";
 
-/// Reserved source ID used for Quickwit ingest API.
-pub const INGEST_API_SOURCE_ID: &str = "_ingest-api-source";
-
 /// Reserved source ID used for native Quickwit ingest.
-/// (this is for ingest v2)
 pub const INGEST_V2_SOURCE_ID: &str = "_ingest-source";
 
-pub const RESERVED_SOURCE_IDS: &[&str] =
-    &[CLI_SOURCE_ID, INGEST_API_SOURCE_ID, INGEST_V2_SOURCE_ID];
+pub const RESERVED_SOURCE_IDS: &[&str] = &[CLI_SOURCE_ID, INGEST_V2_SOURCE_ID];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(into = "VersionedSourceConfig")]
@@ -92,13 +82,9 @@ impl SourceConfig {
             SourceParams::File(params) => serde_json::to_value(params),
             SourceParams::PubSub(params) => serde_json::to_value(params),
             SourceParams::Ingest => serde_json::to_value(()),
-            SourceParams::IngestApi => serde_json::to_value(()),
             SourceParams::IngestCli => serde_json::to_value(()),
             SourceParams::Kafka(params) => serde_json::to_value(params),
-            SourceParams::Kinesis(params) => serde_json::to_value(params),
-            SourceParams::Pulsar(params) => serde_json::to_value(params),
             SourceParams::Stdin => serde_json::to_value(()),
-            SourceParams::Vec(params) => serde_json::to_value(params),
             SourceParams::Void(params) => serde_json::to_value(params),
         }
         .expect("`SourceParams` should be JSON serializable")
@@ -116,25 +102,13 @@ impl SourceConfig {
         }
     }
 
-    /// Creates a native Quickwit ingest source. The ingest source ingests data from an ingester.
+    /// Creates a native Quickwit ingest source.
     pub fn ingest_v2() -> Self {
         Self {
             source_id: INGEST_V2_SOURCE_ID.to_string(),
             num_pipelines: NonZeroUsize::MIN,
-            enabled: enable_ingest_v2(),
+            enabled: true,
             source_params: SourceParams::Ingest,
-            transform_config: None,
-            input_format: SourceInputFormat::Json,
-        }
-    }
-
-    /// Creates the default ingest-api source config.
-    pub fn ingest_api_default() -> Self {
-        Self {
-            source_id: INGEST_API_SOURCE_ID.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
-            enabled: !disable_ingest_v1(),
-            source_params: SourceParams::IngestApi,
             transform_config: None,
             input_format: SourceInputFormat::Json,
         }
@@ -233,17 +207,12 @@ pub enum SourceParams {
     #[schema(value_type = FileSourceParamsForSerde)]
     File(FileSourceParams),
     Ingest,
-    #[serde(rename = "ingest-api")]
-    IngestApi,
     #[serde(rename = "ingest-cli")]
     IngestCli,
     Kafka(KafkaSourceParams),
-    Kinesis(KinesisSourceParams),
     #[serde(rename = "pubsub")]
     PubSub(PubSubSourceParams),
-    Pulsar(PulsarSourceParams),
     Stdin,
-    Vec(VecSourceParams),
     Void(VoidSourceParams),
 }
 
@@ -268,14 +237,10 @@ impl SourceParams {
         match self {
             SourceParams::File(_) => SourceType::File,
             SourceParams::Ingest => SourceType::IngestV2,
-            SourceParams::IngestApi => SourceType::IngestV1,
             SourceParams::IngestCli => SourceType::Cli,
             SourceParams::Kafka(_) => SourceType::Kafka,
-            SourceParams::Kinesis(_) => SourceType::Kinesis,
             SourceParams::PubSub(_) => SourceType::PubSub,
-            SourceParams::Pulsar(_) => SourceType::Pulsar,
             SourceParams::Stdin => SourceType::Stdin,
-            SourceParams::Vec(_) => SourceType::Vec,
             SourceParams::Void(_) => SourceType::Void,
         }
     }
@@ -289,13 +254,7 @@ impl SourceParams {
             (SourceParams::Kafka(current), SourceParams::Kafka(new)) => {
                 current.validate_update(new)
             }
-            (SourceParams::Kinesis(current), SourceParams::Kinesis(new)) => {
-                current.validate_update(new)
-            }
             (SourceParams::PubSub(current), SourceParams::PubSub(new)) => {
-                current.validate_update(new)
-            }
-            (SourceParams::Pulsar(current), SourceParams::Pulsar(new)) => {
                 current.validate_update(new)
             }
             (current, new) if current.source_type() != new.source_type() => Err(anyhow::anyhow!(
@@ -488,148 +447,8 @@ impl PubSubSourceParams {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RegionOrEndpoint {
-    Region(String),
-    Endpoint(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(try_from = "KinesisSourceParamsInner")]
-pub struct KinesisSourceParams {
-    pub stream_name: String,
-    #[serde(flatten)]
-    pub region_or_endpoint: Option<RegionOrEndpoint>,
-    /// When backfill mode is enabled, the source exits after reaching the end of the stream.
-    #[serde(skip_serializing_if = "is_false")]
-    pub enable_backfill_mode: bool,
-}
-
-impl KinesisSourceParams {
-    fn validate_update(&self, other: &Self) -> anyhow::Result<()> {
-        // Changing the stream would likely mess up the checkpoints because the
-        // Kinesis shard IDs are used as metastore checkpoint PartitionId, and
-        // there uniqueness is only guaranteed within a stream.
-        ensure!(
-            self.stream_name == other.stream_name,
-            "Kinesis stream_name cannot be updated"
-        );
-        ensure!(
-            self.region_or_endpoint == other.region_or_endpoint,
-            "Kinesis region or endpoint cannot be updated"
-        );
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct KinesisSourceParamsInner {
-    pub stream_name: String,
-    pub region: Option<String>,
-    pub endpoint: Option<String>,
-    #[serde(default)]
-    pub enable_backfill_mode: bool,
-}
-
-impl TryFrom<KinesisSourceParamsInner> for KinesisSourceParams {
-    type Error = &'static str;
-
-    fn try_from(value: KinesisSourceParamsInner) -> Result<Self, Self::Error> {
-        if value.region.is_some() && value.endpoint.is_some() {
-            return Err("Kinesis source parameters `region` and `endpoint` are mutually exclusive");
-        }
-        let region = value.region.map(RegionOrEndpoint::Region);
-        let endpoint = value.endpoint.map(RegionOrEndpoint::Endpoint);
-        let region_or_endpoint = region.or(endpoint);
-
-        Ok(KinesisSourceParams {
-            stream_name: value.stream_name,
-            region_or_endpoint,
-            enable_backfill_mode: value.enable_backfill_mode,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct VecSourceParams {
-    #[schema(value_type = Vec<String>)]
-    pub docs: Vec<Bytes>,
-    pub batch_num_docs: usize,
-    #[serde(default)]
-    pub partition: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VoidSourceParams;
-
-#[derive(
-    Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize, utoipa::ToSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct PulsarSourceParams {
-    /// List of the topics that the source consumes.
-    pub topics: Vec<String>,
-    #[serde(deserialize_with = "pulsar_uri")]
-    /// The connection URI for pulsar.
-    pub address: String,
-    #[schema(default = "quickwit")]
-    #[serde(default = "default_consumer_name")]
-    /// The name to register with the pulsar source.
-    pub consumer_name: String,
-    // Serde yaml has some specific behaviour when deserializing
-    // enums (see https://github.com/dtolnay/serde-yaml/issues/342)
-    // and requires explicitly stating `default` in order to make the parameter
-    // optional on the yaml config.
-    #[serde(default, with = "serde_yaml::with::singleton_map")]
-    /// Authentication for pulsar.
-    pub authentication: Option<PulsarSourceAuth>,
-}
-
-impl PulsarSourceParams {
-    fn validate_update(&self, _other: &Self) -> anyhow::Result<()> {
-        // In the Pulsar source, we use use combinations of the topic+partition
-        // (generated by the Pulsar client library) as metastore checkpoint
-        // PartitionId, and those are "guaranteed" to be unique across topics.
-        Ok(())
-    }
-}
-
-#[derive(
-    Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize, utoipa::ToSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum PulsarSourceAuth {
-    Token(String),
-    Oauth2 {
-        issuer_url: String,
-        credentials_url: String,
-        audience: Option<String>,
-        scope: Option<String>,
-    },
-}
-
-// Deserializing a string into an pulsar uri.
-fn pulsar_uri<'de, D>(deserializer: D) -> Result<String, D::Error>
-where D: Deserializer<'de> {
-    let uri: String = Deserialize::deserialize(deserializer)?;
-    let re: Regex = Regex::new(r"pulsar(\+ssl)?://.*").expect("regular expression should compile");
-
-    if !re.is_match(uri.as_str()) {
-        return Err(Error::custom(format!(
-            "invalid Pulsar uri provided, must be in the format of `pulsar://host:port/path`. \
-             got: `{uri}`"
-        )));
-    }
-
-    Ok(uri)
-}
-
-fn default_consumer_name() -> String {
-    "quickwit".to_string()
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -733,8 +552,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::source_config::RegionOrEndpoint;
-    use crate::{ConfigFormat, FileSourceParams, KinesisSourceParams};
+    use crate::{ConfigFormat, FileSourceParams};
 
     fn get_source_config_filepath(source_config_filename: &str) -> String {
         format!(
@@ -841,33 +659,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_kinesis_source_config() {
-        let source_config_filepath = get_source_config_filepath("kinesis-source.yaml");
-        let file_content = std::fs::read_to_string(&source_config_filepath).unwrap();
-        let source_config_uri = Uri::from_str(&source_config_filepath).unwrap();
-        let config_format = ConfigFormat::sniff_from_uri(&source_config_uri).unwrap();
-        let source_config =
-            load_source_config_from_user_config(config_format, file_content.as_bytes()).unwrap();
-        let expected_source_config = SourceConfig {
-            source_id: "hdfs-logs-kinesis-source".to_string(),
-            num_pipelines: NonZeroUsize::MIN,
-            enabled: true,
-            source_params: SourceParams::Kinesis(KinesisSourceParams {
-                stream_name: "emr-cluster-logs".to_string(),
-                region_or_endpoint: None,
-                enable_backfill_mode: false,
-            }),
-            transform_config: Some(TransformConfig {
-                vrl_script: ".message = downcase(string!(.message))".to_string(),
-                timezone: "local".to_string(),
-            }),
-            input_format: SourceInputFormat::Json,
-        };
-        assert_eq!(source_config, expected_source_config);
-        assert_eq!(source_config.num_pipelines.get(), 1);
-    }
-
-    #[tokio::test]
     async fn test_load_invalid_source_config() {
         {
             let content = r#"
@@ -955,26 +746,6 @@ mod tests {
                 load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
                     .unwrap();
             assert_eq!(source_config.num_pipelines.get(), 3);
-        }
-        {
-            let content = r#"
-            {
-                "version": "0.7",
-                "source_id": "hdfs-logs-pulsar-source",
-                "desired_num_pipelines": 3,
-                "max_num_pipelines_per_indexer": 3,
-                "source_type": "pulsar",
-                "params": {
-                    "topics": ["my-topic"],
-                    "address": "http://localhost:6650"
-                }
-            }
-            "#;
-            load_source_config_from_user_config(ConfigFormat::Json, content.as_bytes())
-                .unwrap_err();
-            // TODO: uncomment asserts once distributed indexing is activated for pulsar.
-            // assert_eq!(source_config.num_pipelines(), 3);
-            // assert_eq!(source_config.max_num_pipelines_per_indexer(), 3);
         }
     }
 
@@ -1094,283 +865,6 @@ mod tests {
             let error = serde_json::from_str::<FileSourceParams>(json).unwrap_err();
             assert!(error.to_string().contains("missing field `type`"));
         }
-    }
-
-    #[test]
-    fn test_kinesis_source_params_serialization() {
-        {
-            let params = KinesisSourceParams {
-                stream_name: "my-stream".to_string(),
-                region_or_endpoint: None,
-                enable_backfill_mode: false,
-            };
-            let params_yaml = serde_yaml::to_string(&params).unwrap();
-
-            assert_eq!(
-                serde_yaml::from_str::<KinesisSourceParams>(&params_yaml).unwrap(),
-                params,
-            )
-        }
-        {
-            let params = KinesisSourceParams {
-                stream_name: "my-stream".to_string(),
-                region_or_endpoint: Some(RegionOrEndpoint::Region("us-west-1".to_string())),
-                enable_backfill_mode: false,
-            };
-            let params_yaml = serde_yaml::to_string(&params).unwrap();
-
-            assert_eq!(
-                serde_yaml::from_str::<KinesisSourceParams>(&params_yaml).unwrap(),
-                params,
-            )
-        }
-        {
-            let params = KinesisSourceParams {
-                stream_name: "my-stream".to_string(),
-                region_or_endpoint: Some(RegionOrEndpoint::Endpoint(
-                    "https://localhost:4566".to_string(),
-                )),
-                enable_backfill_mode: false,
-            };
-            let params_yaml = serde_yaml::to_string(&params).unwrap();
-
-            assert_eq!(
-                ConfigFormat::Yaml
-                    .parse::<KinesisSourceParams>(params_yaml.as_bytes())
-                    .unwrap(),
-                params,
-            )
-        }
-    }
-
-    #[test]
-    fn test_kinesis_source_params_deserialization() {
-        {
-            let yaml = r#"
-                    stream_name: my-stream
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<KinesisSourceParams>(yaml).unwrap(),
-                KinesisSourceParams {
-                    stream_name: "my-stream".to_string(),
-                    region_or_endpoint: None,
-                    enable_backfill_mode: false,
-                }
-            );
-        }
-        {
-            let yaml = r#"
-                    stream_name: my-stream
-                    region: us-west-1
-                    enable_backfill_mode: true
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<KinesisSourceParams>(yaml).unwrap(),
-                KinesisSourceParams {
-                    stream_name: "my-stream".to_string(),
-                    region_or_endpoint: Some(RegionOrEndpoint::Region("us-west-1".to_string())),
-                    enable_backfill_mode: true,
-                }
-            );
-        }
-        {
-            let yaml = r#"
-                    stream_name: my-stream
-                    region: us-west-1
-                    endpoint: https://localhost:4566
-                "#;
-            let error = serde_yaml::from_str::<KinesisSourceParams>(yaml).unwrap_err();
-            assert!(error.to_string().starts_with("Kinesis source parameters "));
-        }
-    }
-
-    #[test]
-    fn test_pulsar_source_params_deserialization() {
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://localhost:6560
-                    consumer_name: my-pulsar-consumer
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://localhost:6560".to_string(),
-                    consumer_name: "my-pulsar-consumer".to_string(),
-                    authentication: None,
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://localhost:6560
-                    consumer_name: my-pulsar-consumer
-                    authentication:
-                        token: my-token
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://localhost:6560".to_string(),
-                    consumer_name: "my-pulsar-consumer".to_string(),
-                    authentication: Some(PulsarSourceAuth::Token("my-token".to_string())),
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://localhost:6560
-                    consumer_name: my-pulsar-consumer
-                    authentication:
-                        oauth2:
-                            issuer_url: https://my-issuer:9000/path
-                            credentials_url: https://my-credentials.com/path
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://localhost:6560".to_string(),
-                    consumer_name: "my-pulsar-consumer".to_string(),
-                    authentication: Some(PulsarSourceAuth::Oauth2 {
-                        issuer_url: "https://my-issuer:9000/path".to_string(),
-                        credentials_url: "https://my-credentials.com/path".to_string(),
-                        audience: None,
-                        scope: None,
-                    }),
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://localhost:6560
-                    consumer_name: my-pulsar-consumer
-                    authentication:
-                        oauth2:
-                            issuer_url: https://my-issuer:9000/path
-                            credentials_url: https://my-credentials.com/path
-                            audience: my-audience
-                            scope: "read+write"
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://localhost:6560".to_string(),
-                    consumer_name: "my-pulsar-consumer".to_string(),
-                    authentication: Some(PulsarSourceAuth::Oauth2 {
-                        issuer_url: "https://my-issuer:9000/path".to_string(),
-                        credentials_url: "https://my-credentials.com/path".to_string(),
-                        audience: Some("my-audience".to_string()),
-                        scope: Some("read+write".to_string()),
-                    }),
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                "#;
-            serde_yaml::from_str::<PulsarSourceParams>(yaml)
-                .expect_err("Parameters should error on missing address");
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://localhost:6560
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://localhost:6560".to_string(),
-                    consumer_name: default_consumer_name(),
-                    authentication: None,
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: invalid-address
-                "#;
-            serde_yaml::from_str::<PulsarSourceParams>(yaml)
-                .expect_err("Pulsar config should reject invalid address");
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://some-host:80/valid-path
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://some-host:80/valid-path".to_string(),
-                    consumer_name: default_consumer_name(),
-                    authentication: None,
-                }
-            );
-        }
-
-        {
-            let yaml = r#"
-                    topics:
-                        - my-topic
-                    address: pulsar://2345:0425:2CA1:0000:0000:0567:5673:23b5:80/valid-path
-                "#;
-            assert_eq!(
-                serde_yaml::from_str::<PulsarSourceParams>(yaml).unwrap(),
-                PulsarSourceParams {
-                    topics: vec!["my-topic".to_string()],
-                    address: "pulsar://2345:0425:2CA1:0000:0000:0567:5673:23b5:80/valid-path"
-                        .to_string(),
-                    consumer_name: default_consumer_name(),
-                    authentication: None,
-                }
-            );
-        }
-    }
-
-    #[cfg(feature = "vrl")]
-    #[tokio::test]
-    async fn test_load_ingest_api_source_config() {
-        let source_config_filepath = get_source_config_filepath("ingest-api-source.json");
-        let file_content = std::fs::read(source_config_filepath).unwrap();
-        let source_config: SourceConfig = ConfigFormat::Json.parse(&file_content).unwrap();
-        let expected_source_config = SourceConfig {
-            source_id: INGEST_API_SOURCE_ID.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
-            enabled: true,
-            source_params: SourceParams::IngestApi,
-            transform_config: Some(TransformConfig {
-                vrl_script: ".message = downcase(string!(.message))".to_string(),
-                timezone: default_timezone(),
-            }),
-            input_format: SourceInputFormat::Json,
-        };
-        assert_eq!(source_config, expected_source_config);
-        assert_eq!(source_config.num_pipelines.get(), 1);
     }
 
     #[test]
@@ -1553,11 +1047,7 @@ mod tests {
             // the source type cannot be updated
             let mut existing_source_config =
                 load_source_config_from_user_config(config_format, &file_content).unwrap();
-            existing_source_config.source_params = SourceParams::Kinesis(KinesisSourceParams {
-                stream_name: "my-stream".to_string(),
-                region_or_endpoint: None,
-                enable_backfill_mode: false,
-            });
+            existing_source_config.source_params = SourceParams::void();
             load_source_config_update(config_format, &file_content, &existing_source_config)
                 .unwrap_err();
         }

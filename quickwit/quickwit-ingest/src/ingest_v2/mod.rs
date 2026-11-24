@@ -13,9 +13,6 @@
 // limitations under the License.
 
 mod doc_mapper;
-mod fetch;
-pub(crate) mod metrics;
-mod mrecord;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -24,57 +21,12 @@ use std::ops::{Add, AddAssign};
 
 use bytes::buf::Writer;
 use bytes::{BufMut, BytesMut};
-use quickwit_cluster::GenerationId;
-use quickwit_common::tower::Pool;
-use quickwit_proto::ingest::ingester::{IngesterServiceClient, IngesterStatus};
 use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
 use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
-use quickwit_proto::types::{
-    AvailabilityZone, DocUid, DocUidGenerator, IndexId, IndexUid, NodeId, SourceId, SubrequestId,
-};
+use quickwit_proto::types::{DocUid, DocUidGenerator, IndexId, SubrequestId};
 use serde::Serialize;
 
 pub(crate) use self::doc_mapper::{is_document_validation_enabled, validate_doc_batch_impl};
-pub use self::fetch::{FetchStreamError, MultiFetchStream};
-pub use self::mrecord::{MRecord, decoded_mrecords};
-
-/// An ingester as represented in the pool, bundling the gRPC client with node metadata.
-#[derive(Debug, Clone)]
-pub struct IngesterPoolEntry {
-    pub client: IngesterServiceClient,
-    pub status: IngesterStatus,
-    pub availability_zone: Option<AvailabilityZone>,
-    pub generation_id: GenerationId,
-}
-
-impl IngesterPoolEntry {
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn ready_with_client(client: IngesterServiceClient) -> Self {
-        IngesterPoolEntry {
-            client,
-            status: IngesterStatus::Ready,
-            availability_zone: None,
-            generation_id: GenerationId::from(1u64),
-        }
-    }
-
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn mocked_ingester() -> Self {
-        IngesterPoolEntry {
-            client: IngesterServiceClient::mocked(),
-            status: IngesterStatus::Ready,
-            availability_zone: None,
-            generation_id: GenerationId::from(1u64),
-        }
-    }
-}
-
-pub type IngesterPool = Pool<NodeId, IngesterPoolEntry>;
-
-/// Identifies an ingester client, typically a source, for logging and debugging purposes.
-pub type ClientId = String;
-
-pub type OpenShardCounts = Vec<(IndexUid, SourceId, usize)>;
 
 /// Helper struct to build a [`DocBatchV2`]`.
 #[derive(Debug, Default)]

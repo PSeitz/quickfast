@@ -463,32 +463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-sdk-kinesis"
-version = "1.127.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56e3ec7e2b664265dbe9f373a80dd4b99f7936f6fe466f26e1963391be9a34b6"
-dependencies = [
- "arc-swap",
- "aws-credential-types",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-eventstream",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-observability",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-schema",
- "aws-smithy-types",
- "aws-types",
- "bytes",
- "fastrand",
- "http 1.5.0",
- "regex-lite",
- "tracing",
-]
-
-[[package]]
 name = "aws-sdk-lambda"
 version = "1.153.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5060,18 +5034,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mrecordlog"
-version = "0.5.0"
-source = "git+https://github.com/quickwit-oss/mrecordlog?rev=3b3562ef#3b3562efea468a3a72a244b16d3c555db0ddc95b"
-dependencies = [
- "bytes",
- "crc32fast",
- "serde",
- "thiserror 2.0.21",
- "tracing",
-]
-
-[[package]]
 name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6846,7 +6808,6 @@ version = "0.9.3"
 dependencies = [
  "aws-config",
  "aws-runtime",
- "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-sdk-sqs",
  "aws-smithy-async",
@@ -7243,19 +7204,16 @@ dependencies = [
  "bytes",
  "bytesize",
  "crc32fast",
- "criterion",
  "fail",
  "futures",
  "http 1.5.0",
  "itertools 0.15.0",
  "memchr",
  "mockall",
- "mrecordlog",
  "proptest",
  "prost 0.14.4",
  "quickwit-actors",
  "quickwit-cluster",
- "quickwit-codegen",
  "quickwit-common",
  "quickwit-config",
  "quickwit-doc-mapper",
@@ -7618,7 +7576,6 @@ dependencies = [
  "quickwit-common",
  "quickwit-config",
  "quickwit-indexing",
- "quickwit-ingest",
  "quickwit-metastore",
  "quickwit-proto",
  "quickwit-serve",

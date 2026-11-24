@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::net::SocketAddr;
+#[cfg(any(test, feature = "testsuite"))]
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,22 +28,21 @@ use chitchat::{
     spawn_chitchat,
 };
 use itertools::Itertools;
-use quickwit_proto::indexing::{IndexingPipelineId, IndexingTask, PipelineMetrics};
-use quickwit_proto::types::{NodeId, PipelineUid, ShardId};
+use quickwit_proto::types::NodeId;
 use quickwit_transport::ChannelFactory;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock, mpsc, watch};
 #[cfg(any(test, feature = "testsuite"))]
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::change::{ClusterChange, compute_cluster_change_events};
 use crate::grpc_gossip::spawn_catchup_callback_task;
 use crate::member::{
     AVAILABILITY_ZONE_KEY, ClusterMember, ENABLED_SERVICES_KEY, GRPC_ADVERTISE_ADDR_KEY,
-    NodeStateExt, PIPELINE_METRICS_PREFIX, READINESS_KEY, READINESS_VALUE_NOT_READY,
-    READINESS_VALUE_READY, STANDALONE_COMPACTORS_KEY,
+    NodeStateExt, READINESS_KEY, READINESS_VALUE_NOT_READY, READINESS_VALUE_READY,
+    STANDALONE_COMPACTORS_KEY,
 };
 use crate::metrics::spawn_metrics_task;
 use crate::{ClusterChangeStream, ClusterNode};
@@ -52,10 +52,6 @@ const MARKED_FOR_DELETION_GRACE_PERIOD: Duration = if cfg!(any(test, feature = "
 } else {
     Duration::from_mins(15)
 };
-
-// An indexing task key is formatted as
-// `{INDEXING_TASK_PREFIX}{PIPELINE_ULID}`.
-const INDEXING_TASK_PREFIX: &str = "indexer.task:";
 
 #[derive(Clone)]
 pub struct Cluster {
@@ -493,45 +489,6 @@ impl Cluster {
         self.inner.read().await.chitchat_handle.initiate_shutdown()
     }
 
-    /// This exposes in chitchat some metrics about the CPU usage of cooperative pipelines.
-    /// The metrics are exposed as follows:
-    /// Key:        pipeline_metrics:<index_uid>:<source_id>
-    /// Value:      179m,76MB/s
-    pub async fn update_self_node_pipeline_metrics(
-        &self,
-        pipeline_metrics: &HashMap<&IndexingPipelineId, PipelineMetrics>,
-    ) {
-        let chitchat = self.chitchat().await;
-        let mut chitchat_guard = chitchat.lock().await;
-        let node_state = chitchat_guard.self_node_state();
-        let mut current_metrics_keys: HashSet<String> = node_state
-            .iter_prefix(PIPELINE_METRICS_PREFIX)
-            .map(|(key, _)| key.to_string())
-            .collect();
-        for (pipeline_id, metrics) in pipeline_metrics {
-            let key = format!("{PIPELINE_METRICS_PREFIX}{pipeline_id}");
-            current_metrics_keys.remove(&key);
-            node_state.set(key, metrics.to_string());
-        }
-        for obsolete_task_key in current_metrics_keys {
-            node_state.delete(&obsolete_task_key);
-        }
-    }
-
-    /// Updates indexing tasks in chitchat state.
-    /// Tasks are grouped by (index_id, source_id), each group is stored in a key as follows:
-    /// - key: `{INDEXING_TASK_PREFIX}{index_id}{INDEXING_TASK_SEPARATOR}{source_id}`
-    /// - value: Number of indexing tasks in the group.
-    ///
-    /// Keys present in chitchat state but not in the given `indexing_tasks` are marked for
-    /// deletion.
-    pub async fn update_self_node_indexing_tasks(&self, indexing_tasks: &[IndexingTask]) {
-        let chitchat = self.chitchat().await;
-        let mut chitchat_guard = chitchat.lock().await;
-        let node_state = chitchat_guard.self_node_state();
-        set_indexing_tasks_in_node_state(indexing_tasks, node_state);
-    }
-
     pub async fn chitchat(&self) -> Arc<Mutex<Chitchat>> {
         self.inner.read().await.chitchat_handle.chitchat()
     }
@@ -545,87 +502,6 @@ impl Cluster {
             .chitchat_handle
             .termination_watcher()
     }
-}
-
-/// Parses indexing tasks from the chitchat node state.
-pub fn parse_indexing_tasks(node_state: &NodeState) -> Vec<IndexingTask> {
-    node_state
-        .iter_prefix(INDEXING_TASK_PREFIX)
-        .map(|(key, versioned_value)| (key, versioned_value.value.as_str()))
-        .flat_map(|(key, value)| {
-            let indexing_task_opt = chitchat_kv_to_indexing_task(key, value);
-            if indexing_task_opt.is_none() {
-                warn!(key=%key, value=%value, "failed to parse indexing task from chitchat kv");
-            }
-            indexing_task_opt
-        })
-        .collect()
-}
-
-/// Writes the given indexing tasks in the given node state.
-///
-/// If previous indexing tasks were present in the node state but were not in the given tasks, they
-/// are marked for deletion.
-pub(crate) fn set_indexing_tasks_in_node_state(
-    indexing_tasks: &[IndexingTask],
-    node_state: &mut NodeState,
-) {
-    let mut current_indexing_tasks_keys: HashSet<String> = node_state
-        .iter_prefix(INDEXING_TASK_PREFIX)
-        .map(|(key, _)| key.to_string())
-        .collect();
-    for indexing_task in indexing_tasks {
-        let (key, value) = indexing_task_to_chitchat_kv(indexing_task);
-        current_indexing_tasks_keys.remove(&key);
-        node_state.set(key, value);
-    }
-    for obsolete_task_key in current_indexing_tasks_keys {
-        node_state.delete(&obsolete_task_key);
-    }
-}
-
-fn indexing_task_to_chitchat_kv(indexing_task: &IndexingTask) -> (String, String) {
-    let IndexingTask {
-        index_uid: _,
-        source_id,
-        shard_ids,
-        pipeline_uid: _,
-        params_fingerprint: _,
-    } = indexing_task;
-    let index_uid = indexing_task.index_uid();
-    let key = format!("{INDEXING_TASK_PREFIX}{}", indexing_task.pipeline_uid());
-    let shard_ids_str = shard_ids.iter().sorted().join(",");
-    let fingerprint = indexing_task.params_fingerprint;
-    let value = format!("{index_uid}:{source_id}:{fingerprint}:{shard_ids_str}");
-    (key, value)
-}
-
-fn parse_shard_ids_str(shard_ids_str: &str) -> Vec<ShardId> {
-    shard_ids_str
-        .split(',')
-        .filter(|shard_id_str| !shard_id_str.is_empty())
-        .map(ShardId::from)
-        .collect()
-}
-
-fn chitchat_kv_to_indexing_task(key: &str, value: &str) -> Option<IndexingTask> {
-    let pipeline_uid_str = key.strip_prefix(INDEXING_TASK_PREFIX)?;
-    let pipeline_uid = PipelineUid::from_str(pipeline_uid_str).ok()?;
-    let mut field_iterator = value.rsplitn(4, ':');
-    let shards_str = field_iterator.next()?;
-    let fingerprint_str = field_iterator.next()?;
-    let source_id = field_iterator.next()?;
-    let index_uid = field_iterator.next()?;
-    let params_fingerprint: u64 = fingerprint_str.parse().ok()?;
-    let index_uid = index_uid.parse().ok()?;
-    let shard_ids = parse_shard_ids_str(shards_str);
-    Some(IndexingTask {
-        index_uid: Some(index_uid),
-        source_id: source_id.to_string(),
-        pipeline_uid: Some(pipeline_uid),
-        shard_ids,
-        params_fingerprint,
-    })
 }
 
 async fn spawn_change_stream_task(cluster: Cluster) {
@@ -773,7 +649,6 @@ pub struct TestClusterBuilder<'a> {
 impl<'a> TestClusterBuilder<'a> {
     pub fn new(node_id: NodeId, gossip_advertise_port: u16, transport: &'a dyn Transport) -> Self {
         use quickwit_proto::indexing::PIPELINE_FULL_CAPACITY;
-        use quickwit_proto::ingest::ingester::IngesterStatus;
 
         let gossip_advertise_addr: SocketAddr = ([127, 0, 0, 1], gossip_advertise_port).into();
         Self {
@@ -786,9 +661,7 @@ impl<'a> TestClusterBuilder<'a> {
                 enabled_services: HashSet::new(),
                 gossip_advertise_addr,
                 grpc_advertise_addr: grpc_addr_from_listen_addr_for_test(gossip_advertise_addr),
-                indexing_tasks: Vec::new(),
                 indexing_cpu_capacity: PIPELINE_FULL_CAPACITY,
-                ingester_status: IngesterStatus::default(),
                 availability_zone: None,
                 enable_standalone_compactors: false,
             },
@@ -891,17 +764,12 @@ pub async fn create_cluster_for_test(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::time::Duration;
 
     use itertools::Itertools;
-    use quickwit_common::test_utils::wait_until_predicate;
     use quickwit_config::MAX_GOSSIP_PROTOCOL_VERSION;
     use quickwit_config::service::QuickwitService;
-    use quickwit_proto::indexing::IndexingTask;
-    use quickwit_proto::types::IndexUid;
-    use rand::RngExt;
 
     use super::*;
     use crate::ChitchatTransport;
@@ -1135,26 +1003,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let index_uid: IndexUid = IndexUid::for_test("index-1", 1);
-        let indexing_task1 = IndexingTask {
-            pipeline_uid: Some(PipelineUid::for_test(1u128)),
-            index_uid: Some(index_uid.clone()),
-            source_id: "source-1".to_string(),
-            shard_ids: Vec::new(),
-            params_fingerprint: 0,
-        };
-        let indexing_task2 = IndexingTask {
-            pipeline_uid: Some(PipelineUid::for_test(2u128)),
-            index_uid: Some(index_uid.clone()),
-            source_id: "source-1".to_string(),
-            shard_ids: Vec::new(),
-            params_fingerprint: 0,
-        };
         cluster2
             .set_self_key_value(GRPC_ADVERTISE_ADDR_KEY, "127.0.0.1:1001")
-            .await;
-        cluster2
-            .update_self_node_indexing_tasks(&[indexing_task1.clone(), indexing_task2.clone()])
             .await;
         cluster1
             .wait_for_ready_members(|members| members.len() == 2, Duration::from_secs(30))
@@ -1173,7 +1023,6 @@ mod tests {
             member_node_1.enabled_services,
             HashSet::from_iter([QuickwitService::Indexer])
         );
-        assert!(member_node_1.indexing_tasks.is_empty());
         assert_eq!(
             member_node_2.grpc_advertise_addr,
             ([127, 0, 0, 1], 1001).into()
@@ -1182,172 +1031,6 @@ mod tests {
             member_node_2.enabled_services,
             HashSet::from_iter([QuickwitService::Indexer, QuickwitService::Metastore].into_iter())
         );
-
-        assert_eq!(
-            &member_node_2.indexing_tasks,
-            &[indexing_task1, indexing_task2]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_chitchat_state_set_high_number_of_tasks() {
-        let transport = ChitchatTransport::default();
-        let cluster1 = create_cluster_for_test(Vec::new(), &["indexer"], &transport, true)
-            .await
-            .unwrap();
-        let cluster2 = Arc::new(
-            create_cluster_for_test(
-                vec![cluster1.gossip_listen_addr.to_string()],
-                &["indexer", "metastore"],
-                &transport,
-                true,
-            )
-            .await
-            .unwrap(),
-        );
-        let cluster3 = Arc::new(
-            create_cluster_for_test(
-                vec![cluster1.gossip_listen_addr.to_string()],
-                &["indexer", "metastore"],
-                &transport,
-                true,
-            )
-            .await
-            .unwrap(),
-        );
-        let mut random_generator = rand::rng();
-        // TODO: increase it back to 1000 when https://github.com/quickwit-oss/chitchat/issues/81 is fixed
-        let indexing_tasks = (0..500)
-            .map(|pipeline_id| {
-                let index_id = random_generator.random_range(0..=10_000);
-                let source_id = random_generator.random_range(0..=100);
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(pipeline_id as u128)),
-                    index_uid: Some(
-                        format!("index-{index_id}:11111111111111111111111111")
-                            .parse()
-                            .unwrap(),
-                    ),
-                    source_id: format!("source-{source_id}"),
-                    shard_ids: Vec::new(),
-                    params_fingerprint: 0,
-                }
-            })
-            .collect_vec();
-        cluster1
-            .update_self_node_indexing_tasks(&indexing_tasks)
-            .await;
-        for cluster in [&cluster2, &cluster3] {
-            let cluster_clone = cluster.clone();
-            let indexing_tasks_clone = indexing_tasks.clone();
-            wait_until_predicate(
-                move || {
-                    test_indexing_tasks_in_given_node(
-                        cluster_clone.clone(),
-                        cluster1.self_chitchat_id.gossip_advertise_addr,
-                        indexing_tasks_clone.clone(),
-                    )
-                },
-                Duration::from_secs(5),
-                Duration::from_millis(100),
-            )
-            .await
-            .unwrap();
-        }
-
-        // Mark tasks for deletion.
-        cluster1.update_self_node_indexing_tasks(&[]).await;
-        for cluster in [&cluster2, &cluster3] {
-            let cluster_clone = cluster.clone();
-            wait_until_predicate(
-                move || {
-                    test_indexing_tasks_in_given_node(
-                        cluster_clone.clone(),
-                        cluster1.self_chitchat_id.gossip_advertise_addr,
-                        Vec::new(),
-                    )
-                },
-                Duration::from_secs(4),
-                Duration::from_millis(500),
-            )
-            .await
-            .unwrap();
-        }
-
-        // Re-add tasks.
-        cluster1
-            .update_self_node_indexing_tasks(&indexing_tasks)
-            .await;
-        for cluster in [&cluster2, &cluster3] {
-            let cluster_clone = cluster.clone();
-            let indexing_tasks_clone = indexing_tasks.clone();
-            wait_until_predicate(
-                move || {
-                    test_indexing_tasks_in_given_node(
-                        cluster_clone.clone(),
-                        cluster1.self_chitchat_id.gossip_advertise_addr,
-                        indexing_tasks_clone.clone(),
-                    )
-                },
-                Duration::from_secs(4),
-                Duration::from_millis(500),
-            )
-            .await
-            .unwrap();
-        }
-    }
-
-    async fn test_indexing_tasks_in_given_node(
-        cluster: Arc<Cluster>,
-        gossip_advertise_addr: SocketAddr,
-        indexing_tasks: Vec<IndexingTask>,
-    ) -> bool {
-        let members = cluster.ready_members().await;
-        let node_opt = members
-            .iter()
-            .find(|member| member.gossip_advertise_addr == gossip_advertise_addr);
-        let Some(node) = node_opt else {
-            return false;
-        };
-        let node_grouped_tasks: HashMap<IndexingTask, usize> = node
-            .indexing_tasks
-            .iter()
-            .chunk_by(|task| (*task).clone())
-            .into_iter()
-            .map(|(key, group)| (key, group.count()))
-            .collect();
-        let grouped_tasks: HashMap<IndexingTask, usize> = indexing_tasks
-            .iter()
-            .chunk_by(|task| (*task).clone())
-            .into_iter()
-            .map(|(key, group)| (key, group.count()))
-            .collect();
-        node_grouped_tasks == grouped_tasks
-    }
-
-    #[tokio::test]
-    async fn test_chitchat_state_with_malformatted_indexing_task_key() {
-        let transport = ChitchatTransport::default();
-        let node = create_cluster_for_test(Vec::new(), &["indexer"], &transport, true)
-            .await
-            .unwrap();
-        {
-            let chitchat_handle = node.inner.read().await.chitchat_handle.chitchat();
-            let mut chitchat_guard = chitchat_handle.lock().await;
-            chitchat_guard.self_node_state().set(
-                format!("{INDEXING_TASK_PREFIX}01BX5ZZKBKACTAV9WEVGEMMVS0"),
-                "my_index:00000000000000000000000000:my_source:41:1,3".to_string(),
-            );
-            chitchat_guard.self_node_state().set(
-                format!("{INDEXING_TASK_PREFIX}01BX5ZZKBKACTAV9WEVGEMMVS1"),
-                "my_index-00000000000000000000000000-my_source:53:3,5".to_string(),
-            );
-        }
-        node.wait_for_ready_members(|members| members.len() == 1, Duration::from_secs(5))
-            .await
-            .unwrap();
-        let ready_members = node.ready_members().await;
-        assert_eq!(ready_members[0].indexing_tasks.len(), 1);
     }
 
     #[tokio::test]
@@ -1436,139 +1119,5 @@ mod tests {
         assert_eq!(members_b, expected_members_b);
 
         Ok(())
-    }
-
-    fn test_serialize_indexing_tasks_aux(
-        indexing_tasks: &[IndexingTask],
-        node_state: &mut NodeState,
-    ) {
-        set_indexing_tasks_in_node_state(indexing_tasks, node_state);
-        let ser_deser_indexing_tasks = parse_indexing_tasks(node_state);
-        assert_eq!(indexing_tasks, ser_deser_indexing_tasks);
-    }
-
-    #[test]
-    fn test_serialize_indexing_tasks() {
-        let mut node_state = NodeState::for_test();
-        let index_uid: IndexUid = IndexUid::for_test("test-index", 0);
-        test_serialize_indexing_tasks_aux(&[], &mut node_state);
-        test_serialize_indexing_tasks_aux(
-            &[IndexingTask {
-                pipeline_uid: Some(PipelineUid::for_test(1u128)),
-                index_uid: Some(index_uid.clone()),
-                source_id: "my-source1".to_string(),
-                shard_ids: vec![ShardId::from(1), ShardId::from(2)],
-                params_fingerprint: 0,
-            }],
-            &mut node_state,
-        );
-        // change in the set of shards
-        test_serialize_indexing_tasks_aux(
-            &[IndexingTask {
-                pipeline_uid: Some(PipelineUid::for_test(2u128)),
-                index_uid: Some(index_uid.clone()),
-                source_id: "my-source1".to_string(),
-                shard_ids: vec![ShardId::from(1), ShardId::from(2), ShardId::from(3)],
-                params_fingerprint: 0,
-            }],
-            &mut node_state,
-        );
-        test_serialize_indexing_tasks_aux(
-            &[
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(1u128)),
-                    index_uid: Some(index_uid.clone()),
-                    source_id: "my-source1".to_string(),
-                    shard_ids: vec![ShardId::from(1), ShardId::from(2)],
-                    params_fingerprint: 0,
-                },
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(2u128)),
-                    index_uid: Some(index_uid.clone()),
-                    source_id: "my-source1".to_string(),
-                    shard_ids: vec![ShardId::from(3), ShardId::from(4)],
-                    params_fingerprint: 0,
-                },
-            ],
-            &mut node_state,
-        );
-        // different index.
-        test_serialize_indexing_tasks_aux(
-            &[
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(1u128)),
-                    index_uid: Some(index_uid.clone()),
-                    source_id: "my-source1".to_string(),
-                    shard_ids: vec![ShardId::from(1), ShardId::from(2)],
-                    params_fingerprint: 0,
-                },
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(2u128)),
-                    index_uid: Some(IndexUid::for_test("test-index2", 0)),
-                    source_id: "my-source1".to_string(),
-                    shard_ids: vec![ShardId::from(3), ShardId::from(4)],
-                    params_fingerprint: 0,
-                },
-            ],
-            &mut node_state,
-        );
-        // same index, different source.
-        test_serialize_indexing_tasks_aux(
-            &[
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(1u128)),
-                    index_uid: Some(index_uid.clone()),
-                    source_id: "my-source1".to_string(),
-                    shard_ids: vec![ShardId::from(1), ShardId::from(2)],
-                    params_fingerprint: 0,
-                },
-                IndexingTask {
-                    pipeline_uid: Some(PipelineUid::for_test(2u128)),
-                    index_uid: Some(index_uid.clone()),
-                    source_id: "my-source2".to_string(),
-                    shard_ids: vec![ShardId::from(3), ShardId::from(4)],
-                    params_fingerprint: 0,
-                },
-            ],
-            &mut node_state,
-        );
-    }
-
-    #[test]
-    fn test_parse_shard_ids_str() {
-        assert!(parse_shard_ids_str("").is_empty());
-        assert!(parse_shard_ids_str(",").is_empty());
-        assert_eq!(
-            parse_shard_ids_str("00000000000000000012,"),
-            [ShardId::from(12)]
-        );
-        assert_eq!(
-            parse_shard_ids_str("00000000000000000012,00000000000000000023,"),
-            [ShardId::from(12), ShardId::from(23)]
-        );
-    }
-
-    #[test]
-    fn test_parse_chitchat_kv() {
-        assert!(
-            chitchat_kv_to_indexing_task("invalidulid", "my_index:uid:my_source:42:1,3").is_none()
-        );
-        let task = super::chitchat_kv_to_indexing_task(
-            "indexer.task:01BX5ZZKBKACTAV9WEVGEMMVS0",
-            "my_index:00000000000000000000000000:my_source:42:00000000000000000001,\
-             00000000000000000003",
-        )
-        .unwrap();
-        assert_eq!(task.params_fingerprint, 42);
-        assert_eq!(
-            task.pipeline_uid(),
-            PipelineUid::from_str("01BX5ZZKBKACTAV9WEVGEMMVS0").unwrap()
-        );
-        assert_eq!(
-            &task.index_uid().to_string(),
-            "my_index:00000000000000000000000000"
-        );
-        assert_eq!(&task.source_id, "my_source");
-        assert_eq!(&task.shard_ids, &[ShardId::from(1), ShardId::from(3)]);
     }
 }

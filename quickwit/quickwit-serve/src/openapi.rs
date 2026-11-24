@@ -29,7 +29,7 @@ use crate::elasticsearch_api::ElasticCompatibleApi;
 use crate::health_check_api::HealthCheckApi;
 use crate::index_api::IndexApi;
 use crate::indexing_api::IndexingApi;
-use crate::ingest_api::{IngestApi, IngestApiSchemas};
+use crate::ingest_api::IngestApi;
 use crate::jaeger_api::JaegerApi;
 use crate::metrics_api::MetricsApi;
 use crate::node_info_handler::NodeInfoApi;
@@ -103,7 +103,6 @@ pub fn build_docs() -> utoipa::openapi::OpenApi {
     docs_base.merge_components_and_paths(JanitorApiSchemas::openapi());
     docs_base.merge_components_and_paths(DocMapperApiSchemas::openapi());
     docs_base.merge_components_and_paths(IndexingApiSchemas::openapi());
-    docs_base.merge_components_and_paths(IngestApiSchemas::openapi());
 
     docs_base
 }

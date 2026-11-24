@@ -23,13 +23,6 @@ pub enum BulkAction {
 }
 
 impl BulkAction {
-    pub fn into_index_id(self) -> Option<IndexId> {
-        match self {
-            BulkAction::Index(meta) => meta.index_id,
-            BulkAction::Create(meta) => meta.index_id,
-        }
-    }
-
     pub fn into_meta(self) -> BulkActionMeta {
         match self {
             BulkAction::Create(meta) => meta,

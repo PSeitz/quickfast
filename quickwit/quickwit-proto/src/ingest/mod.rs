@@ -15,18 +15,14 @@
 use std::iter::zip;
 
 use bytes::Bytes;
-use bytesize::ByteSize;
 use quickwit_common::rate_limited_error;
 use quickwit_common::tower::MakeLoadShedError;
 use serde::{Deserialize, Serialize};
 
-use self::ingester::PersistFailureReason;
-use self::router::IngestFailureReason;
 use super::GrpcServiceError;
 use crate::types::{DocUid, Position, QueueId, ShardId, SourceUid, queue_id};
 use crate::{ServiceError, ServiceErrorCode};
 
-pub mod ingester;
 pub mod router;
 
 pub mod ingesthree {
@@ -198,46 +194,6 @@ impl DocBatchV2 {
     }
 }
 
-impl MRecordBatch {
-    pub fn encoded_mrecords(&self) -> impl Iterator<Item = Bytes> + '_ {
-        self.mrecord_lengths
-            .iter()
-            .scan(0, |start_offset, mrecord_length| {
-                let start = *start_offset;
-                let end = start + *mrecord_length as usize;
-                *start_offset = end;
-                Some(self.mrecord_buffer.slice(start..end))
-            })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.mrecord_lengths.is_empty()
-    }
-
-    pub fn estimate_size(&self) -> ByteSize {
-        ByteSize((self.mrecord_buffer.len() + self.mrecord_lengths.len() * 4) as u64)
-    }
-
-    pub fn num_mrecords(&self) -> usize {
-        self.mrecord_lengths.len()
-    }
-
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn for_test(mrecords: impl IntoIterator<Item = &'static str>) -> Option<Self> {
-        let mut mrecord_buffer = Vec::new();
-        let mut mrecord_lengths = Vec::new();
-
-        for mrecord in mrecords {
-            mrecord_buffer.extend(mrecord.as_bytes());
-            mrecord_lengths.push(mrecord.len() as u32);
-        }
-        Some(Self {
-            mrecord_lengths,
-            mrecord_buffer: Bytes::from(mrecord_buffer),
-        })
-    }
-}
-
 impl Shard {
     pub fn is_open(&self) -> bool {
         self.shard_state().is_open()
@@ -311,18 +267,6 @@ impl ShardIdPositions {
             let queue_id = queue_id(self.index_uid(), &self.source_id, shard_position.shard_id());
             (queue_id, shard_position.publish_position_inclusive())
         })
-    }
-}
-
-impl From<PersistFailureReason> for IngestFailureReason {
-    fn from(reason: PersistFailureReason) -> Self {
-        match reason {
-            PersistFailureReason::Unspecified => IngestFailureReason::Unspecified,
-            PersistFailureReason::NoShardsAvailable => IngestFailureReason::NoShardsAvailable,
-            PersistFailureReason::WalFull => IngestFailureReason::WalFull,
-            PersistFailureReason::Timeout => IngestFailureReason::Timeout,
-            PersistFailureReason::NodeUnavailable => IngestFailureReason::NoShardsAvailable,
-        }
     }
 }
 

@@ -19,10 +19,10 @@ use prost::Message;
 use quickwit_common::thread_pool::run_cpu_intensive;
 use quickwit_common::uri::Uri;
 use quickwit_config::{ConfigFormat, IndexConfig, load_index_config_from_user_config};
+use quickwit_ingest::JsonDocBatchV2Builder;
 use quickwit_ingest::router_client::IngestRouterClient;
-use quickwit_ingest::{CommitType, JsonDocBatchV2Builder};
 use quickwit_metrics::{counter, histogram, label_values};
-use quickwit_proto::ingest::DocBatchV2;
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
 use quickwit_proto::opentelemetry::proto::collector::logs::v1::logs_service_server::LogsService;
 use quickwit_proto::opentelemetry::proto::collector::logs::v1::{
     ExportLogsPartialSuccess, ExportLogsServiceRequest, ExportLogsServiceResponse,
@@ -305,7 +305,7 @@ impl OtlpGrpcLogsService {
             self.ingest_router.clone(),
             index_id,
             doc_batch,
-            CommitType::Auto,
+            CommitTypeV2::Auto,
         )
         .await?;
         Ok(())

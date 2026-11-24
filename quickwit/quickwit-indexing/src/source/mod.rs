@@ -236,18 +236,9 @@ pub async fn check_source_connectivity(
             }
         }
         SourceParams::Ingest
-        | SourceParams::IngestApi
         | SourceParams::IngestCli
         | SourceParams::Stdin
-        | SourceParams::Vec(_)
         | SourceParams::Void(_) => Ok(()),
-        SourceParams::Kinesis(_) | SourceParams::Pulsar(_) => {
-            bail!(
-                "source type `{}` is not supported; use Kafka, SQS, GCP PubSub, or push directly \
-                 to the ingest API",
-                source_config.source_type().as_str_name()
-            )
-        }
     }
 }
 

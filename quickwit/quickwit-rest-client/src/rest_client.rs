@@ -19,7 +19,6 @@ use bytes::Bytes;
 use quickwit_cluster::ClusterSnapshot;
 use quickwit_config::{ConfigFormat, SourceConfig};
 use quickwit_indexing::actors::IndexingServiceCounters;
-pub use quickwit_ingest::CommitType;
 use quickwit_metastore::{IndexMetadata, Split, SplitInfo};
 use quickwit_proto::ingest::Shard;
 use quickwit_serve::{
@@ -33,6 +32,15 @@ use reqwest_retry::RetryTransientMiddleware;
 use reqwest_retry::policies::ExponentialBackoff;
 use serde::Serialize;
 use serde_json::json;
+
+/// Commit mode for REST ingest requests.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CommitType {
+    #[default]
+    Auto,
+    WaitFor,
+    Force,
+}
 
 use crate::BatchLineReader;
 use crate::error::Error;
@@ -810,7 +818,6 @@ mod test {
     use http::StatusCode;
     use quickwit_config::{ConfigFormat, SourceConfig};
     use quickwit_indexing::mock_split;
-    use quickwit_ingest::CommitType;
     use quickwit_metastore::IndexMetadata;
     use quickwit_serve::{
         ListSplitsQueryParams, ListSplitsResponse, RestIngestResponse, SearchRequestQueryString,
@@ -827,7 +834,7 @@ mod test {
 
     use crate::error::Error;
     use crate::models::{IngestSource, SearchResponseRestClient};
-    use crate::rest_client::QuickwitClientBuilder;
+    use crate::rest_client::{CommitType, QuickwitClientBuilder};
     #[tokio::test]
     async fn test_client_no_server() {
         let port = quickwit_common::net::find_available_tcp_port().unwrap();
@@ -1206,7 +1213,7 @@ mod test {
         let mock_server = MockServer::start().await;
         let server_url = Url::parse(&mock_server.uri()).unwrap();
         let qw_client = QuickwitClientBuilder::new(server_url).build();
-        let source_config = SourceConfig::ingest_api_default();
+        let source_config = SourceConfig::ingest_v2();
         // POST create source with toml
         Mock::given(method("POST"))
             .and(path("/api/v1/indexes/my-index/sources"))
