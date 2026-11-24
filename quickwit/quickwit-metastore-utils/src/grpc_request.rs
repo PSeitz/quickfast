@@ -73,7 +73,6 @@ generate_req_enum!(
     ToggleSourceRequest,
     DeleteSourceRequest,
     LastDeleteOpstampRequest,
-    ResetSourceCheckpointRequest,
     DeleteQuery,
     UpdateSplitsDeleteOpstampRequest,
     ListDeleteTasksRequest,

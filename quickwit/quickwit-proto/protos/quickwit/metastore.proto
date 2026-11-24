@@ -17,24 +17,16 @@ syntax = "proto3";
 package quickwit.metastore;
 
 import "quickwit/common.proto";
-import "quickwit/ingest.proto";
 
 enum SourceType {
   SOURCE_TYPE_UNSPECIFIED = 0;
   SOURCE_TYPE_CLI = 1;
   SOURCE_TYPE_FILE = 2;
-  SOURCE_TYPE_INGEST_V1 = 4;
   SOURCE_TYPE_INGEST_V2 = 5;
   // Apache Kafka
   SOURCE_TYPE_KAFKA = 6;
-  // Amazon Kinesis
-  SOURCE_TYPE_KINESIS = 7;
-  SOURCE_TYPE_NATS = 8;
   // Google Cloud Pub/Sub
   SOURCE_TYPE_PUB_SUB = 3;
-  // Apache Pulsar
-  SOURCE_TYPE_PULSAR = 9;
-  SOURCE_TYPE_VEC = 10;
   SOURCE_TYPE_VOID = 11;
   SOURCE_TYPE_STDIN = 13;
 }
@@ -182,9 +174,6 @@ service MetastoreService {
   // Removes source.
   rpc DeleteSource(DeleteSourceRequest) returns (EmptyResponse);
 
-  // Resets source checkpoint.
-  rpc ResetSourceCheckpoint(ResetSourceCheckpointRequest) returns (EmptyResponse);
-
   // Gets last opstamp for a given `index_id`.
   rpc LastDeleteOpstamp(LastDeleteOpstampRequest) returns (LastDeleteOpstampResponse);
 
@@ -199,34 +188,6 @@ service MetastoreService {
 
   // Lists splits with `split.delete_opstamp` < `delete_opstamp` for a given `index_id`.
   rpc ListStaleSplits(ListStaleSplitsRequest) returns (ListSplitsResponse);
-
-  // Shard API
-  //
-  // Note that for the file-backed metastore implementation, the requests are not processed atomically.
-  // Indeed, each request comprises one or more subrequests that target different indexes and sources processed
-  // independently. Responses list the requests that succeeded or failed in the fields `successes` and
-  // `failures`.
-  rpc OpenShards(OpenShardsRequest) returns (OpenShardsResponse);
-
-  // Acquires a set of shards for indexing. This RPC locks the shards for publishing thanks to a publish token and only
-  // the last indexer that has acquired the shards is allowed to publish. The response returns for each subrequest the
-  // list of acquired shards along with the positions to index from.
-  //
-  // If a requested shard is missing, this method does not return an error. It should simply return the list of
-  // shards that were actually acquired.
-  //
-  // For this reason, AcquireShards.acquire_shards may return less subresponse than there was in the request.
-  // Also they may be returned in any order.
-  rpc AcquireShards(AcquireShardsRequest) returns (AcquireShardsResponse);
-
-  // Deletes a set of shards. This RPC deletes the shards from the metastore.
-  // If the shard did not exist to begin with, the operation is successful and does not return any error.
-  rpc DeleteShards(DeleteShardsRequest) returns (DeleteShardsResponse);
-
-  // Deletes outdated shards. This RPC deletes the shards from the metastore.
-  rpc PruneShards(PruneShardsRequest) returns (EmptyResponse);
-
-  rpc ListShards(ListShardsRequest) returns (ListShardsResponse);
 
   // Index Template API
   //
@@ -465,8 +426,7 @@ message PublishSplitsRequest {
   quickwit.common.IndexUid index_uid = 1;
   repeated string staged_split_ids = 2;
   repeated string replaced_split_ids = 3;
-  optional string index_checkpoint_delta_json_opt = 4;
-  optional string publish_token_opt = 5;
+  reserved 4, 5;
 }
 
 message MarkSplitsForDeletionRequest {
@@ -496,11 +456,6 @@ message ToggleSourceRequest {
 }
 
 message DeleteSourceRequest {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-}
-
-message ResetSourceCheckpointRequest {
   quickwit.common.IndexUid index_uid = 1;
   string source_id = 2;
 }
@@ -557,97 +512,6 @@ message ListDeleteTasksRequest {
 
 message ListDeleteTasksResponse {
   repeated DeleteTask delete_tasks = 1;
-}
-
-//
-// Shard API
-//
-
-message OpenShardsRequest {
-  repeated OpenShardSubrequest subrequests = 1;
-}
-
-message OpenShardSubrequest {
-  uint32 subrequest_id = 1;
-  quickwit.common.IndexUid index_uid = 2;
-  string source_id = 3;
-  quickwit.ingest.ShardId shard_id = 4;
-  string ingester_id = 5;
-  reserved 6;
-  quickwit.common.DocMappingUid doc_mapping_uid = 7;
-  optional string publish_token = 8;
-}
-
-message OpenShardsResponse {
-  repeated OpenShardSubresponse subresponses = 1;
-}
-
-message OpenShardSubresponse {
-  reserved 2, 3;
-
-  uint32 subrequest_id = 1;
-  quickwit.ingest.Shard open_shard = 4;
-}
-
-message AcquireShardsRequest {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  repeated quickwit.ingest.ShardId shard_ids = 3;
-  string publish_token = 4;
-}
-
-message AcquireShardsResponse {
-  // List of acquired shards, in no specific order.
-  repeated quickwit.ingest.Shard acquired_shards = 3;
-}
-
-message DeleteShardsRequest {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  repeated quickwit.ingest.ShardId shard_ids = 3;
-  // If false, only shards at EOF positions will be deleted.
-  bool force = 4;
-}
-
-message DeleteShardsResponse {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  // List of shard IDs that were successfully deleted.
-  repeated quickwit.ingest.ShardId successes = 3;
-  // List of shard IDs that could not be deleted because `force` was set to `false` in the request,
-  // and the shards are not at EOF, i.e., not fully indexed.
-  repeated quickwit.ingest.ShardId failures = 4;
-}
-
-message PruneShardsRequest {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  // The maximum age of the shards to keep, in seconds.
-  optional uint32 max_age_secs = 5;
-  // The maximum number of the shards to keep. Delete older shards first.
-  optional uint32 max_count = 6;
-  // The interval between two pruning operations, in seconds.
-  optional uint32 interval_secs = 7;
-}
-
-message ListShardsRequest {
-  repeated ListShardsSubrequest subrequests = 1;
-}
-
-message ListShardsSubrequest {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  optional quickwit.ingest.ShardState shard_state = 3;
-}
-
-message ListShardsResponse {
-  repeated ListShardsSubresponse subresponses = 1;
-}
-
-message ListShardsSubresponse {
-  quickwit.common.IndexUid index_uid = 1;
-  string source_id = 2;
-  repeated quickwit.ingest.Shard shards = 3;
 }
 
 //

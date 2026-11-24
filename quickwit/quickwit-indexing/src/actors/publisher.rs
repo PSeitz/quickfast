@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use fail::fail_point;
 use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
-use quickwit_proto::metastore::{
-    MetastoreError, MetastoreResult, MetastoreService, MetastoreServiceClient, PublishSplitsRequest,
-};
+use quickwit_proto::metastore::{MetastoreService, MetastoreServiceClient, PublishSplitsRequest};
 use serde::Serialize;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::actors::MergePlanner;
 use crate::metrics::record_published_split;
-use crate::models::{NewSplits, SharedPublishToken, SplitsUpdate};
+use crate::models::{NewSplits, SplitsUpdate};
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct PublisherCounters {
@@ -56,7 +52,6 @@ pub struct Publisher {
     publisher_type: PublisherType,
     metastore: MetastoreServiceClient,
     merge_planner_mailbox_opt: Option<Mailbox<MergePlanner>>,
-    publish_token: SharedPublishToken,
     counters: PublisherCounters,
 }
 
@@ -65,50 +60,14 @@ impl Publisher {
         publisher_type: PublisherType,
         metastore: MetastoreServiceClient,
         merge_planner_mailbox_opt: Option<Mailbox<MergePlanner>>,
-        publish_token: SharedPublishToken,
     ) -> Publisher {
         Publisher {
             publisher_type,
             metastore,
             merge_planner_mailbox_opt,
-            publish_token,
             counters: PublisherCounters::default(),
         }
     }
-}
-
-async fn publish_with_retry<T, F, Fut>(
-    ctx: &ActorContext<Publisher>,
-    operation_name: &str,
-    mut publish: F,
-) -> Result<(), ActorExitStatus>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = MetastoreResult<T>>,
-{
-    for retry_delay in [
-        Some(Duration::from_secs(1)),
-        Some(Duration::from_secs(3)),
-        None,
-    ] {
-        let Err(error) = ctx.protect_future(publish()).await else {
-            return Ok(());
-        };
-        let retryable = matches!(error, MetastoreError::InvalidPublishToken { .. });
-        match retry_delay {
-            Some(retry_delay) if retryable => {
-                warn!(%error, operation = operation_name, "metastore publish failed, retrying");
-                ctx.protect_future(ctx.sleep(retry_delay)).await;
-            }
-            _ => {
-                warn!(%error, operation = operation_name, retryable, "metastore publish failed, giving up after 3 tries");
-                return Err(anyhow::Error::from(error)
-                    .context(format!("failed to {operation_name}"))
-                    .into());
-            }
-        }
-    }
-    unreachable!();
 }
 
 #[async_trait]
@@ -176,22 +135,14 @@ impl Handler<SplitsUpdate> for Publisher {
             );
             return Ok(());
         };
-        publish_with_retry(ctx, "publish splits", || {
-            let metastore = self.metastore.clone();
-            let publish_splits_request = PublishSplitsRequest {
-                index_uid: Some(index_uid.clone()),
-                staged_split_ids: split_ids.clone(),
-                replaced_split_ids: replaced_split_ids.iter().map(String::from).collect(),
-                index_checkpoint_delta_json_opt: None,
-                publish_token_opt: self
-                    .publish_token
-                    .load()
-                    .as_deref()
-                    .map(|publish_token| publish_token.to_string()),
-            };
-            async move { metastore.publish_splits(publish_splits_request).await }
-        })
-        .await?;
+        let publish_splits_request = PublishSplitsRequest {
+            index_uid: Some(index_uid.clone()),
+            staged_split_ids: split_ids.clone(),
+            replaced_split_ids: replaced_split_ids.iter().map(String::from).collect(),
+        };
+        ctx.protect_future(self.metastore.publish_splits(publish_splits_request))
+            .await
+            .map_err(|error| anyhow::Error::from(error).context("failed to publish splits"))?;
         drop(guard);
 
         for split in &new_splits {
@@ -235,7 +186,7 @@ mod tests {
     use quickwit_proto::types::{IndexUid, SplitId};
 
     use super::{Publisher, PublisherType};
-    use crate::models::{NewSplits, PublishLock, SharedPublishToken, SplitsUpdate};
+    use crate::models::{NewSplits, PublishLock, SplitsUpdate};
 
     #[tokio::test]
     async fn test_publisher_publish_operation() {
@@ -249,7 +200,6 @@ mod tests {
                 req.index_uid() == &ref_index_uid_clone
                     && req.staged_split_ids[..] == ["split"]
                     && req.replaced_split_ids[..] == ["old_split"]
-                    && req.index_checkpoint_delta_json_opt.is_none()
             })
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
@@ -259,7 +209,6 @@ mod tests {
             PublisherType::MergePublisher,
             MetastoreServiceClient::from_mock(mock_metastore),
             Some(merge_planner_mailbox),
-            SharedPublishToken::default(),
         );
         let (publisher_mailbox, publisher_handle) = universe.spawn_builder().spawn(publisher);
 
@@ -295,7 +244,6 @@ mod tests {
             PublisherType::MergePublisher,
             MetastoreServiceClient::from_mock(mock_metastore),
             None,
-            SharedPublishToken::default(),
         );
         let (publisher_mailbox, publisher_handle) = universe.spawn_builder().spawn(publisher);
         let publish_lock = PublishLock::default();

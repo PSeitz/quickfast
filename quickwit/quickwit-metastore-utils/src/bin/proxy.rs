@@ -189,16 +189,6 @@ impl MetastoreService for MetastoreProxyService {
         let resp = lock.client.delete_source(request).await?;
         Ok(resp)
     }
-    /// Resets source checkpoint.
-    async fn reset_source_checkpoint(
-        &self,
-        request: tonic::Request<ResetSourceCheckpointRequest>,
-    ) -> Result<tonic::Response<SourceResponse>, tonic::Status> {
-        let mut lock = self.inner.lock().await;
-        lock.record(request.get_ref().clone()).await.unwrap();
-        let resp = lock.client.reset_source_checkpoint(request).await?;
-        Ok(resp)
-    }
     /// Gets last opstamp for a given `index_id`.
     async fn last_delete_opstamp(
         &self,

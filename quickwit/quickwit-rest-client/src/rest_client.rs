@@ -20,7 +20,6 @@ use quickwit_cluster::ClusterSnapshot;
 use quickwit_config::{ConfigFormat, SourceConfig};
 use quickwit_indexing::actors::IndexingServiceCounters;
 use quickwit_metastore::{IndexMetadata, Split, SplitInfo};
-use quickwit_proto::ingest::Shard;
 use quickwit_serve::{
     ListSplitsQueryParams, ListSplitsResponse, RestIngestResponse, SearchRequestQueryString,
 };
@@ -671,16 +670,6 @@ impl<'a> SourceClient<'a> {
         Ok(())
     }
 
-    pub async fn reset_checkpoint(&self, source_id: &str) -> Result<(), Error> {
-        let path = format!("{}/{source_id}/reset-checkpoint", self.sources_root_url());
-        let response = self
-            .transport
-            .send::<()>(Method::PUT, &path, None, None, None, self.timeout)
-            .await?;
-        response.check().await?;
-        Ok(())
-    }
-
     pub async fn list(&self) -> Result<Vec<SourceConfig>, Error> {
         let response = self
             .transport
@@ -705,16 +694,6 @@ impl<'a> SourceClient<'a> {
             .await?;
         response.check().await?;
         Ok(())
-    }
-
-    pub async fn get_shards(&self, source_id: &str) -> Result<Vec<Shard>, Error> {
-        let path = format!("{}/{source_id}/shards", self.sources_root_url());
-        let response = self
-            .transport
-            .send::<()>(Method::GET, &path, None, None, None, self.timeout)
-            .await?;
-        let source_config = response.deserialize().await?;
-        Ok(source_config)
     }
 }
 
@@ -1291,36 +1270,6 @@ mod test {
         qw_client
             .sources("my-index")
             .toggle("my-source-2", true)
-            .await
-            .unwrap_err();
-
-        // PUT reset checkpoint
-        Mock::given(method("PUT"))
-            .and(path(
-                "/api/v1/indexes/my-index/sources/my-source/reset-checkpoint",
-            ))
-            .respond_with(ResponseTemplate::new(StatusCode::OK))
-            .up_to_n_times(1)
-            .mount(&mock_server)
-            .await;
-        qw_client
-            .sources("my-index")
-            .reset_checkpoint("my-source")
-            .await
-            .unwrap();
-
-        // PUT reset checkpoint returns an error
-        Mock::given(method("PUT"))
-            .and(path(
-                "/api/v1/indexes/my-index/sources/my-source/reset-checkpoint",
-            ))
-            .respond_with(ResponseTemplate::new(StatusCode::BAD_GATEWAY))
-            .up_to_n_times(1)
-            .mount(&mock_server)
-            .await;
-        qw_client
-            .sources("my-index")
-            .reset_checkpoint("my-source")
             .await
             .unwrap_err();
 

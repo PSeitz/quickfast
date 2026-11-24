@@ -15,54 +15,45 @@
 use std::collections::HashMap;
 use std::fmt::{self, Write};
 use std::str::FromStr;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use itertools::Itertools;
 use quickwit_common::pretty::PrettySample;
 use quickwit_common::uri::Uri;
 use quickwit_common::{ServiceStream, get_bool_from_env_cached, rate_limited_error};
 use quickwit_config::{
     IndexTemplate, IndexTemplateId, PostgresMetastoreConfig, validate_index_id_pattern,
 };
-use quickwit_proto::ingest::{Shard, ShardState};
 use quickwit_proto::metastore::{
-    AcquireShardsRequest, AcquireShardsResponse, AddSourceRequest, AssignFilesForIndexing,
-    AssignFilesForIndexingResponse, CreateIndexRequest, CreateIndexResponse,
-    CreateIndexTemplateRequest, DeleteIndexRequest, DeleteIndexTemplatesRequest, DeleteQuery,
-    DeleteShardsRequest, DeleteShardsResponse, DeleteSourceRequest, DeleteSplitsRequest,
-    DeleteTask, EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest,
-    FindIndexTemplateMatchesResponse, GetClusterIdentityRequest, GetClusterIdentityResponse,
-    GetIndexTemplateRequest, GetIndexTemplateResponse, IndexMetadataFailure,
-    IndexMetadataFailureReason, IndexMetadataRequest, IndexMetadataResponse, IndexStats,
-    IndexTemplateMatch, IndexesMetadataRequest, IndexesMetadataResponse, LastDeleteOpstampRequest,
+    AddSourceRequest, AssignFilesForIndexing, AssignFilesForIndexingResponse, CreateIndexRequest,
+    CreateIndexResponse, CreateIndexTemplateRequest, DeleteIndexRequest,
+    DeleteIndexTemplatesRequest, DeleteQuery, DeleteSourceRequest, DeleteSplitsRequest, DeleteTask,
+    EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse,
+    GetClusterIdentityRequest, GetClusterIdentityResponse, GetIndexTemplateRequest,
+    GetIndexTemplateResponse, IndexMetadataFailure, IndexMetadataFailureReason,
+    IndexMetadataRequest, IndexMetadataResponse, IndexStats, IndexTemplateMatch,
+    IndexesMetadataRequest, IndexesMetadataResponse, LastDeleteOpstampRequest,
     LastDeleteOpstampResponse, ListCompletedFilesRequest, ListCompletedFilesResponse,
     ListDeleteTasksRequest, ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
     ListIndexTemplatesRequest, ListIndexTemplatesResponse, ListIndexesMetadataRequest,
-    ListIndexesMetadataResponse, ListShardsRequest, ListShardsResponse, ListShardsSubresponse,
-    ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest, MarkSplitsForDeletionRequest,
-    MetastoreError, MetastoreResult, MetastoreService, MetastoreServiceStream, OpenShardSubrequest,
-    OpenShardSubresponse, OpenShardsRequest, OpenShardsResponse, PruneShardsRequest,
-    PublishFileSplits, PublishFileSplitsResponse, PublishSplitsRequest, RegisterFileForIndexing,
-    RegisterFileForIndexingResponse, ResetSourceCheckpointRequest, SplitStats, StageSplitsRequest,
+    ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest,
+    MarkSplitsForDeletionRequest, MetastoreError, MetastoreResult, MetastoreService,
+    MetastoreServiceStream, PublishFileSplits, PublishFileSplitsResponse, PublishSplitsRequest,
+    RegisterFileForIndexing, RegisterFileForIndexingResponse, SplitStats, StageSplitsRequest,
     ToggleSourceRequest, UpdateIndexRequest, UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest,
     UpdateSplitsDeleteOpstampResponse, serde_utils,
 };
-use quickwit_proto::types::{
-    IndexId, IndexUid, Position, PublishToken, ShardId, SourceId, queue_id,
-};
-use sea_query::{Alias, Asterisk, Expr, ExprTrait, Func, PostgresQueryBuilder, Query, UnionType};
+use quickwit_proto::types::{IndexId, IndexUid};
+use sea_query::{Asterisk, PostgresQueryBuilder, Query};
 use sea_query_sqlx::SqlxBinder;
-use sqlx::{Acquire, Executor, Postgres, Transaction};
-use time::OffsetDateTime;
+use sqlx::{Acquire, Postgres, Transaction};
 use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 use super::error::convert_sqlx_err;
 use super::metrics::MetastoreKind;
 use super::migrator::Migrations;
-use super::model::{PgDeleteTask, PgIndex, PgIndexTemplate, PgShard, PgSplit, Splits};
+use super::model::{PgDeleteTask, PgIndex, PgIndexTemplate, PgSplit, Splits};
 use super::pool::TrackedPool;
 use super::split_stream::SplitStream;
 use super::utils::{
@@ -72,15 +63,10 @@ use super::{
     QW_POSTGRES_READ_ONLY_ENV_KEY, QW_POSTGRES_SKIP_DEFERRED_MIGRATIONS_ENV_KEY,
     QW_POSTGRES_SKIP_MIGRATION_LOCKING_ENV_KEY, QW_POSTGRES_SKIP_MIGRATIONS_ENV_KEY,
 };
-use crate::checkpoint::{
-    IndexCheckpointDelta, PartitionId, SourceCheckpoint, SourceCheckpointDelta,
-};
 use crate::file_backed::MutationOccurred;
-use crate::metastore::postgres::model::Shards;
 use crate::metastore::postgres::utils::split_maturity_timestamp;
 use crate::metastore::{
-    IndexesMetadataResponseExt, PublishSplitsRequestExt, STREAM_SPLITS_CHUNK_SIZE,
-    UpdateSourceRequestExt, use_shard_api,
+    IndexesMetadataResponseExt, STREAM_SPLITS_CHUNK_SIZE, UpdateSourceRequestExt,
 };
 use crate::{
     AddSourceRequestExt, CreateIndexRequestExt, IndexMetadata, IndexMetadataResponseExt,
@@ -283,102 +269,6 @@ async fn index_metadata(
             })
         })?
         .index_metadata()
-}
-
-async fn try_apply_delta_v2(
-    tx: &mut Transaction<'_, Postgres>,
-    index_uid: &IndexUid,
-    source_id: &SourceId,
-    checkpoint_delta: SourceCheckpointDelta,
-    publish_token: PublishToken,
-) -> MetastoreResult<()> {
-    let num_partitions = checkpoint_delta.num_partitions();
-    let shard_ids: Vec<String> = checkpoint_delta
-        .partitions()
-        .map(|partition_id| partition_id.to_string())
-        .collect();
-
-    let shards: Vec<(String, String, Option<String>)> = sqlx::query_as(
-        r#"
-        SELECT
-            shard_id, publish_position_inclusive, publish_token
-        FROM
-            shards
-        WHERE
-            index_uid = $1
-            AND source_id = $2
-            AND shard_id = ANY($3)
-        FOR UPDATE
-        "#,
-    )
-    .bind(index_uid)
-    .bind(source_id)
-    .bind(shard_ids)
-    .fetch_all(tx.as_mut())
-    .await?;
-
-    if shards.len() != num_partitions {
-        let queue_id = format!("{index_uid}/{source_id}"); // FIXME
-        let entity_kind = EntityKind::Shard { queue_id };
-        return Err(MetastoreError::NotFound(entity_kind));
-    }
-    let mut current_checkpoint = SourceCheckpoint::default();
-
-    for (shard_id, current_position, current_publish_token_opt) in shards {
-        let token_matches = match &current_publish_token_opt {
-            Some(current_publish_token) => *current_publish_token == *publish_token,
-            None => false,
-        };
-        if !token_matches {
-            return Err(MetastoreError::InvalidPublishToken {
-                queue_id: queue_id(index_uid, source_id, &ShardId::from(shard_id.as_str())),
-            });
-        }
-        let partition_id = PartitionId::from(shard_id);
-        let current_position = Position::from(current_position);
-        current_checkpoint.add_partition(partition_id, current_position);
-    }
-    current_checkpoint
-        .try_apply_delta(checkpoint_delta)
-        .map_err(|error| MetastoreError::InvalidArgument {
-            message: error.to_string(),
-        })?;
-
-    let mut shard_ids = Vec::with_capacity(num_partitions);
-    let mut new_positions = Vec::with_capacity(num_partitions);
-
-    for (partition_id, new_position) in current_checkpoint.iter() {
-        let shard_id = partition_id.to_string();
-        shard_ids.push(shard_id.to_string());
-        new_positions.push(new_position.to_string());
-    }
-
-    sqlx::query(
-        r#"
-            UPDATE
-                shards
-            SET
-                publish_position_inclusive = new_positions.position,
-                shard_state = CASE WHEN new_positions.position LIKE '~%' THEN 'closed' ELSE shards.shard_state END,
-                update_timestamp = $5
-            FROM
-                UNNEST($3, $4)
-                AS new_positions(shard_id, position)
-            WHERE
-                index_uid = $1
-                AND source_id = $2
-                AND shards.shard_id = new_positions.shard_id
-            "#,
-    )
-    .bind(index_uid)
-    .bind(source_id)
-    .bind(shard_ids)
-    .bind(new_positions)
-    // Use a timestamp generated by the metastore node to avoid clock drift issues
-    .bind(OffsetDateTime::now_utc())
-    .execute(tx.as_mut())
-    .await?;
-    Ok(())
 }
 
 /// This macro is used to systematically wrap the metastore
@@ -814,59 +704,17 @@ impl MetastoreService for PostgresqlMetastore {
         &self,
         request: PublishSplitsRequest,
     ) -> MetastoreResult<EmptyResponse> {
-        let checkpoint_delta_opt: Option<IndexCheckpointDelta> =
-            request.deserialize_index_checkpoint()?;
         let index_uid: IndexUid = request.index_uid().clone();
         let staged_split_ids = request.staged_split_ids;
         let replaced_split_ids = request.replaced_split_ids;
 
         run_with_tx!(self.connection_pool, tx, "publish splits", {
-            let mut index_metadata = index_metadata(tx, &index_uid.index_id, true).await?;
+            let index_metadata = index_metadata(tx, &index_uid.index_id, false).await?;
             if index_metadata.index_uid != index_uid {
                 return Err(MetastoreError::NotFound(EntityKind::Index {
                     index_id: index_uid.index_id,
                 }));
             }
-            if let Some(checkpoint_delta) = checkpoint_delta_opt {
-                let source_id = checkpoint_delta.source_id.clone();
-                let source = index_metadata.sources.get(&source_id).ok_or_else(|| {
-                    MetastoreError::NotFound(EntityKind::Source {
-                        index_id: index_uid.index_id.to_string(),
-                        source_id: source_id.to_string(),
-                    })
-                })?;
-
-                if use_shard_api(&source.source_params) {
-                    let publish_token = request.publish_token_opt.ok_or_else(|| {
-                        let message = format!(
-                            "publish token is required for publishing splits for source \
-                             `{source_id}`"
-                        );
-                        MetastoreError::InvalidArgument { message }
-                    })?;
-                    try_apply_delta_v2(
-                        tx,
-                        &index_uid,
-                        &source_id,
-                        checkpoint_delta.source_delta,
-                        publish_token.into(),
-                    )
-                    .await?;
-                } else {
-                    index_metadata
-                        .checkpoint
-                        .try_apply_delta(checkpoint_delta)
-                        .map_err(|error| {
-                            let entity = EntityKind::CheckpointDelta {
-                                index_id: index_uid.index_id.to_string(),
-                                source_id,
-                            };
-                            let message = error.to_string();
-                            MetastoreError::FailedPrecondition { entity, message }
-                        })?;
-                }
-            }
-            let index_metadata_json = serde_utils::to_json_str(&index_metadata)?;
 
             const PUBLISH_SPLITS_QUERY: &str = r#"
             -- Select the splits to update, regardless of their state.
@@ -875,34 +723,20 @@ impl MetastoreService for PostgresqlMetastore {
                 SELECT input_splits.split_id, input_splits.expected_split_state, splits.actual_split_state
                 FROM (
                     SELECT split_id, 'Staged' AS expected_split_state
-                    FROM UNNEST($3) AS staged_splits(split_id)
+                    FROM UNNEST($2) AS staged_splits(split_id)
                     UNION
                     SELECT split_id, 'Published' AS expected_split_state
-                    FROM UNNEST($4) AS published_splits(split_id)
+                    FROM UNNEST($3) AS published_splits(split_id)
                 ) input_splits
                 LEFT JOIN (
                     SELECT split_id, split_state AS actual_split_state
                     FROM splits
                     WHERE
                         index_uid = $1
-                        AND (split_id = ANY($3) OR split_id = ANY($4))
+                        AND (split_id = ANY($2) OR split_id = ANY($3))
                     FOR UPDATE
                     ) AS splits
                 USING (split_id)
-            ),
-            -- Update the index metadata with the new checkpoint.
-            updated_index_metadata AS (
-                UPDATE indexes
-                SET
-                    index_metadata_json = $2
-                WHERE
-                    index_uid = $1
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM input_splits
-                        WHERE
-                            actual_split_state != expected_split_state
-                        )
             ),
             -- Publish the staged splits and mark the published splits for deletion.
             updated_splits AS (
@@ -943,7 +777,6 @@ impl MetastoreService for PostgresqlMetastore {
             ): (i64, i64, Vec<String>, Vec<String>, Vec<String>) =
                 sqlx::query_as(PUBLISH_SPLITS_QUERY)
                     .bind(&index_uid)
-                    .bind(index_metadata_json)
                     .bind(staged_split_ids)
                     .bind(replaced_split_ids)
                     .fetch_one(tx.as_mut())
@@ -1342,26 +1175,6 @@ impl MetastoreService for PostgresqlMetastore {
         Ok(EmptyResponse {})
     }
 
-    #[instrument(name = "metastore.postgres.reset_source_checkpoint", skip(self))]
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> MetastoreResult<EmptyResponse> {
-        let index_uid: IndexUid = request.index_uid().clone();
-        run_with_tx!(self.connection_pool, tx, "reset source checkpoint", {
-            mutate_index_metadata(tx, index_uid, |index_metadata| {
-                if index_metadata.checkpoint.reset_source(&request.source_id) {
-                    Ok::<_, MetastoreError>(MutationOccurred::Yes(()))
-                } else {
-                    Ok::<_, MetastoreError>(MutationOccurred::No(()))
-                }
-            })
-            .await?;
-            Ok(())
-        })?;
-        Ok(EmptyResponse {})
-    }
-
     /// Retrieves the last delete opstamp for a given `index_id`.
     #[instrument(name = "metastore.postgres.last_delete_opstamp", skip(self))]
     async fn last_delete_opstamp(
@@ -1515,225 +1328,6 @@ impl MetastoreService for PostgresqlMetastore {
             .collect::<MetastoreResult<_>>()?;
         let response = ListSplitsResponse::try_from_splits(stale_splits)?;
         Ok(response)
-    }
-
-    // TODO: Issue a single SQL query.
-    #[instrument(name = "metastore.postgres.open_shards", skip_all, fields(num_subrequests = request.subrequests.len()))]
-    async fn open_shards(&self, request: OpenShardsRequest) -> MetastoreResult<OpenShardsResponse> {
-        let mut subresponses = Vec::with_capacity(request.subrequests.len());
-
-        for subrequest in request.subrequests {
-            let open_shard: Shard = open_or_fetch_shard(&self.connection_pool, &subrequest).await?;
-            let subresponse = OpenShardSubresponse {
-                subrequest_id: subrequest.subrequest_id,
-                open_shard: Some(open_shard),
-            };
-            subresponses.push(subresponse);
-        }
-        Ok(OpenShardsResponse { subresponses })
-    }
-
-    #[instrument(name = "metastore.postgres.acquire_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> MetastoreResult<AcquireShardsResponse> {
-        const ACQUIRE_SHARDS_QUERY: &str = include_str!("queries/shards/acquire.sql");
-
-        if request.shard_ids.is_empty() {
-            return Ok(Default::default());
-        }
-        let pg_shards: Vec<PgShard> = sqlx::query_as(ACQUIRE_SHARDS_QUERY)
-            .bind(request.index_uid())
-            .bind(&request.source_id)
-            .bind(&request.shard_ids)
-            .bind(&request.publish_token)
-            .fetch_all(&self.connection_pool)
-            .await?;
-
-        if pg_shards.len() != request.shard_ids.len() {
-            warn_on_unacquired_shards(&request, &pg_shards);
-        }
-
-        let acquired_shards = pg_shards
-            .into_iter()
-            .map(|pg_shard| pg_shard.into())
-            .collect();
-        let response = AcquireShardsResponse { acquired_shards };
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.postgres.list_shards", skip_all, fields(num_subrequests = request.subrequests.len()))]
-    async fn list_shards(&self, request: ListShardsRequest) -> MetastoreResult<ListShardsResponse> {
-        if request.subrequests.is_empty() {
-            return Ok(Default::default());
-        }
-        let mut sql_query_builder = Query::select();
-
-        for (idx, subrequest) in request.subrequests.iter().enumerate() {
-            let mut sql_subquery_builder = Query::select();
-
-            sql_subquery_builder
-                .column(Asterisk)
-                .from(Shards::Table)
-                .and_where(Expr::col(Shards::IndexUid).eq(subrequest.index_uid()))
-                .and_where(Expr::col(Shards::SourceId).eq(&subrequest.source_id));
-
-            let shard_state = subrequest.shard_state();
-
-            if shard_state != ShardState::Unspecified {
-                let shard_state_str = shard_state.as_json_str_name();
-                let shard_state_alias = Alias::new("SHARD_STATE");
-                let cast_expr = Func::cast_as(shard_state_str, shard_state_alias);
-                sql_subquery_builder.and_where(Expr::col(Shards::ShardState).eq(cast_expr));
-            }
-            if idx == 0 {
-                sql_query_builder = sql_subquery_builder;
-            } else {
-                sql_query_builder.union(UnionType::All, sql_subquery_builder);
-            }
-        }
-        let (sql_query, values) = sql_query_builder.build_sqlx(PostgresQueryBuilder);
-
-        let pg_shards: Vec<PgShard> = sqlx::query_as_with::<_, PgShard, _>(&sql_query, values)
-            .fetch_all(&self.connection_pool)
-            .await?;
-
-        let mut per_source_subresponses: HashMap<(IndexUid, SourceId), ListShardsSubresponse> =
-            request
-                .subrequests
-                .into_iter()
-                .map(|subrequest| {
-                    let index_uid = subrequest.index_uid().clone();
-                    let source_id = subrequest.source_id.clone();
-                    (
-                        (index_uid, source_id),
-                        ListShardsSubresponse {
-                            index_uid: subrequest.index_uid,
-                            source_id: subrequest.source_id,
-                            shards: Vec::new(),
-                        },
-                    )
-                })
-                .collect();
-
-        for pg_shard in pg_shards {
-            let shard: Shard = pg_shard.into();
-            let source_key = (shard.index_uid().clone(), shard.source_id.clone());
-
-            let Some(subresponse) = per_source_subresponses.get_mut(&source_key) else {
-                warn!(
-                    index_uid=%shard.index_uid(),
-                    source_id=%shard.source_id,
-                    "could not find source in subresponses: this should never happen, please report"
-                );
-                continue;
-            };
-            subresponse.shards.push(shard);
-        }
-        let subresponses = per_source_subresponses.into_values().collect();
-        let response = ListShardsResponse { subresponses };
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.postgres.delete_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> MetastoreResult<DeleteShardsResponse> {
-        const DELETE_SHARDS_QUERY: &str = include_str!("queries/shards/delete.sql");
-
-        const FIND_NOT_DELETABLE_SHARDS_QUERY: &str =
-            include_str!("queries/shards/find_not_deletable.sql");
-
-        if request.shard_ids.is_empty() {
-            return Ok(Default::default());
-        }
-        let query_result = sqlx::query(DELETE_SHARDS_QUERY)
-            .bind(request.index_uid())
-            .bind(&request.source_id)
-            .bind(&request.shard_ids)
-            .bind(request.force)
-            .execute(&self.connection_pool)
-            .await?;
-
-        // Happy path: all shards were deleted.
-        if request.force || query_result.rows_affected() == request.shard_ids.len() as u64 {
-            let response = DeleteShardsResponse {
-                index_uid: request.index_uid,
-                source_id: request.source_id,
-                successes: request.shard_ids,
-                failures: Vec::new(),
-            };
-            return Ok(response);
-        }
-        // Unhappy path: some shards were not deleted because they do not exist or are not fully
-        // indexed.
-        let not_deletable_pg_shards: Vec<PgShard> = sqlx::query_as(FIND_NOT_DELETABLE_SHARDS_QUERY)
-            .bind(request.index_uid())
-            .bind(&request.source_id)
-            .bind(&request.shard_ids)
-            .fetch_all(&self.connection_pool)
-            .await?;
-
-        if not_deletable_pg_shards.is_empty() {
-            let response = DeleteShardsResponse {
-                index_uid: request.index_uid,
-                source_id: request.source_id,
-                successes: request.shard_ids,
-                failures: Vec::new(),
-            };
-            return Ok(response);
-        }
-        let failures: Vec<ShardId> = not_deletable_pg_shards
-            .into_iter()
-            .map(|pg_shard| pg_shard.shard_id)
-            .collect();
-        warn!(
-            index_uid=%request.index_uid(),
-            source_id=%request.source_id,
-            "failed to delete shards `{}`: shards are not fully indexed",
-            failures.iter().join(", ")
-        );
-        let successes: Vec<ShardId> = request
-            .shard_ids
-            .into_iter()
-            .filter(|shard_id| !failures.contains(shard_id))
-            .collect();
-        let response = DeleteShardsResponse {
-            index_uid: request.index_uid,
-            source_id: request.source_id,
-            successes,
-            failures,
-        };
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.postgres.prune_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn prune_shards(&self, request: PruneShardsRequest) -> MetastoreResult<EmptyResponse> {
-        const PRUNE_AGE_SHARDS_QUERY: &str = include_str!("queries/shards/prune_age.sql");
-        const PRUNE_COUNT_SHARDS_QUERY: &str = include_str!("queries/shards/prune_count.sql");
-
-        if let Some(max_age_secs) = request.max_age_secs {
-            let limit_datetime =
-                OffsetDateTime::now_utc() - Duration::from_secs(max_age_secs as u64);
-            sqlx::query(PRUNE_AGE_SHARDS_QUERY)
-                .bind(request.index_uid())
-                .bind(&request.source_id)
-                .bind(limit_datetime)
-                .execute(&self.connection_pool)
-                .await?;
-        }
-
-        if let Some(max_count) = request.max_count {
-            sqlx::query(PRUNE_COUNT_SHARDS_QUERY)
-                .bind(request.index_uid())
-                .bind(&request.source_id)
-                .bind(max_count as i64)
-                .execute(&self.connection_pool)
-                .await?;
-        }
-        Ok(EmptyResponse {})
     }
 
     // Index Template API
@@ -1905,77 +1499,6 @@ impl MetastoreService for PostgresqlMetastore {
     }
 }
 
-/// Best-effort diagnostics for the acquire error path: logs the shards from `request` that were not
-/// acquired — those absent from `acquired_pg_shards` because a more recent publish token owns them,
-/// or because they no longer exist. Does not touch the database.
-fn warn_on_unacquired_shards(request: &AcquireShardsRequest, acquired_pg_shards: &[PgShard]) {
-    let not_acquired_shard_ids: Vec<&ShardId> = request
-        .shard_ids
-        .iter()
-        .filter(|shard_id| {
-            !acquired_pg_shards
-                .iter()
-                .any(|pg_shard| &pg_shard.shard_id == *shard_id)
-        })
-        .collect();
-    info!(
-        index_uid=%request.index_uid(),
-        source_id=%request.source_id,
-        shard_ids=?not_acquired_shard_ids,
-        publish_token=%request.publish_token,
-        "failed to acquire shards: held by a more recent publish token, or no longer present"
-    );
-}
-
-async fn open_or_fetch_shard<'e>(
-    executor: impl Executor<'e, Database = Postgres> + Clone,
-    subrequest: &OpenShardSubrequest,
-) -> MetastoreResult<Shard> {
-    const OPEN_SHARDS_QUERY: &str = include_str!("queries/shards/open.sql");
-
-    let pg_shard_opt: Option<PgShard> = sqlx::query_as(OPEN_SHARDS_QUERY)
-        .bind(subrequest.index_uid())
-        .bind(&subrequest.source_id)
-        .bind(subrequest.shard_id().as_str())
-        .bind(&subrequest.ingester_id)
-        // The legacy `follower_id` column is retained; new shards always store NULL.
-        .bind(Option::<&str>::None)
-        .bind(subrequest.doc_mapping_uid)
-        .bind(&subrequest.publish_token)
-        // Use a timestamp generated by the metastore node to avoid clock drift issues
-        .bind(OffsetDateTime::now_utc())
-        .fetch_optional(executor.clone())
-        .await?;
-
-    if let Some(pg_shard) = pg_shard_opt {
-        let shard: Shard = pg_shard.into();
-        info!(
-            index_uid=%shard.index_uid(),
-            source_id=%shard.source_id,
-            shard_id=%shard.shard_id(),
-            ingester_id=%shard.ingester_id,
-            "opened shard"
-        );
-        return Ok(shard);
-    }
-    const FETCH_SHARD_QUERY: &str = include_str!("queries/shards/fetch.sql");
-
-    let pg_shard_opt: Option<PgShard> = sqlx::query_as(FETCH_SHARD_QUERY)
-        .bind(subrequest.index_uid())
-        .bind(&subrequest.source_id)
-        .bind(subrequest.shard_id().as_str())
-        .fetch_optional(executor)
-        .await?;
-
-    if let Some(pg_shard) = pg_shard_opt {
-        return Ok(pg_shard.into());
-    }
-    Err(MetastoreError::NotFound(EntityKind::Source {
-        index_id: subrequest.index_uid().to_string(),
-        source_id: subrequest.source_id.clone(),
-    }))
-}
-
 impl MetastoreServiceExt for PostgresqlMetastore {}
 
 /// Builds the SQL query that returns indexes matching at least one pattern in
@@ -2082,92 +1605,18 @@ mod staged_files_wait_tests;
 mod tests {
     use std::collections::HashSet;
 
-    use async_trait::async_trait;
     use quickwit_common::uri::Protocol;
     use quickwit_doc_mapper::tag_pruning::TagFilterAst;
-    use quickwit_proto::ingest::Shard;
     use quickwit_proto::metastore::MetastoreService;
-    use quickwit_proto::types::{IndexUid, SourceId, SplitId};
+    use quickwit_proto::types::{IndexUid, SplitId};
     use sea_query::{Asterisk, PostgresQueryBuilder, Query};
     use time::OffsetDateTime;
 
     use super::*;
     use crate::metastore::postgres::metastore::build_index_id_patterns_sql_query;
-    use crate::metastore::postgres::model::{PgShard, Splits};
+    use crate::metastore::postgres::model::Splits;
     use crate::tests::DefaultForTest;
-    use crate::tests::shard::ReadWriteShardsForTest;
     use crate::{ListSplitsQuery, SplitState, metastore_test_suite};
-
-    #[async_trait]
-    impl ReadWriteShardsForTest for PostgresqlMetastore {
-        async fn insert_shards(
-            &self,
-            index_uid: &IndexUid,
-            source_id: &SourceId,
-            shards: Vec<Shard>,
-        ) {
-            const INSERT_SHARD_QUERY: &str = include_str!("queries/shards/insert.sql");
-
-            for shard in shards {
-                assert_eq!(&shard.source_id, source_id);
-                assert_eq!(shard.index_uid(), index_uid);
-                // explicit destructuring to ensure new fields are properly handled
-                let Shard {
-                    doc_mapping_uid,
-                    index_uid,
-                    ingester_id,
-                    publish_position_inclusive,
-                    publish_token,
-                    shard_id,
-                    shard_state,
-                    source_id,
-                    update_timestamp,
-                } = shard;
-                let shard_state_name = ShardState::try_from(shard_state)
-                    .unwrap()
-                    .as_json_str_name();
-                let update_timestamp = OffsetDateTime::from_unix_timestamp(update_timestamp)
-                    .expect("Bad timestamp format");
-                sqlx::query(INSERT_SHARD_QUERY)
-                    .bind(index_uid)
-                    .bind(source_id)
-                    .bind(shard_id.unwrap())
-                    .bind(shard_state_name)
-                    .bind(ingester_id)
-                    // The legacy `follower_id` column is retained; new shards always store NULL.
-                    .bind(Option::<&str>::None)
-                    .bind(doc_mapping_uid)
-                    .bind(publish_position_inclusive.unwrap().to_string())
-                    .bind(publish_token)
-                    .bind(update_timestamp)
-                    .execute(&self.connection_pool)
-                    .await
-                    .unwrap();
-            }
-        }
-
-        async fn list_all_shards(&self, index_uid: &IndexUid, source_id: &SourceId) -> Vec<Shard> {
-            let pg_shards: Vec<PgShard> = sqlx::query_as(
-                r#"
-                SELECT *
-                FROM shards
-                WHERE
-                    index_uid = $1
-                    AND source_id = $2
-                "#,
-            )
-            .bind(index_uid)
-            .bind(source_id)
-            .fetch_all(&self.connection_pool)
-            .await
-            .unwrap();
-
-            pg_shards
-                .into_iter()
-                .map(|pg_shard| pg_shard.into())
-                .collect()
-        }
-    }
 
     #[async_trait]
     impl crate::tests::staged_file::WriteStagedFileForTest for PostgresqlMetastore {

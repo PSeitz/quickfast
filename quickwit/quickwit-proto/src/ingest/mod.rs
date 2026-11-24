@@ -20,7 +20,7 @@ use quickwit_common::tower::MakeLoadShedError;
 use serde::{Deserialize, Serialize};
 
 use super::GrpcServiceError;
-use crate::types::{DocUid, Position, QueueId, ShardId, SourceUid, queue_id};
+use crate::types::DocUid;
 use crate::{ServiceError, ServiceErrorCode};
 
 pub mod router;
@@ -60,8 +60,6 @@ pub enum RateLimitingCause {
 pub enum IngestV2Error {
     #[error("internal error: {0}")]
     Internal(String),
-    #[error("shard `{shard_id}` not found")]
-    ShardNotFound { shard_id: ShardId },
     #[error("request timed out: {0}")]
     Timeout(String),
     #[error("too many requests")]
@@ -89,7 +87,6 @@ impl ServiceError for IngestV2Error {
                 rate_limited_error!(limit_per_min = 6, "ingest internal error: {error_msg}");
                 ServiceErrorCode::Internal
             }
-            Self::ShardNotFound { .. } => ServiceErrorCode::NotFound,
             Self::Timeout(_) => ServiceErrorCode::Timeout,
             Self::TooManyRequests(_) => ServiceErrorCode::TooManyRequests,
             Self::Unavailable(_) => ServiceErrorCode::Unavailable,
@@ -124,21 +121,6 @@ impl GrpcServiceError for IngestV2Error {
 impl MakeLoadShedError for IngestV2Error {
     fn make_load_shed_error() -> Self {
         IngestV2Error::TooManyRequests(RateLimitingCause::LoadShedding)
-    }
-}
-
-impl Shard {
-    pub fn source_uid(&self) -> SourceUid {
-        SourceUid {
-            index_uid: self.index_uid().clone(),
-            source_id: self.source_id.clone(),
-        }
-    }
-}
-
-impl ShardPKey {
-    pub fn queue_id(&self) -> QueueId {
-        queue_id(self.index_uid(), &self.source_id, self.shard_id())
     }
 }
 
@@ -191,128 +173,5 @@ impl DocBatchV2 {
             doc_buffer: Bytes::from(doc_buffer),
             doc_lengths,
         }
-    }
-}
-
-impl Shard {
-    pub fn is_open(&self) -> bool {
-        self.shard_state().is_open()
-    }
-
-    pub fn is_unavailable(&self) -> bool {
-        self.shard_state().is_unavailable()
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.shard_state().is_closed()
-    }
-
-    pub fn queue_id(&self) -> super::types::QueueId {
-        queue_id(self.index_uid(), &self.source_id, self.shard_id())
-    }
-}
-
-impl ShardState {
-    pub fn is_open(&self) -> bool {
-        *self == ShardState::Open
-    }
-
-    pub fn is_unavailable(&self) -> bool {
-        *self == ShardState::Unavailable
-    }
-
-    pub fn is_closed(&self) -> bool {
-        *self == ShardState::Closed
-    }
-
-    pub fn as_json_str_name(&self) -> &'static str {
-        match self {
-            ShardState::Unspecified => "unspecified",
-            ShardState::Open => "open",
-            ShardState::Unavailable => "unavailable",
-            ShardState::Closed => "closed",
-        }
-    }
-
-    pub fn from_json_str_name(shard_state_json_name: &str) -> Option<Self> {
-        match shard_state_json_name {
-            "unspecified" => Some(Self::Unspecified),
-            "open" => Some(Self::Open),
-            "unavailable" => Some(Self::Unavailable),
-            "closed" => Some(Self::Closed),
-            _ => None,
-        }
-    }
-}
-
-impl ShardIds {
-    pub fn queue_ids(&self) -> impl Iterator<Item = QueueId> + '_ {
-        self.shard_ids
-            .iter()
-            .map(|shard_id| queue_id(self.index_uid(), &self.source_id, shard_id))
-    }
-
-    pub fn pkeys(&self) -> impl Iterator<Item = ShardPKey> + '_ {
-        self.shard_ids.iter().map(move |shard_id| ShardPKey {
-            index_uid: self.index_uid.clone(),
-            source_id: self.source_id.clone(),
-            shard_id: Some(shard_id.clone()),
-        })
-    }
-}
-
-impl ShardIdPositions {
-    pub fn queue_id_positions(&self) -> impl Iterator<Item = (QueueId, Position)> + '_ {
-        self.shard_positions.iter().map(|shard_position| {
-            let queue_id = queue_id(self.index_uid(), &self.source_id, shard_position.shard_id());
-            (queue_id, shard_position.publish_position_inclusive())
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_shard_state_json_str_name() {
-        let shard_state_json_name = ShardState::Unspecified.as_json_str_name();
-        let shard_state = ShardState::from_json_str_name(shard_state_json_name).unwrap();
-        assert_eq!(shard_state, ShardState::Unspecified);
-
-        let shard_state_json_name = ShardState::Open.as_json_str_name();
-        let shard_state = ShardState::from_json_str_name(shard_state_json_name).unwrap();
-        assert_eq!(shard_state, ShardState::Open);
-
-        let shard_state_json_name = ShardState::Unavailable.as_json_str_name();
-        let shard_state = ShardState::from_json_str_name(shard_state_json_name).unwrap();
-        assert_eq!(shard_state, ShardState::Unavailable);
-
-        let shard_state_json_name = ShardState::Closed.as_json_str_name();
-        let shard_state = ShardState::from_json_str_name(shard_state_json_name).unwrap();
-        assert_eq!(shard_state, ShardState::Closed);
-
-        assert!(ShardState::from_json_str_name("unknown").is_none());
-    }
-
-    #[test]
-    fn test_shard_ingester_id_json_backward_compatibility() {
-        let shard = Shard {
-            ingester_id: "test-ingester".to_string(),
-            ..Default::default()
-        };
-
-        let mut shard_json = serde_json::to_value(&shard).unwrap();
-        assert_eq!(shard_json["leader_id"], "test-ingester");
-        assert!(shard_json.get("ingester_id").is_none());
-
-        let deserialized_shard: Shard = serde_json::from_value(shard_json.clone()).unwrap();
-        assert_eq!(deserialized_shard.ingester_id, "test-ingester");
-
-        let shard_object = shard_json.as_object_mut().unwrap();
-        let ingester_id = shard_object.remove("leader_id").unwrap();
-        shard_object.insert("ingester_id".to_string(), ingester_id);
-        let deserialized_shard: Shard = serde_json::from_value(shard_json).unwrap();
-        assert_eq!(deserialized_shard.ingester_id, "test-ingester");
     }
 }

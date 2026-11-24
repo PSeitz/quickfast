@@ -27,7 +27,6 @@ mod state;
 mod store_operations;
 
 use core::fmt;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::path::Path;
 use std::sync::Arc;
@@ -41,24 +40,21 @@ use itertools::Itertools;
 use quickwit_common::ServiceStream;
 use quickwit_config::IndexTemplate;
 use quickwit_proto::metastore::{
-    AcquireShardsRequest, AcquireShardsResponse, AddSourceRequest, AssignFilesForIndexing,
-    AssignFilesForIndexingResponse, CreateIndexRequest, CreateIndexResponse,
-    CreateIndexTemplateRequest, DeleteIndexRequest, DeleteIndexTemplatesRequest, DeleteQuery,
-    DeleteShardsRequest, DeleteShardsResponse, DeleteSourceRequest, DeleteSplitsRequest,
-    DeleteTask, EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest,
-    FindIndexTemplateMatchesResponse, GetClusterIdentityRequest, GetClusterIdentityResponse,
-    GetIndexTemplateRequest, GetIndexTemplateResponse, IndexMetadataFailure,
-    IndexMetadataFailureReason, IndexMetadataRequest, IndexMetadataResponse, IndexTemplateMatch,
-    IndexesMetadataRequest, IndexesMetadataResponse, LastDeleteOpstampRequest,
-    LastDeleteOpstampResponse, ListCompletedFilesRequest, ListCompletedFilesResponse,
-    ListDeleteTasksRequest, ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
+    AddSourceRequest, AssignFilesForIndexing, AssignFilesForIndexingResponse, CreateIndexRequest,
+    CreateIndexResponse, CreateIndexTemplateRequest, DeleteIndexRequest,
+    DeleteIndexTemplatesRequest, DeleteQuery, DeleteSourceRequest, DeleteSplitsRequest, DeleteTask,
+    EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse,
+    GetClusterIdentityRequest, GetClusterIdentityResponse, GetIndexTemplateRequest,
+    GetIndexTemplateResponse, IndexMetadataFailure, IndexMetadataFailureReason,
+    IndexMetadataRequest, IndexMetadataResponse, IndexTemplateMatch, IndexesMetadataRequest,
+    IndexesMetadataResponse, LastDeleteOpstampRequest, LastDeleteOpstampResponse,
+    ListCompletedFilesRequest, ListCompletedFilesResponse, ListDeleteTasksRequest,
+    ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
     ListIndexTemplatesRequest, ListIndexTemplatesResponse, ListIndexesMetadataRequest,
-    ListIndexesMetadataResponse, ListShardsRequest, ListShardsResponse, ListSplitsRequest,
-    ListSplitsResponse, ListStaleSplitsRequest, MarkSplitsForDeletionRequest, MetastoreError,
-    MetastoreResult, MetastoreService, MetastoreServiceStream, OpenShardSubrequest,
-    OpenShardsRequest, OpenShardsResponse, PruneShardsRequest, PublishFileSplits,
-    PublishFileSplitsResponse, PublishSplitsRequest, RegisterFileForIndexing,
-    RegisterFileForIndexingResponse, ResetSourceCheckpointRequest, StageSplitsRequest,
+    ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest,
+    MarkSplitsForDeletionRequest, MetastoreError, MetastoreResult, MetastoreService,
+    MetastoreServiceStream, PublishFileSplits, PublishFileSplitsResponse, PublishSplitsRequest,
+    RegisterFileForIndexing, RegisterFileForIndexingResponse, StageSplitsRequest,
     ToggleSourceRequest, UpdateIndexRequest, UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest,
     UpdateSplitsDeleteOpstampResponse, serde_utils,
 };
@@ -80,10 +76,9 @@ use self::store_operations::{delete_index, index_exists, load_index, put_index};
 use super::{
     AddSourceRequestExt, CreateIndexRequestExt, IndexMetadataResponseExt,
     IndexesMetadataResponseExt, ListIndexesMetadataResponseExt, ListSplitsRequestExt,
-    ListSplitsResponseExt, PublishSplitsRequestExt, STREAM_SPLITS_CHUNK_SIZE,
-    StageSplitsRequestExt, UpdateIndexRequestExt, UpdateSourceRequestExt,
+    ListSplitsResponseExt, STREAM_SPLITS_CHUNK_SIZE, StageSplitsRequestExt, UpdateIndexRequestExt,
+    UpdateSourceRequestExt,
 };
-use crate::checkpoint::IndexCheckpointDelta;
 use crate::{IndexMetadata, ListSplitsQuery, MetastoreServiceExt, Split, SplitState};
 
 /// Status of an index tracked by the metastore.
@@ -779,16 +774,9 @@ impl MetastoreService for FileBackedMetastore {
         &self,
         request: PublishSplitsRequest,
     ) -> MetastoreResult<EmptyResponse> {
-        let index_checkpoint_delta: Option<IndexCheckpointDelta> =
-            request.deserialize_index_checkpoint()?;
         let index_uid = request.index_uid().clone();
         self.mutate(&index_uid, |index| {
-            index.publish_splits(
-                request.staged_split_ids,
-                request.replaced_split_ids,
-                index_checkpoint_delta,
-                request.publish_token_opt.map(|token| token.into()),
-            )?;
+            index.publish_splits(request.staged_split_ids, request.replaced_split_ids)?;
             Ok(MutationOccurred::Yes(()))
         })
         .await?;
@@ -877,22 +865,6 @@ impl MetastoreService for FileBackedMetastore {
         self.mutate(index_uid, |index| {
             index.delete_source(&request.source_id)?;
             Ok(MutationOccurred::Yes(()))
-        })
-        .await?;
-        Ok(EmptyResponse {})
-    }
-
-    #[instrument(name = "metastore.file_backed.reset_source_checkpoint", skip_all, fields(index_uid = %request.index_uid(), source_id = %request.source_id))]
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> MetastoreResult<EmptyResponse> {
-        let index_uid = request.index_uid();
-
-        self.mutate(index_uid, |index| {
-            index
-                .reset_source_checkpoint(&request.source_id)
-                .map(MutationOccurred::from)
         })
         .await?;
         Ok(EmptyResponse {})
@@ -1075,76 +1047,6 @@ impl MetastoreService for FileBackedMetastore {
         .collect();
         let response =
             ListIndexesMetadataResponse::try_from_indexes_metadata(indexes_metadata).await?;
-        Ok(response)
-    }
-
-    // Shard API
-
-    #[instrument(name = "metastore.file_backed.open_shards", skip_all, fields(num_subrequests = request.subrequests.len()))]
-    async fn open_shards(&self, request: OpenShardsRequest) -> MetastoreResult<OpenShardsResponse> {
-        let mut response = OpenShardsResponse {
-            subresponses: Vec::with_capacity(request.subrequests.len()),
-        };
-        // We must group the subrequests by `index_uid` to mutate each index only once, since each
-        // mutation triggers an IO.
-        let per_index_uid_subrequests: HashMap<IndexUid, Vec<OpenShardSubrequest>> = request
-            .subrequests
-            .into_iter()
-            .into_group_map_by(|subrequest| subrequest.index_uid().clone());
-
-        for (index_uid, subrequests) in per_index_uid_subrequests {
-            let subresponses = self
-                .mutate(&index_uid, |index| index.open_shards(subrequests))
-                .await?;
-            response.subresponses.extend(subresponses);
-        }
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.file_backed.acquire_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> MetastoreResult<AcquireShardsResponse> {
-        let index_uid = request.index_uid().clone();
-        let response = self
-            .mutate(&index_uid, |index| index.acquire_shards(request))
-            .await?;
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.file_backed.delete_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> MetastoreResult<DeleteShardsResponse> {
-        let index_uid = request.index_uid().clone();
-        let response = self
-            .mutate(&index_uid, |index| index.delete_shards(request))
-            .await?;
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.file_backed.prune_shards", skip_all, fields(index_uid = %request.index_uid()))]
-    async fn prune_shards(&self, request: PruneShardsRequest) -> MetastoreResult<EmptyResponse> {
-        let index_uid = request.index_uid().clone();
-        self.mutate(&index_uid, |index| index.prune_shards(request))
-            .await?;
-        Ok(EmptyResponse {})
-    }
-
-    #[instrument(name = "metastore.file_backed.list_shards", skip_all, fields(num_subrequests = request.subrequests.len()))]
-    async fn list_shards(&self, request: ListShardsRequest) -> MetastoreResult<ListShardsResponse> {
-        let mut subresponses = Vec::with_capacity(request.subrequests.len());
-
-        for subrequest in request.subrequests {
-            let index_uid = subrequest.index_uid().clone();
-            let subresponse = self
-                .read(&index_uid, |index| index.list_shards(subrequest))
-                .await?;
-            subresponses.push(subresponse);
-        }
-        let response = ListShardsResponse { subresponses };
         Ok(response)
     }
 
@@ -1473,9 +1375,7 @@ mod tests {
     use futures::executor::block_on;
     use quickwit_common::uri::{Protocol, Uri};
     use quickwit_config::IndexConfig;
-    use quickwit_proto::ingest::Shard;
     use quickwit_proto::metastore::{DeleteQuery, MetastoreError};
-    use quickwit_proto::types::SourceId;
     use quickwit_query::query_ast::qast_helper;
     use quickwit_storage::{MockStorage, RamStorage, Storage, StorageErrorKind};
     use rand::RngExt;
@@ -1487,34 +1387,7 @@ mod tests {
     use super::*;
     use crate::metastore::MetastoreServiceStreamSplitsExt;
     use crate::tests::DefaultForTest;
-    use crate::tests::shard::ReadWriteShardsForTest;
     use crate::{IndexMetadata, ListSplitsQuery, SplitMetadata, SplitState, metastore_test_suite};
-
-    #[async_trait]
-    impl ReadWriteShardsForTest for FileBackedMetastore {
-        async fn insert_shards(
-            &self,
-            index_uid: &IndexUid,
-            source_id: &SourceId,
-            shards: Vec<Shard>,
-        ) {
-            self.mutate(index_uid, |index| {
-                index.insert_shards(source_id, shards);
-                Ok(MutationOccurred::Yes(()))
-            })
-            .await
-            .unwrap();
-        }
-
-        async fn list_all_shards(&self, index_uid: &IndexUid, source_id: &SourceId) -> Vec<Shard> {
-            self.read(index_uid, |index| {
-                let shards = index.list_all_shards(source_id);
-                Ok(shards)
-            })
-            .await
-            .unwrap()
-        }
-    }
 
     metastore_test_suite!(crate::FileBackedMetastore);
 

@@ -19,7 +19,6 @@ use quickwit_proto::types::IndexUid;
 use serde::{self, Deserialize, Serialize};
 
 use crate::IndexMetadata;
-use crate::checkpoint::IndexCheckpoint;
 use crate::split_metadata::utc_now_timestamp;
 
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -43,8 +42,6 @@ impl TryFrom<VersionedIndexMetadata> for IndexMetadata {
 
     fn try_from(index_metadata: VersionedIndexMetadata) -> anyhow::Result<Self> {
         match index_metadata {
-            // When we have more than one version, you should chain version conversion.
-            // ie. Implement conversion from V_k -> V_{k+1}
             VersionedIndexMetadata::V0_8(v8) => v8.try_into(),
         }
     }
@@ -56,7 +53,6 @@ impl From<IndexMetadata> for IndexMetadataV0_8 {
         Self {
             index_uid: index_metadata.index_uid,
             index_config: index_metadata.index_config,
-            checkpoint: index_metadata.checkpoint,
             create_timestamp: index_metadata.create_timestamp,
             sources,
         }
@@ -69,8 +65,6 @@ pub(crate) struct IndexMetadataV0_8 {
     pub index_uid: IndexUid,
     #[schema(value_type = VersionedIndexConfig)]
     pub index_config: IndexConfig,
-    #[schema(value_type = Object)]
-    pub checkpoint: IndexCheckpoint,
     #[serde(default = "utc_now_timestamp")]
     pub create_timestamp: i64,
     #[schema(value_type = Vec<VersionedSourceConfig>)]
@@ -91,7 +85,6 @@ impl TryFrom<IndexMetadataV0_8> for IndexMetadata {
         Ok(Self {
             index_uid: v0_8.index_uid,
             index_config: v0_8.index_config,
-            checkpoint: v0_8.checkpoint,
             create_timestamp: v0_8.create_timestamp,
             sources,
         })

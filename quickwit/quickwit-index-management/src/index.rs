@@ -32,8 +32,7 @@ use quickwit_metastore::{
 use quickwit_proto::metastore::{
     AddSourceRequest, CreateIndexRequest, DeleteIndexRequest, EntityKind, IndexMetadataRequest,
     ListIndexesMetadataRequest, ListSplitsRequest, MarkSplitsForDeletionRequest, MetastoreError,
-    MetastoreService, MetastoreServiceClient, ResetSourceCheckpointRequest, UpdateIndexRequest,
-    UpdateSourceRequest, serde_utils,
+    MetastoreService, MetastoreServiceClient, UpdateIndexRequest, UpdateSourceRequest, serde_utils,
 };
 use quickwit_proto::types::{IndexUid, SplitId};
 use quickwit_proto::{ServiceError, ServiceErrorCode};
@@ -452,15 +451,6 @@ impl IndexService {
         .await
         {
             error!(metastore_endpoints=?self.metastore.endpoints(), index_id=%index_id, error=?err, "failed to delete all the split files during garbage collection");
-        }
-        for source_id in index_metadata.sources.keys() {
-            let reset_source_checkpoint_request = ResetSourceCheckpointRequest {
-                index_uid: Some(index_uid.clone()),
-                source_id: source_id.to_string(),
-            };
-            self.metastore
-                .reset_source_checkpoint(reset_source_checkpoint_request)
-                .await?;
         }
         Ok(())
     }

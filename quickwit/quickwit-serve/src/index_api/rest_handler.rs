@@ -585,9 +585,6 @@ mod tests {
         mock_metastore
             .expect_delete_splits()
             .return_once(|_| Ok(EmptyResponse {}));
-        mock_metastore
-            .expect_reset_source_checkpoint()
-            .return_once(|_| Ok(EmptyResponse {}));
         let index_service = IndexService::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             StorageResolver::unconfigured(),

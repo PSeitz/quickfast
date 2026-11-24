@@ -19,7 +19,7 @@ use quickwit_common::retry::Retryable;
 use quickwit_common::tower::{MakeLoadShedError, TimeoutExceeded};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{IndexId, IndexUid, QueueId, SourceId};
+use crate::types::{IndexId, IndexUid, SourceId};
 use crate::{GrpcServiceError, ServiceError, ServiceErrorCode};
 
 pub mod events;
@@ -120,13 +120,6 @@ mod split_recovery_metadata_tests {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {
-    /// A checkpoint delta.
-    CheckpointDelta {
-        /// Index ID.
-        index_id: IndexId,
-        /// Source ID.
-        source_id: SourceId,
-    },
     /// An index.
     Index {
         /// Index ID.
@@ -143,11 +136,6 @@ pub enum EntityKind {
         index_id: IndexId,
         /// Source ID.
         source_id: SourceId,
-    },
-    /// A shard.
-    Shard {
-        /// Shard queue ID: <index_uid>/<source_id>/<shard_id>
-        queue_id: QueueId,
     },
     /// A split.
     Split {
@@ -169,13 +157,8 @@ pub enum EntityKind {
 impl fmt::Display for EntityKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EntityKind::CheckpointDelta {
-                index_id,
-                source_id,
-            } => write!(f, "checkpoint delta `{index_id}/{source_id}`"),
             EntityKind::Index { index_id } => write!(f, "index `{index_id}`"),
             EntityKind::Indexes { index_ids } => write!(f, "indexes `{}`", index_ids.join(", ")),
-            EntityKind::Shard { queue_id } => write!(f, "shard `{queue_id}`"),
             EntityKind::Source {
                 index_id,
                 source_id,
@@ -211,9 +194,6 @@ pub enum MetastoreError {
 
     #[error("invalid argument: {message}")]
     InvalidArgument { message: String },
-
-    #[error("invalid publish token for shard `{queue_id}`")]
-    InvalidPublishToken { queue_id: QueueId },
 
     #[error("IO error: {message}")]
     Io { message: String },
@@ -252,7 +232,6 @@ impl MetastoreError {
             | MetastoreError::FailedPrecondition { .. }
             | MetastoreError::Forbidden { .. }
             | MetastoreError::InvalidArgument { .. }
-            | MetastoreError::InvalidPublishToken { .. }
             | MetastoreError::JsonDeserializeError { .. }
             | MetastoreError::JsonSerializeError { .. }
             | MetastoreError::NotFound(_)
@@ -307,7 +286,6 @@ impl ServiceError for MetastoreError {
                 ServiceErrorCode::Internal
             }
             Self::InvalidArgument { .. } => ServiceErrorCode::BadRequest,
-            Self::InvalidPublishToken { .. } => ServiceErrorCode::BadRequest,
             Self::Io { message } => {
                 rate_limited_error!(limit_per_min = 6, "metastore/io internal error: {message}");
                 ServiceErrorCode::Internal
@@ -399,16 +377,11 @@ impl SourceType {
         match self {
             SourceType::Cli => "ingest-cli",
             SourceType::File => "file",
-            SourceType::IngestV1 => "ingest-api",
             SourceType::IngestV2 => "ingest",
             SourceType::Kafka => "kafka",
-            SourceType::Kinesis => "kinesis",
-            SourceType::Nats => "nats",
             SourceType::PubSub => "pubsub",
-            SourceType::Pulsar => "pulsar",
             SourceType::Stdin => "stdin",
             SourceType::Unspecified => "unspecified",
-            SourceType::Vec => "vec",
             SourceType::Void => "void",
         }
     }
@@ -419,16 +392,11 @@ impl fmt::Display for SourceType {
         let source_type_str = match self {
             SourceType::Cli => "CLI ingest",
             SourceType::File => "file",
-            SourceType::IngestV1 => "ingest API v1",
             SourceType::IngestV2 => "ingest API v2",
             SourceType::Kafka => "Apache Kafka",
-            SourceType::Kinesis => "Amazon Kinesis",
-            SourceType::Nats => "NATS",
             SourceType::PubSub => "Google Cloud Pub/Sub",
-            SourceType::Pulsar => "Apache Pulsar",
             SourceType::Stdin => "Stdin",
             SourceType::Unspecified => "unspecified",
-            SourceType::Vec => "vec",
             SourceType::Void => "void",
         };
         write!(f, "{source_type_str}")

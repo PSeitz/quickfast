@@ -35,6 +35,8 @@ struct IngestOptions {
     #[serde(alias = "commit", default = "IngestOptions::default_commit_type")]
     commit_type: CommitTypeV2,
     #[serde(default)]
+    use_legacy_ingest: bool,
+    #[serde(default)]
     detailed_response: bool,
 }
 
@@ -74,9 +76,11 @@ fn ingest_handler(
         .and(with_arg(ingest_router))
         .then(
             move |index_id, body, ingest_options: IngestOptions, ingest_router| async move {
-                if ingest_options.commit_type != CommitTypeV2::Auto {
+                if ingest_options.use_legacy_ingest
+                    || ingest_options.commit_type != CommitTypeV2::Auto
+                {
                     return Err(IngestServiceError::BadRequest(
-                        "ingesthree supports Auto commits only".to_string(),
+                        "ingesthree supports Auto commits without legacy ingest".to_string(),
                     ));
                 }
                 ingest(index_id, body, ingest_options, ingest_router).await

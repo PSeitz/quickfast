@@ -79,7 +79,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "crate::types::DocMappingUid",
         )
         .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid")
-        .extern_path(".quickwit.ingest.ShardId", "crate::types::ShardId")
         .field_attribute("DeleteQuery.index_uid", "#[schema(value_type = String)]")
         .field_attribute("DeleteQuery.index_uid", "#[serde(alias = \"index_id\")]")
         .field_attribute("DeleteQuery.query_ast", "#[serde(alias = \"query\")]")
@@ -108,35 +107,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ingest service (metastore service proto should be generated before ingest).
     let mut prost_config = prost_build::Config::default();
     prost_config
-        .bytes(["DocBatchV2.doc_buffer", "Position.position"])
+        .bytes(["DocBatchV2.doc_buffer"])
         .extern_path(
             ".quickwit.common.DocMappingUid",
             "crate::types::DocMappingUid",
         )
         .extern_path(".quickwit.common.DocUid", "crate::types::DocUid")
         .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid")
-        .extern_path(".quickwit.ingest.Position", "crate::types::Position")
-        .extern_path(".quickwit.ingest.ShardId", "crate::types::ShardId")
-        .field_attribute(
-            "Shard.ingester_id",
-            "#[serde(rename = \"leader_id\", alias = \"ingester_id\")]",
-        )
-        .field_attribute(
-            "Shard.publish_position_inclusive",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\")]",
-        )
-        .field_attribute(
-            "Shard.publish_token",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\")]",
-        )
-        .field_attribute(
-            "Shard.replication_position_inclusive",
-            "#[serde(default, skip_serializing_if = \"Option::is_none\")]",
-        )
-        .field_attribute(
-            "Shard.update_timestamp",
-            "#[serde(default = \"super::compatibility_shard_update_timestamp\")]",
-        )
         .file_descriptor_set_path("src/codegen/quickwit/ingest_descriptor.bin");
 
     Codegen::builder()

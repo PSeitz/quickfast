@@ -25,9 +25,6 @@ mod publish_lock;
 mod publisher_message;
 mod split_attrs;
 
-use std::sync::Arc;
-
-use arc_swap::ArcSwapOption;
 pub use indexed_split::{IndexedSplit, IndexedSplitBatch, IndexedSplitBuilder};
 pub use indexing_statistics::IndexingStatistics;
 pub use merge_planner_message::NewSplits;
@@ -37,10 +34,4 @@ pub use packaged_split::{PackagedSplit, PackagedSplitBatch};
 pub use processed_doc::ProcessedDoc;
 pub use publish_lock::{NewPublishLock, PublishLock};
 pub use publisher_message::SplitsUpdate;
-use quickwit_proto::types::PublishToken;
 pub use split_attrs::{SplitAttrs, create_split_metadata};
-
-/// Shared, live publish token owned by an indexing pipeline. The source writes it on reset and
-/// shard re-acquisition; the publisher reads it at publish time. `None` means no token (merge
-/// pipelines, or sources without a publish token such as file/kafka).
-pub type SharedPublishToken = Arc<ArcSwapOption<PublishToken>>;

@@ -19,23 +19,18 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tracing::error;
 pub use ulid::Ulid;
 
 mod doc_mapping_uid;
 mod doc_uid;
 mod index_uid;
 mod pipeline_uid;
-mod position;
-mod shard_id;
 mod split_id;
 
 pub use doc_mapping_uid::DocMappingUid;
 pub use doc_uid::{DocUid, DocUidGenerator};
 pub use index_uid::IndexUid;
 pub use pipeline_uid::PipelineUid;
-pub use position::Position;
-pub use shard_id::ShardId;
 pub use split_id::SplitId;
 
 /// The size of an ULID in bytes. Use `ULID_LEN` for the length of Base32 encoded ULID strings.
@@ -50,65 +45,6 @@ pub type SubrequestId = u32;
 pub type IndexingPlanId = String;
 
 pub type AvailabilityZone = Arc<str>;
-
-/// Uniquely identifies a shard and its underlying mrecordlog queue.
-pub type QueueId = String; // <index_uid>/<source_id>/<shard_id>
-
-pub fn queue_id(index_uid: &IndexUid, source_id: &str, shard_id: &ShardId) -> QueueId {
-    format!("{index_uid}/{source_id}/{shard_id}")
-}
-
-pub fn split_queue_id(queue_id: &str) -> Option<(IndexUid, SourceId, ShardId)> {
-    let parts_opt = split_queue_id_inner(queue_id);
-
-    if parts_opt.is_none() {
-        error!("failed to parse queue ID `{queue_id}`: this should never happen, please report");
-    }
-    parts_opt
-}
-
-fn split_queue_id_inner(queue_id: &str) -> Option<(IndexUid, SourceId, ShardId)> {
-    let mut parts = queue_id.split('/');
-    let index_uid = parts.next()?;
-    let source_id = parts.next()?;
-    let shard_id = parts.next()?;
-    Some((
-        index_uid.parse().ok()?,
-        source_id.to_string(),
-        ShardId::from(shard_id),
-    ))
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PublishToken(String);
-
-impl Deref for PublishToken {
-    type Target = String;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl PublishToken {
-    pub fn resolve(node_id: &str, indexing_plan_id: &str) -> Self {
-        if indexing_plan_id.is_empty() {
-            let ulid = if cfg!(test) {
-                Ulid::nil()
-            } else {
-                Ulid::generate()
-            };
-            PublishToken(format!("{node_id}/{ulid}"))
-        } else {
-            PublishToken(format!("{indexing_plan_id}-{node_id}"))
-        }
-    }
-}
-
-impl From<String> for PublishToken {
-    fn from(token: String) -> Self {
-        PublishToken(token)
-    }
-}
 
 /// It can however appear only once in a given index.
 /// In itself, `SourceId` is not unique, but the pair `(IndexUid, SourceId)` is.
@@ -272,38 +208,6 @@ impl From<&NodeId> for sea_query::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_queue_id() {
-        assert_eq!(
-            queue_id(
-                &IndexUid::for_test("test-index", 0),
-                "test-source",
-                &ShardId::from(1u64)
-            ),
-            "test-index:00000000000000000000000000/test-source/00000000000000000001"
-        );
-    }
-
-    #[test]
-    fn test_split_queue_id() {
-        let splits = split_queue_id("test-index:00000000000000000000000000");
-        assert!(splits.is_none());
-
-        let splits = split_queue_id("test-index:00000000000000000000000000/test-source");
-        assert!(splits.is_none());
-
-        let (index_uid, source_id, shard_id) = split_queue_id(
-            "test-index:00000000000000000000000000/test-source/00000000000000000001",
-        )
-        .unwrap();
-        assert_eq!(
-            &index_uid.to_string(),
-            "test-index:00000000000000000000000000"
-        );
-        assert_eq!(source_id, "test-source");
-        assert_eq!(shard_id, ShardId::from(1u64));
-    }
 
     #[test]
     fn test_node_id() {

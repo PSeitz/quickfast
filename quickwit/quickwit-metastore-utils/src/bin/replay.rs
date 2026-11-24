@@ -65,9 +65,6 @@ async fn replay_grpc_request(
         GrpcRequest::LastDeleteOpstampRequest(req) => {
             client.last_delete_opstamp(req).await?;
         }
-        GrpcRequest::ResetSourceCheckpointRequest(req) => {
-            client.reset_source_checkpoint(req).await?;
-        }
         GrpcRequest::DeleteQuery(req) => {
             client.create_delete_task(req).await?;
         }

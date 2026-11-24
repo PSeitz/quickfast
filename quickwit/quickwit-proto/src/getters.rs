@@ -34,23 +34,6 @@ macro_rules! generate_getters {
     }
 }
 
-macro_rules! generate_clone_getters {
-    (impl fn $field:ident() -> $type:ty {} for $($struct:ty),+) => {
-        $(
-        impl $struct {
-            // we track caller so the reported line isn't the macro invocation below
-            #[track_caller]
-            pub fn $field(&self) -> $type {
-                self.$field
-                    .clone()
-                    .expect(concat!("`",
-                    stringify!($field), "` should be a required field"))
-            }
-        }
-        )*
-    }
-}
-
 macro_rules! generate_copy_getters {
     (impl fn $field:ident() -> $type:ty {} for $($struct:ty),+) => {
         $(
@@ -67,14 +50,6 @@ macro_rules! generate_copy_getters {
     }
 }
 
-// [`DocMappingUid`] getters
-generate_copy_getters!(
-    impl fn doc_mapping_uid() -> DocMappingUid {} for
-
-    OpenShardSubrequest,
-    Shard
-);
-
 // [`DocUid`] getters
 generate_copy_getters! {
     impl fn doc_uid() -> DocUid {} for
@@ -87,62 +62,25 @@ generate_getters! {
     impl fn index_uid() -> &IndexUid {} for
     // Ingest API
     IngestSuccess,
-    Shard,
-    ShardIdPositions,
-    ShardIds,
-    ShardPKey,
 
     // Metastore API
-    AcquireShardsRequest,
     AddSourceRequest,
     CreateIndexResponse,
     DeleteIndexRequest,
     DeleteQuery,
-    DeleteShardsRequest,
-    DeleteShardsResponse,
     DeleteSourceRequest,
     DeleteSplitsRequest,
     DocumentsStagedForUpload,
     LastDeleteOpstampRequest,
     ListDeleteTasksRequest,
-    ListShardsSubrequest,
-    ListShardsSubresponse,
     ListStaleSplitsRequest,
     MarkSplitsForDeletionRequest,
-    OpenShardSubrequest,
-    PruneShardsRequest,
     PublishFileSplits,
     PublishSplitsRequest,
     RegisterFileForIndexing,
-    ResetSourceCheckpointRequest,
     StageSplitsRequest,
     ToggleSourceRequest,
     UpdateIndexRequest,
     UpdateSourceRequest,
     UpdateSplitsDeleteOpstampRequest
-}
-
-// [`Position`] getters. We use `clone` because `Position` is an `Arc` under the hood.
-generate_clone_getters! {
-    impl fn publish_position_inclusive() -> Position {} for
-
-    Shard,
-    ShardIdPosition
-}
-
-// [`Shard`] getters
-generate_getters! {
-    impl fn open_shard() -> &Shard {} for
-
-    OpenShardSubresponse
-}
-
-// [`ShardId`] getters
-generate_getters! {
-    impl fn shard_id() -> &ShardId {} for
-
-    OpenShardSubrequest,
-    Shard,
-    ShardIdPosition,
-    ShardPKey
 }

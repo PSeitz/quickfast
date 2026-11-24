@@ -34,7 +34,6 @@ pub(crate) mod file_publication_validation;
 pub(crate) mod get_identity;
 pub(crate) mod index;
 pub(crate) mod list_splits;
-pub(crate) mod shard;
 pub(crate) mod source;
 pub(crate) mod split;
 pub(crate) mod staged_file;
@@ -566,13 +565,6 @@ macro_rules! metastore_test_suite {
 
             #[tokio::test]
             #[serial_test::file_serial]
-            async fn test_metastore_reset_checkpoint() {
-                let _ = tracing_subscriber::fmt::try_init();
-                $crate::tests::source::test_metastore_reset_checkpoint::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
             async fn test_metastore_create_delete_task() {
                 let _ = tracing_subscriber::fmt::try_init();
                 $crate::tests::delete_task::test_metastore_create_delete_task::<$metastore_type>().await;
@@ -640,50 +632,6 @@ macro_rules! metastore_test_suite {
             async fn test_metastore_stage_splits() {
                 let _ = tracing_subscriber::fmt::try_init();
                 $crate::tests::split::test_metastore_stage_splits::<$metastore_type>().await;
-            }
-
-            /// Shard API tests
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_open_shards() {
-                $crate::tests::shard::test_metastore_open_shards::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_acquire_shards() {
-                $crate::tests::shard::test_metastore_acquire_shards::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_list_shards() {
-                $crate::tests::shard::test_metastore_list_shards::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_delete_shards() {
-                $crate::tests::shard::test_metastore_delete_shards::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_prune_shards() {
-                $crate::tests::shard::test_metastore_prune_shards::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::serial]
-            async fn test_metastore_apply_checkpoint_delta_v2_single_shard() {
-                $crate::tests::shard::test_metastore_apply_checkpoint_delta_v2_single_shard::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_metastore_apply_checkpoint_delta_v2_multi_shards() {
-                $crate::tests::shard::test_metastore_apply_checkpoint_delta_v2_multi_shards::<$metastore_type>().await;
             }
 
             /// Index Template API tests

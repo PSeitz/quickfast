@@ -556,8 +556,6 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
                 index_uid: Some(index_uid.clone()),
                 staged_split_ids,
                 replaced_split_ids: Vec::new(),
-                index_checkpoint_delta_json_opt: None,
-                publish_token_opt: None,
             })
             .await?;
     }

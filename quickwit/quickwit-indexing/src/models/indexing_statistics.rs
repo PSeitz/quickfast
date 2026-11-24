@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
-
 use quickwit_proto::indexing::PipelineMetrics;
-use quickwit_proto::types::ShardId;
 use serde::Serialize;
 
 /// A struct that holds statistical data about indexing.
@@ -45,8 +42,5 @@ pub struct IndexingStatistics {
     pub num_spawn_attempts: usize,
     // Pipeline metrics.
     pub pipeline_metrics_opt: Option<PipelineMetrics>,
-    // List of shard ids.
-    #[schema(value_type = Vec<u64>)]
-    pub shard_ids: BTreeSet<ShardId>,
     pub params_fingerprint: u64,
 }

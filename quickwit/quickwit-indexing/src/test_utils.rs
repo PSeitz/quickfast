@@ -250,8 +250,6 @@ impl TestSandbox {
                     index_uid: Some(self.index_uid.clone()),
                     staged_split_ids,
                     replaced_split_ids: Vec::new(),
-                    index_checkpoint_delta_json_opt: None,
-                    publish_token_opt: None,
                 })
                 .await?;
             let _ = self

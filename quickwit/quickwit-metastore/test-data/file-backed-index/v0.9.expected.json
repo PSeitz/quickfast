@@ -10,11 +10,6 @@
     }
   ],
   "index": {
-    "checkpoint": {
-      "kafka-source": {
-        "00000000000000000000": "00000000000000000042"
-      }
-    },
     "create_timestamp": 1789,
     "index_config": {
       "doc_mapping": {
@@ -145,20 +140,6 @@
       }
     ],
     "version": "0.9"
-  },
-  "shards": {
-    "_ingest-source": [
-      {
-        "doc_mapping_uid": "00000000000000000000000001",
-        "index_uid": "my-index:00000000000000000000000001",
-        "leader_id": "ingester",
-        "publish_position_inclusive": "",
-        "shard_id": "00000000000000000001",
-        "shard_state": 1,
-        "source_id": "_ingest-source",
-        "update_timestamp": 1724240908
-      }
-    ]
   },
   "splits": [
     {

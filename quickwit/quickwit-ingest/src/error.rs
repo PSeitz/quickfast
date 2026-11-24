@@ -82,9 +82,6 @@ impl From<IngestV2Error> for IngestServiceError {
                 IngestServiceError::Unavailable(format!("unavailable: {error_msg}"))
             }
             IngestV2Error::Internal(message) => IngestServiceError::Internal(message),
-            IngestV2Error::ShardNotFound { .. } => {
-                IngestServiceError::Internal("shard not found".to_string())
-            }
             IngestV2Error::TooManyRequests(rate_limiting_cause) => {
                 IngestServiceError::RateLimited(rate_limiting_cause)
             }

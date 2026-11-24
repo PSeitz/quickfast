@@ -29,8 +29,8 @@ pub use index_metadata::IndexMetadata;
 use itertools::Itertools;
 use quickwit_common::thread_pool::run_cpu_intensive;
 use quickwit_config::{
-    DocMapping, FileSourceParams, IndexConfig, IndexingSettings, IngestSettings, RetentionPolicy,
-    SearchSettings, SourceConfig, SourceParams,
+    DocMapping, IndexConfig, IndexingSettings, IngestSettings, RetentionPolicy, SearchSettings,
+    SourceConfig,
 };
 use quickwit_doc_mapper::tag_pruning::TagFilterAst;
 use quickwit_proto::metastore::{
@@ -38,12 +38,11 @@ use quickwit_proto::metastore::{
     IndexMetadataRequest, IndexMetadataResponse, IndexesMetadataResponse,
     ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, MetastoreError,
     MetastoreResult, MetastoreService, MetastoreServiceClient, MetastoreServiceStream,
-    PublishSplitsRequest, StageSplitsRequest, UpdateIndexRequest, UpdateSourceRequest, serde_utils,
+    StageSplitsRequest, UpdateIndexRequest, UpdateSourceRequest, serde_utils,
 };
 use quickwit_proto::types::{IndexUid, NodeId, SplitId};
 use time::OffsetDateTime;
 
-use crate::checkpoint::IndexCheckpointDelta;
 use crate::{Split, SplitMetadata, SplitState};
 
 /// Splits batch size returned by the stream splits API
@@ -580,22 +579,6 @@ pub trait ListSplitsResponseExt {
     fn empty() -> Self;
 }
 
-/// Helper trait for [`PublishSplitsRequest`] to deserialize its payload.
-pub trait PublishSplitsRequestExt {
-    /// Deserializes the `index_checkpoint_delta_json_opt` field of a [`PublishSplitsRequest`] into
-    /// an [`Option<IndexCheckpointDelta>`].
-    fn deserialize_index_checkpoint(&self) -> MetastoreResult<Option<IndexCheckpointDelta>>;
-}
-
-impl PublishSplitsRequestExt for PublishSplitsRequest {
-    fn deserialize_index_checkpoint(&self) -> MetastoreResult<Option<IndexCheckpointDelta>> {
-        self.index_checkpoint_delta_json_opt
-            .as_ref()
-            .map(|value| serde_utils::from_json_str(value))
-            .transpose()
-    }
-}
-
 #[async_trait]
 impl ListSplitsResponseExt for ListSplitsResponse {
     fn empty() -> Self {
@@ -1110,24 +1093,9 @@ impl<T> Default for FilterRange<T> {
     }
 }
 
-/// Maps the given source params to whether checkpoints should be stored in the index metadata
-/// (false) or the shard table (true)
-fn use_shard_api(params: &SourceParams) -> bool {
-    match params {
-        SourceParams::File(FileSourceParams::Filepath(_)) => false,
-        SourceParams::File(FileSourceParams::Notifications(_)) => true,
-        SourceParams::Ingest => true,
-        SourceParams::IngestCli => false,
-        SourceParams::Kafka(_) => false,
-        SourceParams::PubSub(_) => false,
-        SourceParams::Stdin => panic!("stdin cannot be checkpointed"),
-        SourceParams::Void(_) => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use quickwit_config::TransformConfig;
+    use quickwit_config::{SourceParams, TransformConfig};
 
     use super::*;
 

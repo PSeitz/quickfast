@@ -29,7 +29,6 @@ use quickwit_indexing::actors::{
     MergeExecutor, MergeSplitDownloader, Packager, Publisher, Uploader, UploaderType,
 };
 use quickwit_indexing::merge_policy::{MergeOperation, MergeSource};
-use quickwit_indexing::models::SharedPublishToken;
 use quickwit_indexing::{IndexingSplitStore, SplitsUpdateMailbox};
 use quickwit_metrics::{counter, gauge, histogram, label_values};
 use quickwit_proto::indexing::MergePipelineId;
@@ -289,7 +288,6 @@ impl CompactionPipeline {
             quickwit_indexing::PublisherType::MergePublisher,
             self.metastore.clone(),
             None,
-            SharedPublishToken::default(),
         );
         let (merge_publisher_mailbox, merge_publisher_handle) = spawn_ctx
             .spawn_builder()

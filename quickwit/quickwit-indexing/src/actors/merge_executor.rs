@@ -799,8 +799,6 @@ mod tests {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![new_split_metadata.split_id.to_string()],
             replaced_split_ids: vec![splits[0].split_metadata.split_id.to_string()],
-            index_checkpoint_delta_json_opt: None,
-            publish_token_opt: None,
         };
         metastore
             .publish_splits(publish_splits_request)

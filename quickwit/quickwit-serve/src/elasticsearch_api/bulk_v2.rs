@@ -402,7 +402,7 @@ mod tests {
         IngestSuccess, MockIngestRouterService,
     };
     use quickwit_proto::ingest::{ParseFailure, ParseFailureReason};
-    use quickwit_proto::types::{IndexUid, Position, ShardId};
+    use quickwit_proto::types::IndexUid;
     use warp::{Filter, Rejection, Reply};
 
     use super::*;
@@ -487,8 +487,6 @@ mod tests {
                             subrequest_id: 0,
                             index_uid: Some(IndexUid::for_test("my-index-1", 0)),
                             source_id: INGEST_V2_SOURCE_ID.to_string(),
-                            shard_id: Some(ShardId::from(1)),
-                            replication_position_inclusive: Some(Position::offset(1u64)),
                             num_ingested_docs: 2,
                             parse_failures: Vec::new(),
                         },
@@ -496,8 +494,6 @@ mod tests {
                             subrequest_id: 1,
                             index_uid: Some(IndexUid::for_test("my-index-2", 0)),
                             source_id: INGEST_V2_SOURCE_ID.to_string(),
-                            shard_id: Some(ShardId::from(1)),
-                            replication_position_inclusive: Some(Position::offset(0u64)),
                             num_ingested_docs: 1,
                             parse_failures: Vec::new(),
                         },
@@ -594,8 +590,6 @@ mod tests {
                         subrequest_id: 0,
                         index_uid: Some(IndexUid::for_test("my-index-1", 0)),
                         source_id: INGEST_V2_SOURCE_ID.to_string(),
-                        shard_id: Some(ShardId::from(1)),
-                        replication_position_inclusive: Some(Position::offset(0u64)),
                         num_ingested_docs: 1,
                         parse_failures: Vec::new(),
                     }],
@@ -826,8 +820,6 @@ mod tests {
                 subrequest_id: 0,
                 index_uid: Some(IndexUid::for_test("test-index-foo", 0)),
                 source_id: "test-source".to_string(),
-                shard_id: Some(ShardId::from(0)),
-                replication_position_inclusive: Some(Position::offset(0u64)),
                 num_ingested_docs: 1,
                 parse_failures: vec![ParseFailure {
                     doc_uid: Some(DocUid::for_test(1)),
@@ -919,8 +911,6 @@ mod tests {
                         subrequest_id: 0,
                         index_uid: Some(IndexUid::for_test("my-index-1", 0)),
                         source_id: INGEST_V2_SOURCE_ID.to_string(),
-                        shard_id: Some(ShardId::from(1)),
-                        replication_position_inclusive: Some(Position::offset(1u64)),
                         num_ingested_docs: 2,
                         parse_failures: Vec::new(),
                     }],
@@ -956,8 +946,6 @@ mod tests {
                             subrequest_id: 0,
                             index_uid: Some(IndexUid::for_test("my-index-1", 0)),
                             source_id: INGEST_V2_SOURCE_ID.to_string(),
-                            shard_id: Some(ShardId::from(1)),
-                            replication_position_inclusive: Some(Position::offset(1u64)),
                             num_ingested_docs: 2,
                             parse_failures: Vec::new(),
                         },
@@ -965,8 +953,6 @@ mod tests {
                             subrequest_id: 1,
                             index_uid: Some(IndexUid::for_test("my-index-2", 0)),
                             source_id: INGEST_V2_SOURCE_ID.to_string(),
-                            shard_id: Some(ShardId::from(1)),
-                            replication_position_inclusive: Some(Position::offset(0u64)),
                             num_ingested_docs: 1,
                             parse_failures: Vec::new(),
                         },

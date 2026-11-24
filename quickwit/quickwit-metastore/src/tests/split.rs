@@ -18,22 +18,21 @@ use futures::future::try_join_all;
 use quickwit_common::rand::append_random_suffix;
 use quickwit_config::{IndexConfig, SourceConfig, SourceParams};
 use quickwit_proto::metastore::{
-    CreateIndexRequest, DeleteSplitsRequest, EntityKind, IndexMetadataRequest, ListSplitsRequest,
-    ListStaleSplitsRequest, MarkSplitsForDeletionRequest, MetastoreError, PublishSplitsRequest,
-    StageSplitsRequest, UpdateSplitsDeleteOpstampRequest,
+    CreateIndexRequest, DeleteSplitsRequest, EntityKind, ListSplitsRequest, ListStaleSplitsRequest,
+    MarkSplitsForDeletionRequest, MetastoreError, PublishSplitsRequest, StageSplitsRequest,
+    UpdateSplitsDeleteOpstampRequest,
 };
-use quickwit_proto::types::{IndexUid, Position};
+use quickwit_proto::types::IndexUid;
 use time::OffsetDateTime;
 use tokio::time::sleep;
 use tracing::{error, info};
 
 use super::DefaultForTest;
-use crate::checkpoint::{IndexCheckpointDelta, PartitionId, SourceCheckpointDelta};
 use crate::metastore::MetastoreServiceStreamSplitsExt;
 use crate::tests::cleanup_index;
 use crate::{
-    CreateIndexRequestExt, IndexMetadataResponseExt, ListSplitsQuery, ListSplitsRequestExt,
-    ListSplitsResponseExt, MetastoreServiceExt, SplitMetadata, SplitState, StageSplitsRequestExt,
+    CreateIndexRequestExt, ListSplitsQuery, ListSplitsRequestExt, ListSplitsResponseExt,
+    MetastoreServiceExt, SplitMetadata, SplitState, StageSplitsRequestExt,
 };
 
 pub async fn test_metastore_publish_splits_empty_splits_array_is_allowed<
@@ -51,11 +50,6 @@ pub async fn test_metastore_publish_splits_empty_splits_array_is_allowed<
     {
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(non_existent_index_uid),
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 1..10;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -68,8 +62,7 @@ pub async fn test_metastore_publish_splits_empty_splits_array_is_allowed<
         ));
     }
 
-    // Update the checkpoint, by publishing an empty array of splits with a non-empty
-    // checkpoint. This operation is allowed and used in the Indexer.
+    // Publishing an empty array of splits is allowed.
     {
         let index_config = IndexConfig::for_test(&index_id, &index_uri);
         let source_configs = &[SourceConfig::for_test(&source_id, SourceParams::void())];
@@ -84,35 +77,12 @@ pub async fn test_metastore_publish_splits_empty_splits_array_is_allowed<
             .clone();
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 0..100;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
             .publish_splits(publish_splits_request)
             .await
             .unwrap();
-
-        let index_metadata = metastore
-            .index_metadata(IndexMetadataRequest::for_index_id(index_id.to_string()))
-            .await
-            .unwrap()
-            .deserialize_index_metadata()
-            .unwrap();
-        let source_checkpoint = index_metadata
-            .checkpoint
-            .source_checkpoint(&source_id)
-            .unwrap();
-        assert_eq!(source_checkpoint.num_partitions(), 1);
-        assert_eq!(
-            source_checkpoint
-                .position_for_partition(&PartitionId::default())
-                .unwrap(),
-            &Position::offset(100u64 - 1)
-        );
         cleanup_index(&mut metastore, index_uid).await;
     }
 }
@@ -155,11 +125,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(IndexUid::new_with_random_ulid("index-not-found")),
             staged_split_ids: vec!["split-not-found".to_string()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 0..10;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -177,11 +142,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(IndexUid::new_with_random_ulid(&index_id)),
             staged_split_ids: vec!["split-not-found".to_string()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 0..10;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -282,11 +242,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 1..12;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -324,11 +279,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 12..15;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -346,11 +296,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 15..18;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -388,11 +333,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), "split-not-found".to_string()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 15..18;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -427,11 +367,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 15..18;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -442,11 +377,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), "split-not-found".to_string()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 18..24;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -481,11 +411,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 18..24;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -503,11 +428,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), "split-not-found".to_string()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 24..26;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -547,11 +467,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), split_id_2.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 24..26;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -584,11 +499,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 26..28;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -599,11 +509,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), split_id_2.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 28..30;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -643,11 +548,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), split_id_2.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 30..31;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         metastore
@@ -658,11 +558,6 @@ pub async fn test_metastore_publish_splits<
         let publish_splits_request = PublishSplitsRequest {
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_1.clone(), split_id_2.clone()],
-            index_checkpoint_delta_json_opt: Some({
-                let offsets = 30..31;
-                let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-                serde_json::to_string(&checkpoint_delta).unwrap()
-            }),
             ..Default::default()
         };
         let error = metastore
@@ -672,7 +567,7 @@ pub async fn test_metastore_publish_splits<
         assert!(matches!(
             error,
             MetastoreError::FailedPrecondition {
-                entity: EntityKind::CheckpointDelta { .. },
+                entity: EntityKind::Splits { .. },
                 ..
             }
         ));
@@ -708,7 +603,6 @@ pub async fn test_metastore_publish_splits_concurrency<
     for partition_id in 0..10 {
         let metastore_clone = metastore.clone();
         let index_id = index_id.clone();
-        let source_id = source_id.clone();
 
         let join_handle = tokio::spawn({
             let index_uid = index_uid.clone();
@@ -726,22 +620,9 @@ pub async fn test_metastore_publish_splits_concurrency<
                     .stage_splits(stage_splits_request)
                     .await
                     .unwrap();
-                let source_delta = SourceCheckpointDelta::from_partition_delta(
-                    PartitionId::from(partition_id as u64),
-                    Position::Beginning,
-                    Position::offset(partition_id as u64),
-                )
-                .unwrap();
-                let checkpoint_delta = IndexCheckpointDelta {
-                    source_id,
-                    source_delta,
-                };
                 let publish_splits_request = PublishSplitsRequest {
                     index_uid: Some(index_uid.clone()),
                     staged_split_ids: vec![split_id.clone()],
-                    index_checkpoint_delta_json_opt: Some(
-                        serde_json::to_string(&checkpoint_delta).unwrap(),
-                    ),
                     ..Default::default()
                 };
                 metastore_clone
@@ -754,18 +635,19 @@ pub async fn test_metastore_publish_splits_concurrency<
     }
     try_join_all(join_handles).await.unwrap();
 
-    let index_metadata = metastore
-        .index_metadata(IndexMetadataRequest::for_index_id(index_id.to_string()))
+    let splits = metastore
+        .list_splits(ListSplitsRequest::try_from_index_uid(index_uid.clone()).unwrap())
         .await
         .unwrap()
-        .deserialize_index_metadata()
+        .collect_splits()
+        .await
         .unwrap();
-    let source_checkpoint = index_metadata
-        .checkpoint
-        .source_checkpoint(&source_id)
-        .unwrap();
-
-    assert_eq!(source_checkpoint.num_partitions(), 10);
+    assert_eq!(splits.len(), 10);
+    assert!(
+        splits
+            .iter()
+            .all(|split| split.split_state == SplitState::Published)
+    );
 
     cleanup_index(&mut metastore, index_uid).await
 }
@@ -1488,11 +1370,6 @@ pub async fn test_metastore_split_update_timestamp<
     let publish_splits_request = PublishSplitsRequest {
         index_uid: Some(index_uid.clone()),
         staged_split_ids: vec![split_id.clone()],
-        index_checkpoint_delta_json_opt: Some({
-            let offsets = 0..5;
-            let checkpoint_delta = IndexCheckpointDelta::for_test(&source_id, offsets);
-            serde_json::to_string(&checkpoint_delta).unwrap()
-        }),
         ..Default::default()
     };
     metastore

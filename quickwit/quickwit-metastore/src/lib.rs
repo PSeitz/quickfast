@@ -23,8 +23,6 @@
 //! - PostgreSQL metastore
 //! - etc.
 
-#[allow(missing_docs)]
-pub mod checkpoint;
 mod error;
 mod metastore;
 mod metastore_factory;
@@ -45,8 +43,8 @@ pub use metastore::{
     AddSourceRequestExt, CreateIndexRequestExt, CreateIndexResponseExt, IndexMetadata,
     IndexMetadataResponseExt, IndexesMetadataResponseExt, ListIndexesMetadataResponseExt,
     ListSplitsQuery, ListSplitsRequestExt, ListSplitsResponseExt, MetastoreServiceExt,
-    MetastoreServiceStreamSplitsExt, PublishSplitsRequestExt, SortBy, StageSplitsRequestExt,
-    UpdateIndexRequestExt, UpdateSourceRequestExt, file_backed,
+    MetastoreServiceStreamSplitsExt, SortBy, StageSplitsRequestExt, UpdateIndexRequestExt,
+    UpdateSourceRequestExt, file_backed,
 };
 pub use metastore_factory::{MetastoreFactory, MetastoreFactoryOptions, UnsupportedMetastore};
 pub use metastore_resolver::MetastoreResolver;

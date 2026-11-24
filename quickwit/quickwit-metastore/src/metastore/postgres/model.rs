@@ -17,9 +17,8 @@
 use std::convert::TryInto;
 use std::str::FromStr;
 
-use quickwit_proto::ingest::{Shard, ShardState};
 use quickwit_proto::metastore::{DeleteQuery, DeleteTask, MetastoreError, MetastoreResult};
-use quickwit_proto::types::{DocMappingUid, IndexId, IndexUid, ShardId, SourceId};
+use quickwit_proto::types::{IndexId, IndexUid};
 use sea_query::Iden;
 use tracing::error;
 
@@ -218,72 +217,6 @@ impl TryInto<DeleteTask> for PgDeleteTask {
             opstamp: self.opstamp as u64,
             delete_query: Some(delete_query),
         })
-    }
-}
-
-#[derive(Iden, Clone, Copy)]
-pub(super) enum Shards {
-    Table,
-    IndexUid,
-    SourceId,
-    ShardId,
-    ShardState,
-    IngesterId,
-    PublishPositionInclusive,
-    PublishToken,
-}
-
-#[derive(sqlx::Type, PartialEq, Debug)]
-#[sqlx(type_name = "SHARD_STATE", rename_all = "snake_case")]
-pub(super) enum PgShardState {
-    Unspecified,
-    Open,
-    Unavailable,
-    Closed,
-}
-
-impl From<PgShardState> for ShardState {
-    fn from(pg_shard_state: PgShardState) -> Self {
-        match pg_shard_state {
-            PgShardState::Unspecified => ShardState::Unspecified,
-            PgShardState::Open => ShardState::Open,
-            PgShardState::Unavailable => ShardState::Unavailable,
-            PgShardState::Closed => ShardState::Closed,
-        }
-    }
-}
-
-#[derive(sqlx::FromRow, Debug)]
-pub(super) struct PgShard {
-    #[sqlx(try_from = "String")]
-    pub index_uid: IndexUid,
-    #[sqlx(try_from = "String")]
-    pub source_id: SourceId,
-    #[sqlx(try_from = "String")]
-    pub shard_id: ShardId,
-    #[sqlx(rename = "leader_id")]
-    pub ingester_id: String,
-    pub shard_state: PgShardState,
-    #[sqlx(try_from = "String")]
-    pub doc_mapping_uid: DocMappingUid,
-    pub publish_position_inclusive: String,
-    pub publish_token: Option<String>,
-    pub update_timestamp: sqlx::types::time::PrimitiveDateTime,
-}
-
-impl From<PgShard> for Shard {
-    fn from(pg_shard: PgShard) -> Self {
-        Shard {
-            index_uid: Some(pg_shard.index_uid),
-            source_id: pg_shard.source_id,
-            shard_id: Some(pg_shard.shard_id),
-            shard_state: ShardState::from(pg_shard.shard_state) as i32,
-            ingester_id: pg_shard.ingester_id,
-            doc_mapping_uid: Some(pg_shard.doc_mapping_uid),
-            publish_position_inclusive: Some(pg_shard.publish_position_inclusive.into()),
-            publish_token: pg_shard.publish_token,
-            update_timestamp: pg_shard.update_timestamp.assume_utc().unix_timestamp(),
-        }
     }
 }
 

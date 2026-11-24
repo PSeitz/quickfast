@@ -50,9 +50,7 @@ message IngestSuccess {
   uint32 subrequest_id = 1;
   quickwit.common.IndexUid index_uid = 2;
   string source_id = 3;
-  quickwit.ingest.ShardId shard_id = 4;
-  // Replication position inclusive.
-  quickwit.ingest.Position replication_position_inclusive = 5;
+  reserved 4, 5;
   uint32 num_ingested_docs = 6;
   repeated quickwit.ingest.ParseFailure parse_failures = 7;
 }

@@ -344,12 +344,6 @@ pub struct PublishSplitsRequest {
     pub staged_split_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag = "3")]
     pub replaced_split_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(string, optional, tag = "4")]
-    pub index_checkpoint_delta_json_opt: ::core::option::Option<
-        ::prost::alloc::string::String,
-    >,
-    #[prost(string, optional, tag = "5")]
-    pub publish_token_opt: ::core::option::Option<::prost::alloc::string::String>,
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -396,14 +390,6 @@ pub struct ToggleSourceRequest {
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct DeleteSourceRequest {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ResetSourceCheckpointRequest {
     #[prost(message, optional, tag = "1")]
     pub index_uid: ::core::option::Option<crate::types::IndexUid>,
     #[prost(string, tag = "2")]
@@ -490,140 +476,6 @@ pub struct ListDeleteTasksResponse {
     pub delete_tasks: ::prost::alloc::vec::Vec<DeleteTask>,
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct OpenShardsRequest {
-    #[prost(message, repeated, tag = "1")]
-    pub subrequests: ::prost::alloc::vec::Vec<OpenShardSubrequest>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OpenShardSubrequest {
-    #[prost(uint32, tag = "1")]
-    pub subrequest_id: u32,
-    #[prost(message, optional, tag = "2")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "3")]
-    pub source_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag = "4")]
-    pub shard_id: ::core::option::Option<crate::types::ShardId>,
-    #[prost(string, tag = "5")]
-    pub ingester_id: ::prost::alloc::string::String,
-    #[prost(message, optional, tag = "7")]
-    pub doc_mapping_uid: ::core::option::Option<crate::types::DocMappingUid>,
-    #[prost(string, optional, tag = "8")]
-    pub publish_token: ::core::option::Option<::prost::alloc::string::String>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct OpenShardsResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub subresponses: ::prost::alloc::vec::Vec<OpenShardSubresponse>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct OpenShardSubresponse {
-    #[prost(uint32, tag = "1")]
-    pub subrequest_id: u32,
-    #[prost(message, optional, tag = "4")]
-    pub open_shard: ::core::option::Option<super::ingest::Shard>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AcquireShardsRequest {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "3")]
-    pub shard_ids: ::prost::alloc::vec::Vec<crate::types::ShardId>,
-    #[prost(string, tag = "4")]
-    pub publish_token: ::prost::alloc::string::String,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AcquireShardsResponse {
-    /// List of acquired shards, in no specific order.
-    #[prost(message, repeated, tag = "3")]
-    pub acquired_shards: ::prost::alloc::vec::Vec<super::ingest::Shard>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DeleteShardsRequest {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "3")]
-    pub shard_ids: ::prost::alloc::vec::Vec<crate::types::ShardId>,
-    /// If false, only shards at EOF positions will be deleted.
-    #[prost(bool, tag = "4")]
-    pub force: bool,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DeleteShardsResponse {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    /// List of shard IDs that were successfully deleted.
-    #[prost(message, repeated, tag = "3")]
-    pub successes: ::prost::alloc::vec::Vec<crate::types::ShardId>,
-    /// List of shard IDs that could not be deleted because `force` was set to `false` in the request,
-    /// and the shards are not at EOF, i.e., not fully indexed.
-    #[prost(message, repeated, tag = "4")]
-    pub failures: ::prost::alloc::vec::Vec<crate::types::ShardId>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PruneShardsRequest {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    /// The maximum age of the shards to keep, in seconds.
-    #[prost(uint32, optional, tag = "5")]
-    pub max_age_secs: ::core::option::Option<u32>,
-    /// The maximum number of the shards to keep. Delete older shards first.
-    #[prost(uint32, optional, tag = "6")]
-    pub max_count: ::core::option::Option<u32>,
-    /// The interval between two pruning operations, in seconds.
-    #[prost(uint32, optional, tag = "7")]
-    pub interval_secs: ::core::option::Option<u32>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListShardsRequest {
-    #[prost(message, repeated, tag = "1")]
-    pub subrequests: ::prost::alloc::vec::Vec<ListShardsSubrequest>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListShardsSubrequest {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    #[prost(enumeration = "super::ingest::ShardState", optional, tag = "3")]
-    pub shard_state: ::core::option::Option<i32>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListShardsResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub subresponses: ::prost::alloc::vec::Vec<ListShardsSubresponse>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListShardsSubresponse {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(string, tag = "2")]
-    pub source_id: ::prost::alloc::string::String,
-    #[prost(message, repeated, tag = "3")]
-    pub shards: ::prost::alloc::vec::Vec<super::ingest::Shard>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CreateIndexTemplateRequest {
     #[prost(string, tag = "1")]
@@ -697,18 +549,11 @@ pub enum SourceType {
     Unspecified = 0,
     Cli = 1,
     File = 2,
-    IngestV1 = 4,
     IngestV2 = 5,
     /// Apache Kafka
     Kafka = 6,
-    /// Amazon Kinesis
-    Kinesis = 7,
-    Nats = 8,
     /// Google Cloud Pub/Sub
     PubSub = 3,
-    /// Apache Pulsar
-    Pulsar = 9,
-    Vec = 10,
     Void = 11,
     Stdin = 13,
 }
@@ -722,14 +567,9 @@ impl SourceType {
             Self::Unspecified => "SOURCE_TYPE_UNSPECIFIED",
             Self::Cli => "SOURCE_TYPE_CLI",
             Self::File => "SOURCE_TYPE_FILE",
-            Self::IngestV1 => "SOURCE_TYPE_INGEST_V1",
             Self::IngestV2 => "SOURCE_TYPE_INGEST_V2",
             Self::Kafka => "SOURCE_TYPE_KAFKA",
-            Self::Kinesis => "SOURCE_TYPE_KINESIS",
-            Self::Nats => "SOURCE_TYPE_NATS",
             Self::PubSub => "SOURCE_TYPE_PUB_SUB",
-            Self::Pulsar => "SOURCE_TYPE_PULSAR",
-            Self::Vec => "SOURCE_TYPE_VEC",
             Self::Void => "SOURCE_TYPE_VOID",
             Self::Stdin => "SOURCE_TYPE_STDIN",
         }
@@ -740,14 +580,9 @@ impl SourceType {
             "SOURCE_TYPE_UNSPECIFIED" => Some(Self::Unspecified),
             "SOURCE_TYPE_CLI" => Some(Self::Cli),
             "SOURCE_TYPE_FILE" => Some(Self::File),
-            "SOURCE_TYPE_INGEST_V1" => Some(Self::IngestV1),
             "SOURCE_TYPE_INGEST_V2" => Some(Self::IngestV2),
             "SOURCE_TYPE_KAFKA" => Some(Self::Kafka),
-            "SOURCE_TYPE_KINESIS" => Some(Self::Kinesis),
-            "SOURCE_TYPE_NATS" => Some(Self::Nats),
             "SOURCE_TYPE_PUB_SUB" => Some(Self::PubSub),
-            "SOURCE_TYPE_PULSAR" => Some(Self::Pulsar),
-            "SOURCE_TYPE_VEC" => Some(Self::Vec),
             "SOURCE_TYPE_VOID" => Some(Self::Void),
             "SOURCE_TYPE_STDIN" => Some(Self::Stdin),
             _ => None,
@@ -890,11 +725,6 @@ impl RpcName for DeleteSourceRequest {
         "delete_source"
     }
 }
-impl RpcName for ResetSourceCheckpointRequest {
-    fn rpc_name() -> &'static str {
-        "reset_source_checkpoint"
-    }
-}
 impl RpcName for LastDeleteOpstampRequest {
     fn rpc_name() -> &'static str {
         "last_delete_opstamp"
@@ -918,31 +748,6 @@ impl RpcName for ListDeleteTasksRequest {
 impl RpcName for ListStaleSplitsRequest {
     fn rpc_name() -> &'static str {
         "list_stale_splits"
-    }
-}
-impl RpcName for OpenShardsRequest {
-    fn rpc_name() -> &'static str {
-        "open_shards"
-    }
-}
-impl RpcName for AcquireShardsRequest {
-    fn rpc_name() -> &'static str {
-        "acquire_shards"
-    }
-}
-impl RpcName for DeleteShardsRequest {
-    fn rpc_name() -> &'static str {
-        "delete_shards"
-    }
-}
-impl RpcName for PruneShardsRequest {
-    fn rpc_name() -> &'static str {
-        "prune_shards"
-    }
-}
-impl RpcName for ListShardsRequest {
-    fn rpc_name() -> &'static str {
-        "list_shards"
     }
 }
 impl RpcName for CreateIndexTemplateRequest {
@@ -1092,11 +897,6 @@ pub trait MetastoreService: std::fmt::Debug + Send + Sync + 'static {
         &self,
         request: DeleteSourceRequest,
     ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Resets source checkpoint.
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
     ///Gets last opstamp for a given `index_id`.
     async fn last_delete_opstamp(
         &self,
@@ -1122,44 +922,6 @@ pub trait MetastoreService: std::fmt::Debug + Send + Sync + 'static {
         &self,
         request: ListStaleSplitsRequest,
     ) -> crate::metastore::MetastoreResult<ListSplitsResponse>;
-    ///Shard API
-    ///
-    ///Note that for the file-backed metastore implementation, the requests are not processed atomically.
-    ///Indeed, each request comprises one or more subrequests that target different indexes and sources processed
-    ///independently. Responses list the requests that succeeded or failed in the fields `successes` and
-    ///`failures`.
-    async fn open_shards(
-        &self,
-        request: OpenShardsRequest,
-    ) -> crate::metastore::MetastoreResult<OpenShardsResponse>;
-    ///Acquires a set of shards for indexing. This RPC locks the shards for publishing thanks to a publish token and only
-    ///the last indexer that has acquired the shards is allowed to publish. The response returns for each subrequest the
-    ///list of acquired shards along with the positions to index from.
-    ///
-    ///If a requested shard is missing, this method does not return an error. It should simply return the list of
-    ///shards that were actually acquired.
-    ///
-    ///For this reason, AcquireShards.acquire_shards may return less subresponse than there was in the request.
-    ///Also they may be returned in any order.
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> crate::metastore::MetastoreResult<AcquireShardsResponse>;
-    ///Deletes a set of shards. This RPC deletes the shards from the metastore.
-    ///If the shard did not exist to begin with, the operation is successful and does not return any error.
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> crate::metastore::MetastoreResult<DeleteShardsResponse>;
-    ///Deletes outdated shards. This RPC deletes the shards from the metastore.
-    async fn prune_shards(
-        &self,
-        request: PruneShardsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    async fn list_shards(
-        &self,
-        request: ListShardsRequest,
-    ) -> crate::metastore::MetastoreResult<ListShardsResponse>;
     ///Creates an index template.
     async fn create_index_template(
         &self,
@@ -1440,13 +1202,6 @@ impl MetastoreService for MetastoreServiceClient {
     ) -> crate::metastore::MetastoreResult<EmptyResponse> {
         self.inner.0.delete_source(request).await
     }
-    #[tracing::instrument(skip_all, name = "metastore.reset_source_checkpoint")]
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.reset_source_checkpoint(request).await
-    }
     #[tracing::instrument(skip_all, name = "metastore.last_delete_opstamp")]
     async fn last_delete_opstamp(
         &self,
@@ -1481,41 +1236,6 @@ impl MetastoreService for MetastoreServiceClient {
         request: ListStaleSplitsRequest,
     ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
         self.inner.0.list_stale_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.open_shards")]
-    async fn open_shards(
-        &self,
-        request: OpenShardsRequest,
-    ) -> crate::metastore::MetastoreResult<OpenShardsResponse> {
-        self.inner.0.open_shards(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.acquire_shards")]
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> crate::metastore::MetastoreResult<AcquireShardsResponse> {
-        self.inner.0.acquire_shards(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.delete_shards")]
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> crate::metastore::MetastoreResult<DeleteShardsResponse> {
-        self.inner.0.delete_shards(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.prune_shards")]
-    async fn prune_shards(
-        &self,
-        request: PruneShardsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.prune_shards(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_shards")]
-    async fn list_shards(
-        &self,
-        request: ListShardsRequest,
-    ) -> crate::metastore::MetastoreResult<ListShardsResponse> {
-        self.inner.0.list_shards(request).await
     }
     #[tracing::instrument(skip_all, name = "metastore.create_index_template")]
     async fn create_index_template(
@@ -1697,12 +1417,6 @@ pub mod mock_metastore_service {
         ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
             self.inner.lock().await.delete_source(request).await
         }
-        async fn reset_source_checkpoint(
-            &self,
-            request: super::ResetSourceCheckpointRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.reset_source_checkpoint(request).await
-        }
         async fn last_delete_opstamp(
             &self,
             request: super::LastDeleteOpstampRequest,
@@ -1734,36 +1448,6 @@ pub mod mock_metastore_service {
             request: super::ListStaleSplitsRequest,
         ) -> crate::metastore::MetastoreResult<super::ListSplitsResponse> {
             self.inner.lock().await.list_stale_splits(request).await
-        }
-        async fn open_shards(
-            &self,
-            request: super::OpenShardsRequest,
-        ) -> crate::metastore::MetastoreResult<super::OpenShardsResponse> {
-            self.inner.lock().await.open_shards(request).await
-        }
-        async fn acquire_shards(
-            &self,
-            request: super::AcquireShardsRequest,
-        ) -> crate::metastore::MetastoreResult<super::AcquireShardsResponse> {
-            self.inner.lock().await.acquire_shards(request).await
-        }
-        async fn delete_shards(
-            &self,
-            request: super::DeleteShardsRequest,
-        ) -> crate::metastore::MetastoreResult<super::DeleteShardsResponse> {
-            self.inner.lock().await.delete_shards(request).await
-        }
-        async fn prune_shards(
-            &self,
-            request: super::PruneShardsRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.prune_shards(request).await
-        }
-        async fn list_shards(
-            &self,
-            request: super::ListShardsRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListShardsResponse> {
-            self.inner.lock().await.list_shards(request).await
         }
         async fn create_index_template(
             &self,
@@ -2132,22 +1816,6 @@ impl tower::Service<DeleteSourceRequest> for InnerMetastoreServiceClient {
         Box::pin(fut)
     }
 }
-impl tower::Service<ResetSourceCheckpointRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ResetSourceCheckpointRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.reset_source_checkpoint(request).await };
-        Box::pin(fut)
-    }
-}
 impl tower::Service<LastDeleteOpstampRequest> for InnerMetastoreServiceClient {
     type Response = LastDeleteOpstampResponse;
     type Error = crate::metastore::MetastoreError;
@@ -2225,86 +1893,6 @@ impl tower::Service<ListStaleSplitsRequest> for InnerMetastoreServiceClient {
     fn call(&mut self, request: ListStaleSplitsRequest) -> Self::Future {
         let svc = self.clone();
         let fut = async move { svc.0.list_stale_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<OpenShardsRequest> for InnerMetastoreServiceClient {
-    type Response = OpenShardsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: OpenShardsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.open_shards(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<AcquireShardsRequest> for InnerMetastoreServiceClient {
-    type Response = AcquireShardsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: AcquireShardsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.acquire_shards(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteShardsRequest> for InnerMetastoreServiceClient {
-    type Response = DeleteShardsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteShardsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.delete_shards(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<PruneShardsRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: PruneShardsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.prune_shards(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListShardsRequest> for InnerMetastoreServiceClient {
-    type Response = ListShardsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListShardsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_shards(request).await };
         Box::pin(fut)
     }
 }
@@ -2509,11 +2097,6 @@ struct MetastoreServiceTowerServiceStack {
         EmptyResponse,
         crate::metastore::MetastoreError,
     >,
-    reset_source_checkpoint_svc: quickwit_common::tower::BoxService<
-        ResetSourceCheckpointRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
     last_delete_opstamp_svc: quickwit_common::tower::BoxService<
         LastDeleteOpstampRequest,
         LastDeleteOpstampResponse,
@@ -2537,31 +2120,6 @@ struct MetastoreServiceTowerServiceStack {
     list_stale_splits_svc: quickwit_common::tower::BoxService<
         ListStaleSplitsRequest,
         ListSplitsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    open_shards_svc: quickwit_common::tower::BoxService<
-        OpenShardsRequest,
-        OpenShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    acquire_shards_svc: quickwit_common::tower::BoxService<
-        AcquireShardsRequest,
-        AcquireShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    delete_shards_svc: quickwit_common::tower::BoxService<
-        DeleteShardsRequest,
-        DeleteShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    prune_shards_svc: quickwit_common::tower::BoxService<
-        PruneShardsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_shards_svc: quickwit_common::tower::BoxService<
-        ListShardsRequest,
-        ListShardsResponse,
         crate::metastore::MetastoreError,
     >,
     create_index_template_svc: quickwit_common::tower::BoxService<
@@ -2717,12 +2275,6 @@ impl MetastoreService for MetastoreServiceTowerServiceStack {
     ) -> crate::metastore::MetastoreResult<EmptyResponse> {
         self.delete_source_svc.clone().ready().await?.call(request).await
     }
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.reset_source_checkpoint_svc.clone().ready().await?.call(request).await
-    }
     async fn last_delete_opstamp(
         &self,
         request: LastDeleteOpstampRequest,
@@ -2752,36 +2304,6 @@ impl MetastoreService for MetastoreServiceTowerServiceStack {
         request: ListStaleSplitsRequest,
     ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
         self.list_stale_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn open_shards(
-        &self,
-        request: OpenShardsRequest,
-    ) -> crate::metastore::MetastoreResult<OpenShardsResponse> {
-        self.open_shards_svc.clone().ready().await?.call(request).await
-    }
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> crate::metastore::MetastoreResult<AcquireShardsResponse> {
-        self.acquire_shards_svc.clone().ready().await?.call(request).await
-    }
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> crate::metastore::MetastoreResult<DeleteShardsResponse> {
-        self.delete_shards_svc.clone().ready().await?.call(request).await
-    }
-    async fn prune_shards(
-        &self,
-        request: PruneShardsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.prune_shards_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_shards(
-        &self,
-        request: ListShardsRequest,
-    ) -> crate::metastore::MetastoreResult<ListShardsResponse> {
-        self.list_shards_svc.clone().ready().await?.call(request).await
     }
     async fn create_index_template(
         &self,
@@ -3026,16 +2548,6 @@ type DeleteSourceLayer = quickwit_common::tower::BoxLayer<
     EmptyResponse,
     crate::metastore::MetastoreError,
 >;
-type ResetSourceCheckpointLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ResetSourceCheckpointRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ResetSourceCheckpointRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
 type LastDeleteOpstampLayer = quickwit_common::tower::BoxLayer<
     quickwit_common::tower::BoxService<
         LastDeleteOpstampRequest,
@@ -3084,56 +2596,6 @@ type ListStaleSplitsLayer = quickwit_common::tower::BoxLayer<
     >,
     ListStaleSplitsRequest,
     ListSplitsResponse,
-    crate::metastore::MetastoreError,
->;
-type OpenShardsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        OpenShardsRequest,
-        OpenShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    OpenShardsRequest,
-    OpenShardsResponse,
-    crate::metastore::MetastoreError,
->;
-type AcquireShardsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        AcquireShardsRequest,
-        AcquireShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    AcquireShardsRequest,
-    AcquireShardsResponse,
-    crate::metastore::MetastoreError,
->;
-type DeleteShardsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteShardsRequest,
-        DeleteShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteShardsRequest,
-    DeleteShardsResponse,
-    crate::metastore::MetastoreError,
->;
-type PruneShardsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        PruneShardsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    PruneShardsRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type ListShardsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListShardsRequest,
-        ListShardsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListShardsRequest,
-    ListShardsResponse,
     crate::metastore::MetastoreError,
 >;
 type CreateIndexTemplateLayer = quickwit_common::tower::BoxLayer<
@@ -3218,17 +2680,11 @@ pub struct MetastoreServiceTowerLayerStack {
     update_source_layers: Vec<UpdateSourceLayer>,
     toggle_source_layers: Vec<ToggleSourceLayer>,
     delete_source_layers: Vec<DeleteSourceLayer>,
-    reset_source_checkpoint_layers: Vec<ResetSourceCheckpointLayer>,
     last_delete_opstamp_layers: Vec<LastDeleteOpstampLayer>,
     create_delete_task_layers: Vec<CreateDeleteTaskLayer>,
     update_splits_delete_opstamp_layers: Vec<UpdateSplitsDeleteOpstampLayer>,
     list_delete_tasks_layers: Vec<ListDeleteTasksLayer>,
     list_stale_splits_layers: Vec<ListStaleSplitsLayer>,
-    open_shards_layers: Vec<OpenShardsLayer>,
-    acquire_shards_layers: Vec<AcquireShardsLayer>,
-    delete_shards_layers: Vec<DeleteShardsLayer>,
-    prune_shards_layers: Vec<PruneShardsLayer>,
-    list_shards_layers: Vec<ListShardsLayer>,
     create_index_template_layers: Vec<CreateIndexTemplateLayer>,
     get_index_template_layers: Vec<GetIndexTemplateLayer>,
     find_index_template_matches_layers: Vec<FindIndexTemplateMatchesLayer>,
@@ -3747,33 +3203,6 @@ impl MetastoreServiceTowerLayerStack {
         >>::Service as tower::Service<DeleteSourceRequest>>::Future: Send + 'static,
         L: tower::Layer<
                 quickwit_common::tower::BoxService<
-                    ResetSourceCheckpointRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ResetSourceCheckpointRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ResetSourceCheckpointRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ResetSourceCheckpointRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            ResetSourceCheckpointRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
                     LastDeleteOpstampRequest,
                     LastDeleteOpstampResponse,
                     crate::metastore::MetastoreError,
@@ -3899,131 +3328,6 @@ impl MetastoreServiceTowerLayerStack {
                 crate::metastore::MetastoreError,
             >,
         >>::Service as tower::Service<ListStaleSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    OpenShardsRequest,
-                    OpenShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                OpenShardsRequest,
-                OpenShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                OpenShardsRequest,
-                Response = OpenShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                OpenShardsRequest,
-                OpenShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<OpenShardsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AcquireShardsRequest,
-                    AcquireShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AcquireShardsRequest,
-                AcquireShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                AcquireShardsRequest,
-                Response = AcquireShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AcquireShardsRequest,
-                AcquireShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<AcquireShardsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteShardsRequest,
-                    DeleteShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteShardsRequest,
-                DeleteShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteShardsRequest,
-                Response = DeleteShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteShardsRequest,
-                DeleteShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<DeleteShardsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PruneShardsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PruneShardsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                PruneShardsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PruneShardsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<PruneShardsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListShardsRequest,
-                    ListShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListShardsRequest,
-                ListShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListShardsRequest,
-                Response = ListShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListShardsRequest,
-                ListShardsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ListShardsRequest>>::Future: Send + 'static,
         L: tower::Layer<
                 quickwit_common::tower::BoxService<
                     CreateIndexTemplateRequest,
@@ -4225,8 +3529,6 @@ impl MetastoreServiceTowerLayerStack {
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
         self.delete_source_layers
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.reset_source_checkpoint_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
         self.last_delete_opstamp_layers
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
         self.create_delete_task_layers
@@ -4236,16 +3538,6 @@ impl MetastoreServiceTowerLayerStack {
         self.list_delete_tasks_layers
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
         self.list_stale_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.open_shards_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.acquire_shards_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.delete_shards_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.prune_shards_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_shards_layers
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
         self.create_index_template_layers
             .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
@@ -4653,28 +3945,6 @@ impl MetastoreServiceTowerLayerStack {
         self.delete_source_layers.push(quickwit_common::tower::BoxLayer::new(layer));
         self
     }
-    pub fn stack_reset_source_checkpoint_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ResetSourceCheckpointRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ResetSourceCheckpointRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            ResetSourceCheckpointRequest,
-        >>::Future: Send + 'static,
-    {
-        self.reset_source_checkpoint_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
     pub fn stack_last_delete_opstamp_layer<L>(mut self, layer: L) -> Self
     where
         L: tower::Layer<
@@ -4773,101 +4043,6 @@ impl MetastoreServiceTowerLayerStack {
         <L::Service as tower::Service<ListStaleSplitsRequest>>::Future: Send + 'static,
     {
         self.list_stale_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_open_shards_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    OpenShardsRequest,
-                    OpenShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                OpenShardsRequest,
-                Response = OpenShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<OpenShardsRequest>>::Future: Send + 'static,
-    {
-        self.open_shards_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_acquire_shards_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AcquireShardsRequest,
-                    AcquireShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                AcquireShardsRequest,
-                Response = AcquireShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<AcquireShardsRequest>>::Future: Send + 'static,
-    {
-        self.acquire_shards_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_delete_shards_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteShardsRequest,
-                    DeleteShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteShardsRequest,
-                Response = DeleteShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<DeleteShardsRequest>>::Future: Send + 'static,
-    {
-        self.delete_shards_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_prune_shards_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PruneShardsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                PruneShardsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<PruneShardsRequest>>::Future: Send + 'static,
-    {
-        self.prune_shards_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_shards_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListShardsRequest,
-                    ListShardsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListShardsRequest,
-                Response = ListShardsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ListShardsRequest>>::Future: Send + 'static,
-    {
-        self.list_shards_layers.push(quickwit_common::tower::BoxLayer::new(layer));
         self
     }
     pub fn stack_create_index_template_layer<L>(mut self, layer: L) -> Self
@@ -5220,14 +4395,6 @@ impl MetastoreServiceTowerLayerStack {
                 quickwit_common::tower::BoxService::new(inner_client.clone()),
                 |svc, layer| layer.layer(svc),
             );
-        let reset_source_checkpoint_svc = self
-            .reset_source_checkpoint_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
         let last_delete_opstamp_svc = self
             .last_delete_opstamp_layers
             .into_iter()
@@ -5262,46 +4429,6 @@ impl MetastoreServiceTowerLayerStack {
             );
         let list_stale_splits_svc = self
             .list_stale_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let open_shards_svc = self
-            .open_shards_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let acquire_shards_svc = self
-            .acquire_shards_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let delete_shards_svc = self
-            .delete_shards_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let prune_shards_svc = self
-            .prune_shards_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_shards_svc = self
-            .list_shards_layers
             .into_iter()
             .rev()
             .fold(
@@ -5378,17 +4505,11 @@ impl MetastoreServiceTowerLayerStack {
             update_source_svc,
             toggle_source_svc,
             delete_source_svc,
-            reset_source_checkpoint_svc,
             last_delete_opstamp_svc,
             create_delete_task_svc,
             update_splits_delete_opstamp_svc,
             list_delete_tasks_svc,
             list_stale_splits_svc,
-            open_shards_svc,
-            acquire_shards_svc,
-            delete_shards_svc,
-            prune_shards_svc,
-            list_shards_svc,
             create_index_template_svc,
             get_index_template_svc,
             find_index_template_matches_svc,
@@ -5610,12 +4731,6 @@ where
             Future = BoxFuture<EmptyResponse, crate::metastore::MetastoreError>,
         >
         + tower::Service<
-            ResetSourceCheckpointRequest,
-            Response = EmptyResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<EmptyResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
             LastDeleteOpstampRequest,
             Response = LastDeleteOpstampResponse,
             Error = crate::metastore::MetastoreError,
@@ -5650,36 +4765,6 @@ where
             Response = ListSplitsResponse,
             Error = crate::metastore::MetastoreError,
             Future = BoxFuture<ListSplitsResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
-            OpenShardsRequest,
-            Response = OpenShardsResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<OpenShardsResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
-            AcquireShardsRequest,
-            Response = AcquireShardsResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<AcquireShardsResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
-            DeleteShardsRequest,
-            Response = DeleteShardsResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<DeleteShardsResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
-            PruneShardsRequest,
-            Response = EmptyResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<EmptyResponse, crate::metastore::MetastoreError>,
-        >
-        + tower::Service<
-            ListShardsRequest,
-            Response = ListShardsResponse,
-            Error = crate::metastore::MetastoreError,
-            Future = BoxFuture<ListShardsResponse, crate::metastore::MetastoreError>,
         >
         + tower::Service<
             CreateIndexTemplateRequest,
@@ -5850,12 +4935,6 @@ where
     ) -> crate::metastore::MetastoreResult<EmptyResponse> {
         self.clone().call(request).await
     }
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.clone().call(request).await
-    }
     async fn last_delete_opstamp(
         &self,
         request: LastDeleteOpstampRequest,
@@ -5884,36 +4963,6 @@ where
         &self,
         request: ListStaleSplitsRequest,
     ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
-        self.clone().call(request).await
-    }
-    async fn open_shards(
-        &self,
-        request: OpenShardsRequest,
-    ) -> crate::metastore::MetastoreResult<OpenShardsResponse> {
-        self.clone().call(request).await
-    }
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> crate::metastore::MetastoreResult<AcquireShardsResponse> {
-        self.clone().call(request).await
-    }
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> crate::metastore::MetastoreResult<DeleteShardsResponse> {
-        self.clone().call(request).await
-    }
-    async fn prune_shards(
-        &self,
-        request: PruneShardsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.clone().call(request).await
-    }
-    async fn list_shards(
-        &self,
-        request: ListShardsRequest,
-    ) -> crate::metastore::MetastoreResult<ListShardsResponse> {
         self.clone().call(request).await
     }
     async fn create_index_template(
@@ -6367,24 +5416,6 @@ where
                 DeleteSourceRequest::rpc_name(),
             ))
     }
-    async fn reset_source_checkpoint(
-        &self,
-        request: ResetSourceCheckpointRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .reset_source_checkpoint(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ResetSourceCheckpointRequest::rpc_name(),
-            ))
-    }
     async fn last_delete_opstamp(
         &self,
         request: LastDeleteOpstampRequest,
@@ -6473,96 +5504,6 @@ where
             .map_err(|status| crate::error::grpc_status_to_service_error(
                 status,
                 ListStaleSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn open_shards(
-        &self,
-        request: OpenShardsRequest,
-    ) -> crate::metastore::MetastoreResult<OpenShardsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .open_shards(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                OpenShardsRequest::rpc_name(),
-            ))
-    }
-    async fn acquire_shards(
-        &self,
-        request: AcquireShardsRequest,
-    ) -> crate::metastore::MetastoreResult<AcquireShardsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .acquire_shards(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                AcquireShardsRequest::rpc_name(),
-            ))
-    }
-    async fn delete_shards(
-        &self,
-        request: DeleteShardsRequest,
-    ) -> crate::metastore::MetastoreResult<DeleteShardsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .delete_shards(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteShardsRequest::rpc_name(),
-            ))
-    }
-    async fn prune_shards(
-        &self,
-        request: PruneShardsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .prune_shards(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                PruneShardsRequest::rpc_name(),
-            ))
-    }
-    async fn list_shards(
-        &self,
-        request: ListShardsRequest,
-    ) -> crate::metastore::MetastoreResult<ListShardsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_shards(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListShardsRequest::rpc_name(),
             ))
     }
     async fn create_index_template(
@@ -7171,29 +6112,6 @@ for MetastoreServiceGrpcServerAdapter {
         };
         <_ as tracing::Instrument>::instrument(fut, span).await
     }
-    async fn reset_source_checkpoint(
-        &self,
-        tonic_request: tonic::Request<ResetSourceCheckpointRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.reset_source_checkpoint");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .reset_source_checkpoint(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
     async fn last_delete_opstamp(
         &self,
         tonic_request: tonic::Request<LastDeleteOpstampRequest>,
@@ -7303,121 +6221,6 @@ for MetastoreServiceGrpcServerAdapter {
             self.inner
                 .0
                 .list_stale_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn open_shards(
-        &self,
-        tonic_request: tonic::Request<OpenShardsRequest>,
-    ) -> Result<tonic::Response<OpenShardsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.open_shards");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .open_shards(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn acquire_shards(
-        &self,
-        tonic_request: tonic::Request<AcquireShardsRequest>,
-    ) -> Result<tonic::Response<AcquireShardsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.acquire_shards");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .acquire_shards(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn delete_shards(
-        &self,
-        tonic_request: tonic::Request<DeleteShardsRequest>,
-    ) -> Result<tonic::Response<DeleteShardsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.delete_shards");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .delete_shards(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn prune_shards(
-        &self,
-        tonic_request: tonic::Request<PruneShardsRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.prune_shards");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .prune_shards(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_shards(
-        &self,
-        tonic_request: tonic::Request<ListShardsRequest>,
-    ) -> Result<tonic::Response<ListShardsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_shards");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_shards(request)
                 .await
                 .map(tonic::Response::new)
                 .map_err(crate::error::grpc_error_to_grpc_status)
@@ -8274,33 +7077,6 @@ pub mod metastore_service_grpc_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Resets source checkpoint.
-        pub async fn reset_source_checkpoint(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ResetSourceCheckpointRequest>,
-        ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/ResetSourceCheckpoint",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "ResetSourceCheckpoint",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
         /// Gets last opstamp for a given `index_id`.
         pub async fn last_delete_opstamp(
             &mut self,
@@ -8445,157 +7221,6 @@ pub mod metastore_service_grpc_client {
                         "quickwit.metastore.MetastoreService",
                         "ListStaleSplits",
                     ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Shard API
-        ///
-        /// Note that for the file-backed metastore implementation, the requests are not processed atomically.
-        /// Indeed, each request comprises one or more subrequests that target different indexes and sources processed
-        /// independently. Responses list the requests that succeeded or failed in the fields `successes` and
-        /// `failures`.
-        pub async fn open_shards(
-            &mut self,
-            request: impl tonic::IntoRequest<super::OpenShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OpenShardsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/OpenShards",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("quickwit.metastore.MetastoreService", "OpenShards"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Acquires a set of shards for indexing. This RPC locks the shards for publishing thanks to a publish token and only
-        /// the last indexer that has acquired the shards is allowed to publish. The response returns for each subrequest the
-        /// list of acquired shards along with the positions to index from.
-        ///
-        /// If a requested shard is missing, this method does not return an error. It should simply return the list of
-        /// shards that were actually acquired.
-        ///
-        /// For this reason, AcquireShards.acquire_shards may return less subresponse than there was in the request.
-        /// Also they may be returned in any order.
-        pub async fn acquire_shards(
-            &mut self,
-            request: impl tonic::IntoRequest<super::AcquireShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AcquireShardsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/AcquireShards",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "AcquireShards",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Deletes a set of shards. This RPC deletes the shards from the metastore.
-        /// If the shard did not exist to begin with, the operation is successful and does not return any error.
-        pub async fn delete_shards(
-            &mut self,
-            request: impl tonic::IntoRequest<super::DeleteShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::DeleteShardsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/DeleteShards",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "DeleteShards",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Deletes outdated shards. This RPC deletes the shards from the metastore.
-        pub async fn prune_shards(
-            &mut self,
-            request: impl tonic::IntoRequest<super::PruneShardsRequest>,
-        ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status> {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/PruneShards",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("quickwit.metastore.MetastoreService", "PruneShards"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn list_shards(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ListShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListShardsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/ListShards",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("quickwit.metastore.MetastoreService", "ListShards"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -8935,11 +7560,6 @@ pub mod metastore_service_grpc_server {
             &self,
             request: tonic::Request<super::DeleteSourceRequest>,
         ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status>;
-        /// Resets source checkpoint.
-        async fn reset_source_checkpoint(
-            &self,
-            request: tonic::Request<super::ResetSourceCheckpointRequest>,
-        ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status>;
         /// Gets last opstamp for a given `index_id`.
         async fn last_delete_opstamp(
             &self,
@@ -8975,56 +7595,6 @@ pub mod metastore_service_grpc_server {
             request: tonic::Request<super::ListStaleSplitsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListSplitsResponse>,
-            tonic::Status,
-        >;
-        /// Shard API
-        ///
-        /// Note that for the file-backed metastore implementation, the requests are not processed atomically.
-        /// Indeed, each request comprises one or more subrequests that target different indexes and sources processed
-        /// independently. Responses list the requests that succeeded or failed in the fields `successes` and
-        /// `failures`.
-        async fn open_shards(
-            &self,
-            request: tonic::Request<super::OpenShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::OpenShardsResponse>,
-            tonic::Status,
-        >;
-        /// Acquires a set of shards for indexing. This RPC locks the shards for publishing thanks to a publish token and only
-        /// the last indexer that has acquired the shards is allowed to publish. The response returns for each subrequest the
-        /// list of acquired shards along with the positions to index from.
-        ///
-        /// If a requested shard is missing, this method does not return an error. It should simply return the list of
-        /// shards that were actually acquired.
-        ///
-        /// For this reason, AcquireShards.acquire_shards may return less subresponse than there was in the request.
-        /// Also they may be returned in any order.
-        async fn acquire_shards(
-            &self,
-            request: tonic::Request<super::AcquireShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::AcquireShardsResponse>,
-            tonic::Status,
-        >;
-        /// Deletes a set of shards. This RPC deletes the shards from the metastore.
-        /// If the shard did not exist to begin with, the operation is successful and does not return any error.
-        async fn delete_shards(
-            &self,
-            request: tonic::Request<super::DeleteShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::DeleteShardsResponse>,
-            tonic::Status,
-        >;
-        /// Deletes outdated shards. This RPC deletes the shards from the metastore.
-        async fn prune_shards(
-            &self,
-            request: tonic::Request<super::PruneShardsRequest>,
-        ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status>;
-        async fn list_shards(
-            &self,
-            request: tonic::Request<super::ListShardsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListShardsResponse>,
             tonic::Status,
         >;
         /// Creates an index template.
@@ -10150,55 +8720,6 @@ pub mod metastore_service_grpc_server {
                     };
                     Box::pin(fut)
                 }
-                "/quickwit.metastore.MetastoreService/ResetSourceCheckpoint" => {
-                    #[allow(non_camel_case_types)]
-                    struct ResetSourceCheckpointSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::ResetSourceCheckpointRequest>
-                    for ResetSourceCheckpointSvc<T> {
-                        type Response = super::EmptyResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ResetSourceCheckpointRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::reset_source_checkpoint(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = ResetSourceCheckpointSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
                 "/quickwit.metastore.MetastoreService/LastDeleteOpstamp" => {
                     #[allow(non_camel_case_types)]
                     struct LastDeleteOpstampSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
@@ -10434,236 +8955,6 @@ pub mod metastore_service_grpc_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListStaleSplitsSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/OpenShards" => {
-                    #[allow(non_camel_case_types)]
-                    struct OpenShardsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::OpenShardsRequest>
-                    for OpenShardsSvc<T> {
-                        type Response = super::OpenShardsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::OpenShardsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::open_shards(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = OpenShardsSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/AcquireShards" => {
-                    #[allow(non_camel_case_types)]
-                    struct AcquireShardsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::AcquireShardsRequest>
-                    for AcquireShardsSvc<T> {
-                        type Response = super::AcquireShardsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::AcquireShardsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::acquire_shards(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = AcquireShardsSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/DeleteShards" => {
-                    #[allow(non_camel_case_types)]
-                    struct DeleteShardsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::DeleteShardsRequest>
-                    for DeleteShardsSvc<T> {
-                        type Response = super::DeleteShardsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::DeleteShardsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::delete_shards(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = DeleteShardsSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/PruneShards" => {
-                    #[allow(non_camel_case_types)]
-                    struct PruneShardsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::PruneShardsRequest>
-                    for PruneShardsSvc<T> {
-                        type Response = super::EmptyResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::PruneShardsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::prune_shards(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = PruneShardsSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/ListShards" => {
-                    #[allow(non_camel_case_types)]
-                    struct ListShardsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
-                    impl<
-                        T: MetastoreServiceGrpc,
-                    > tonic::server::UnaryService<super::ListShardsRequest>
-                    for ListShardsSvc<T> {
-                        type Response = super::ListShardsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ListShardsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_shards(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = ListShardsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

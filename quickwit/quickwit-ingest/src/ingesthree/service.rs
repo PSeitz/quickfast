@@ -432,8 +432,6 @@ mod tests {
             assert_eq!(success.source_id, INGEST_V2_SOURCE_ID);
             assert_eq!(success.num_ingested_docs, 1);
             assert_eq!(success.parse_failures.len(), usize::from(validate_docs));
-            assert!(success.shard_id.is_none());
-            assert!(success.replication_position_inclusive.is_none());
             assert_eq!(
                 counter!(parent: requests, "status" => "success", "code" => "ok").get(),
                 1

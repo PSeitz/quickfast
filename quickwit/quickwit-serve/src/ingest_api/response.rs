@@ -135,8 +135,6 @@ mod tests {
                 subrequest_id: 0,
                 index_uid: Some(IndexUid::new_with_random_ulid("myindex")),
                 source_id: String::from("mysource"),
-                shard_id: Some("myshard".into()),
-                replication_position_inclusive: None,
                 num_ingested_docs: 5,
                 parse_failures: vec![],
             }],
@@ -156,8 +154,6 @@ mod tests {
                 subrequest_id: 0,
                 index_uid: Some(IndexUid::new_with_random_ulid("myindex")),
                 source_id: String::from("mysource"),
-                shard_id: Some("myshard".into()),
-                replication_position_inclusive: None,
                 num_ingested_docs: 5,
                 parse_failures: vec![ParseFailure {
                     doc_uid: Some(DocUid::for_test(42)),

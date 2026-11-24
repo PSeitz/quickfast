@@ -15,5 +15,4 @@ disallowed-methods = [
 ignore-interior-mutability = [
     "bytes::Bytes",
     "bytestring::ByteString",
-    "quickwit_proto::types::ShardId",
 ]

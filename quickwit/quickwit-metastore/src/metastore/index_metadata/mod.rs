@@ -28,8 +28,6 @@ use serde::{Deserialize, Serialize};
 use serialize::VersionedIndexMetadata;
 use time::OffsetDateTime;
 
-use crate::checkpoint::IndexCheckpoint;
-
 /// An index metadata carries all meta data about an index.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(into = "VersionedIndexMetadata")]
@@ -39,8 +37,6 @@ pub struct IndexMetadata {
     pub index_uid: IndexUid,
     /// Index configuration
     pub index_config: IndexConfig,
-    /// Per-source map of checkpoint for the given index.
-    pub checkpoint: IndexCheckpoint,
     /// Time at which the index was created.
     pub create_timestamp: i64,
     /// Sources
@@ -59,7 +55,6 @@ impl IndexMetadata {
         IndexMetadata {
             index_uid,
             index_config,
-            checkpoint: Default::default(),
             create_timestamp: OffsetDateTime::now_utc().unix_timestamp(),
             sources: HashMap::default(),
         }
@@ -143,7 +138,6 @@ impl IndexMetadata {
                 source_id: source_config.source_id,
             })),
             Entry::Vacant(entry) => {
-                self.checkpoint.add_source(&source_config.source_id);
                 entry.insert(source_config);
                 Ok(())
             }
@@ -188,7 +182,6 @@ impl IndexMetadata {
                 source_id: source_id.to_string(),
             })
         })?;
-        self.checkpoint.remove_source(source_id);
         Ok(())
     }
 }
@@ -196,31 +189,10 @@ impl IndexMetadata {
 #[cfg(any(test, feature = "testsuite"))]
 impl quickwit_config::TestableForRegression for IndexMetadata {
     fn sample_for_regression() -> IndexMetadata {
-        use std::collections::BTreeMap;
-
-        use quickwit_proto::types::Position;
-
-        use crate::checkpoint::{PartitionId, SourceCheckpoint, SourceCheckpointDelta};
-
         let index_config = IndexConfig::sample_for_regression();
-
-        let mut source_checkpoint = SourceCheckpoint::default();
-        let delta = SourceCheckpointDelta::from_partition_delta(
-            PartitionId::from(0i64),
-            Position::Beginning,
-            Position::offset(42u64),
-        )
-        .unwrap();
-        source_checkpoint.try_apply_delta(delta).unwrap();
-
-        let per_source_checkpoint: BTreeMap<String, SourceCheckpoint> =
-            BTreeMap::from_iter([("kafka-source".to_string(), source_checkpoint)]);
-        let checkpoint = IndexCheckpoint::from(per_source_checkpoint);
-
         let mut index_metadata = IndexMetadata {
             index_uid: IndexUid::for_test(&index_config.index_id, 1),
             index_config,
-            checkpoint,
             create_timestamp: 1789,
             sources: Default::default(),
         };
@@ -232,7 +204,6 @@ impl quickwit_config::TestableForRegression for IndexMetadata {
 
     fn assert_equality(&self, other: &Self) {
         self.index_config().assert_equality(other.index_config());
-        assert_eq!(self.checkpoint, other.checkpoint);
         assert_eq!(self.create_timestamp, other.create_timestamp);
         assert_eq!(self.sources, other.sources);
     }

@@ -20,7 +20,6 @@ use colored::Colorize;
 use itertools::Itertools;
 use quickwit_common::uri::Uri;
 use quickwit_config::{ConfigFormat, SourceConfig, validate_identifier};
-use quickwit_metastore::checkpoint::SourceCheckpoint;
 use quickwit_proto::types::{IndexId, SourceId};
 use quickwit_storage::{StorageResolver, load_file};
 use serde_json::Value as JsonValue;
@@ -135,19 +134,6 @@ pub fn build_source_command() -> Command {
                         .required(true),
                 ])
             )
-        .subcommand(
-            Command::new("reset-checkpoint")
-                .about("Resets a source checkpoint.")
-                .alias("reset")
-                .args(&[
-                    arg!(--index <INDEX_ID> "Index ID")
-                        .display_order(1)
-                        .required(true),
-                    arg!(--source <SOURCE_ID> "Source ID")
-                        .display_order(2)
-                        .required(true),
-                ])
-            )
         .arg_required_else_help(true)
 }
 
@@ -197,14 +183,6 @@ pub struct ListSourcesArgs {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct ResetCheckpointArgs {
-    pub client_args: ClientArgs,
-    pub index_id: IndexId,
-    pub source_id: SourceId,
-    pub assume_yes: bool,
-}
-
-#[derive(Debug, Eq, PartialEq)]
 pub enum SourceCliCommand {
     CreateSource(CreateSourceArgs),
     UpdateSource(UpdateSourceArgs),
@@ -212,7 +190,6 @@ pub enum SourceCliCommand {
     DeleteSource(DeleteSourceArgs),
     DescribeSource(DescribeSourceArgs),
     ListSources(ListSourcesArgs),
-    ResetCheckpoint(ResetCheckpointArgs),
 }
 
 impl SourceCliCommand {
@@ -224,7 +201,6 @@ impl SourceCliCommand {
             Self::DeleteSource(args) => delete_source_cli(args).await,
             Self::DescribeSource(args) => describe_source_cli(args).await,
             Self::ListSources(args) => list_sources_cli(args).await,
-            Self::ResetCheckpoint(args) => reset_checkpoint_cli(args).await,
         }
     }
 
@@ -244,9 +220,6 @@ impl SourceCliCommand {
             "delete" => Self::parse_delete_args(submatches).map(Self::DeleteSource),
             "describe" => Self::parse_describe_args(submatches).map(Self::DescribeSource),
             "list" => Self::parse_list_args(submatches).map(Self::ListSources),
-            "reset-checkpoint" => {
-                Self::parse_reset_checkpoint_args(submatches).map(Self::ResetCheckpoint)
-            }
             _ => bail!("unknown source subcommand `{subcommand}`"),
         }
     }
@@ -352,23 +325,6 @@ impl SourceCliCommand {
             index_id,
         })
     }
-
-    fn parse_reset_checkpoint_args(mut matches: ArgMatches) -> anyhow::Result<ResetCheckpointArgs> {
-        let client_args = ClientArgs::parse(&mut matches)?;
-        let index_id = matches
-            .remove_one::<String>("index")
-            .expect("`index` should be a required arg.");
-        let source_id = matches
-            .remove_one::<String>("source")
-            .expect("`source` should be a required arg.");
-        let assume_yes = matches.get_flag("yes");
-        Ok(ResetCheckpointArgs {
-            client_args,
-            index_id,
-            source_id,
-            assume_yes,
-        })
-    }
 }
 
 async fn create_source_cli(args: CreateSourceArgs) -> anyhow::Result<()> {
@@ -459,28 +415,14 @@ async fn describe_source_cli(args: DescribeSourceArgs) -> anyhow::Result<()> {
         .get(&args.index_id)
         .await
         .context("failed to fetch index metadata")?;
-    let source_checkpoint = index_metadata
-        .checkpoint
-        .source_checkpoint(&args.source_id)
-        .cloned()
-        .unwrap_or_default();
-    let (source_table, params_table, checkpoint_table) = make_describe_source_tables(
-        source_checkpoint,
-        index_metadata.sources.into_values(),
-        &args.source_id,
-    )?;
-    display_tables(&[source_table, params_table, checkpoint_table]);
+    let (source_table, params_table) =
+        make_describe_source_tables(index_metadata.sources.into_values(), &args.source_id)?;
+    display_tables(&[source_table, params_table]);
     Ok(())
 }
 
-fn make_describe_source_tables<I>(
-    checkpoint: SourceCheckpoint,
-    sources: I,
-    source_id: &str,
-) -> anyhow::Result<(Table, Table, Table)>
-where
-    I: IntoIterator<Item = SourceConfig>,
-{
+fn make_describe_source_tables<I>(sources: I, source_id: &str) -> anyhow::Result<(Table, Table)>
+where I: IntoIterator<Item = SourceConfig> {
     let source = sources
         .into_iter()
         .find(|source| source.source_id == source_id)
@@ -499,15 +441,7 @@ where
         .sorted_by(|left, right| left.key.cmp(&right.key));
     let params_table = make_table("Parameters", params_rows, false);
 
-    let checkpoint_rows = checkpoint
-        .iter()
-        .map(|(partition_id, position)| CheckpointRow {
-            partition_id: partition_id.0.to_string(),
-            offset: position.to_string(),
-        })
-        .sorted_by(|left, right| left.partition_id.cmp(&right.partition_id));
-    let checkpoint_table = make_table("Checkpoint", checkpoint_rows, false);
-    Ok((source_table, params_table, checkpoint_table))
+    Ok((source_table, params_table))
 }
 
 async fn list_sources_cli(args: ListSourcesArgs) -> anyhow::Result<()> {
@@ -553,41 +487,11 @@ struct ParamsRow {
     value: JsonValue,
 }
 
-#[derive(Tabled)]
-struct CheckpointRow {
-    #[tabled(rename = "Partition ID")]
-    partition_id: String,
-    #[tabled(rename = "Offset")]
-    offset: String,
-}
-
 fn display_tables(tables: &[Table]) {
     println!(
         "{}",
         tables.iter().map(|table| table.to_string()).join("\n\n")
     );
-}
-
-async fn reset_checkpoint_cli(args: ResetCheckpointArgs) -> anyhow::Result<()> {
-    debug!(args=?args, "reset-checkpoint-source");
-    println!("❯ Resetting source checkpoint...");
-    if !args.assume_yes {
-        let prompt =
-            "This operation will reset the source checkpoints. Do you want to proceed?".to_string();
-        if !prompt_confirmation(&prompt, false) {
-            return Ok(());
-        }
-    }
-    let qw_client = args.client_args.client();
-    qw_client
-        .sources(&args.index_id)
-        .reset_checkpoint(&args.source_id)
-        .await?;
-    println!(
-        "{} Checkpoint successfully deleted.",
-        "✔".color(GREEN_COLOR)
-    );
-    Ok(())
 }
 
 /// Recursively flattens a JSON object into a vector of `(path, value)` tuples where `path`
@@ -623,8 +527,6 @@ mod tests {
     use std::str::FromStr;
 
     use quickwit_config::{SourceInputFormat, SourceParams};
-    use quickwit_metastore::checkpoint::PartitionId;
-    use quickwit_proto::types::Position;
     use serde_json::json;
 
     use super::*;
@@ -638,10 +540,12 @@ mod tests {
             flatten_json(json!(JsonValue::Null)),
             vec![("".to_string(), JsonValue::Null)]
         );
+        let mut flattened = flatten_json(
+            json!({"foo": {"bar": JsonValue::Bool(true)}, "baz": JsonValue::Bool(false)}),
+        );
+        flattened.sort_by(|left, right| left.0.cmp(&right.0));
         assert_eq!(
-            flatten_json(
-                json!({"foo": {"bar": JsonValue::Bool(true)}, "baz": JsonValue::Bool(false)})
-            ),
+            flattened,
             vec![
                 ("baz".to_string(), JsonValue::Bool(false)),
                 ("foo.bar".to_string(), JsonValue::Bool(true)),
@@ -796,43 +700,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_reset_checkpoint_args() {
-        let app = build_cli().no_binary_name(true);
-        let matches = app
-            .try_get_matches_from(vec![
-                "source",
-                "reset-checkpoint",
-                "--index",
-                "hdfs-logs",
-                "--source",
-                "hdfs-logs-source",
-                "--yes",
-            ])
-            .unwrap();
-        let command = CliCommand::parse_cli_args(matches).unwrap();
-        let expected_command =
-            CliCommand::Source(SourceCliCommand::ResetCheckpoint(ResetCheckpointArgs {
-                client_args: ClientArgs::default(),
-                index_id: "hdfs-logs".to_string(),
-                source_id: "hdfs-logs-source".to_string(),
-                assume_yes: true,
-            }));
-        assert_eq!(command, expected_command);
-    }
-
-    #[test]
     fn test_make_describe_source_tables() {
-        assert!(
-            make_describe_source_tables(SourceCheckpoint::default(), [], "source-does-not-exist")
-                .is_err()
-        );
+        assert!(make_describe_source_tables([], "source-does-not-exist").is_err());
 
-        let checkpoint: SourceCheckpoint = vec![("shard-000", ""), ("shard-001", "1234567890")]
-            .into_iter()
-            .map(|(partition_id, offset)| {
-                (PartitionId::from(partition_id), Position::offset(offset))
-            })
-            .collect();
         let sources = vec![SourceConfig {
             source_id: "foo-source".to_string(),
             num_pipelines: NonZeroUsize::MIN,
@@ -851,18 +721,8 @@ mod tests {
             key: "filepath".to_string(),
             value: JsonValue::String(expected_uri.to_string()),
         }];
-        let expected_checkpoint = vec![
-            CheckpointRow {
-                partition_id: "shard-000".to_string(),
-                offset: "".to_string(),
-            },
-            CheckpointRow {
-                partition_id: "shard-001".to_string(),
-                offset: "1234567890".to_string(),
-            },
-        ];
-        let (source_table, params_table, checkpoint_table) =
-            make_describe_source_tables(checkpoint, sources, "foo-source").unwrap();
+        let (source_table, params_table) =
+            make_describe_source_tables(sources, "foo-source").unwrap();
         assert_eq!(
             source_table.to_string(),
             make_table("Source", expected_source, true).to_string()
@@ -870,10 +730,6 @@ mod tests {
         assert_eq!(
             params_table.to_string(),
             make_table("Parameters", expected_params, false).to_string()
-        );
-        assert_eq!(
-            checkpoint_table.to_string(),
-            make_table("Checkpoint", expected_checkpoint, false).to_string()
         );
     }
 
