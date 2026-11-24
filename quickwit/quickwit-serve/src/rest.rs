@@ -178,7 +178,6 @@ pub(crate) async fn start_rest_server(
         quickwit_services.indexing_service_opt.clone(),
         quickwit_services.janitor_service_opt.clone(),
         quickwit_services.compactor_service_opt.clone(),
-        quickwit_services.ingester_opt.clone(),
     )
     .boxed();
 
@@ -193,8 +192,7 @@ pub(crate) async fn start_rest_server(
     let developer_routes = developer_api_routes(
         quickwit_services.cluster.clone(),
         quickwit_services.env_filter_reload_fn.clone(),
-    )
-    .boxed();
+    );
 
     // `/api/v1/*` routes.
     let api_v1_root_route = api_v1_routes(quickwit_services.clone());
@@ -282,7 +280,6 @@ pub(crate) async fn start_health_check_server(
         quickwit_services.indexing_service_opt.clone(),
         quickwit_services.janitor_service_opt.clone(),
         quickwit_services.compactor_service_opt.clone(),
-        quickwit_services.ingester_opt.clone(),
     )
     .recover(recover_fn_final)
     .boxed();
@@ -793,7 +790,6 @@ mod tests {
     use quickwit_config::NodeConfig;
     use quickwit_index_management::IndexService;
     use quickwit_ingest::{IngestApiService, IngestServiceClient};
-    use quickwit_proto::control_plane::ControlPlaneServiceClient;
     use quickwit_proto::ingest::router::IngestRouterServiceClient;
     use quickwit_proto::metastore::MetastoreServiceClient;
     use quickwit_search::MockSearchService;
@@ -924,24 +920,18 @@ mod tests {
         let metastore_client = MetastoreServiceClient::mocked();
         let index_service =
             IndexService::new(metastore_client.clone(), StorageResolver::unconfigured());
-        let control_plane_client = ControlPlaneServiceClient::mocked();
         let transport = ChitchatTransport::default();
         let cluster = create_cluster_for_test(Vec::new(), &[], &transport, false)
             .await
             .unwrap();
         let quickwit_services = QuickwitServices {
             _report_splits_subscription_handle_opt: None,
-            _local_shards_update_listener_handle_opt: None,
             cluster,
             compaction_service_client_opt: None,
-            control_plane_server_opt: None,
-            control_plane_client,
             indexing_service_opt: None,
             index_manager: index_service,
             ingest_service: ingest_service_client(),
-            ingest_router_opt: None,
             ingest_router_service: IngestRouterServiceClient::mocked().into(),
-            ingester_opt: None,
             ingesthree_service_opt: None,
             janitor_service_opt: None,
             otlp_logs_service_opt: None,

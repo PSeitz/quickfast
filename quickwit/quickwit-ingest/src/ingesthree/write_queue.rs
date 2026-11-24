@@ -329,6 +329,21 @@ impl WriteQueue {
         self.sender.closed().await;
     }
 
+    /// Publishes an initial capacity score before node readiness is advertised so routers
+    /// never observe a ready `ingesthree` indexer without a capacity key.
+    pub async fn publish_initial_capacity(&self, cluster: &Cluster) {
+        let mut tracker = {
+            let admission = self.admission.lock().expect("admission mutex poisoned");
+            CapacityTracker::new(admission.max_disk_bytes.max(1), admission.max_queue_bytes)
+        };
+        let score = self
+            .admission
+            .lock()
+            .expect("admission mutex poisoned")
+            .capacity_score(&mut tracker);
+        cluster.set_self_ingesthree_capacity(score).await;
+    }
+
     /// Publishes node-wide capacity until the writer closes. Uses the v2 score and
     /// its five-second sampling cadence. Feedback is advisory: append still checks
     /// reservations atomically, including work admitted since the last sample.

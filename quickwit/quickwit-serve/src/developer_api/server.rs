@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use bytesize::ByteSize;
-use quickwit_actors::Mailbox;
 use quickwit_cluster::Cluster;
 use quickwit_config::NodeConfig;
 use quickwit_config::service::QuickwitService;
-use quickwit_control_plane::control_plane::{ControlPlane, GetDebugInfo};
-use quickwit_ingest::{IngestRouter, Ingester};
 use quickwit_proto::developer::{
     DeveloperError, DeveloperResult, DeveloperService, GetDebugInfoRequest, GetDebugInfoResponse,
 };
@@ -36,9 +32,6 @@ use crate::{BuildInfo, QuickwitServices, RuntimeInfo};
 pub(crate) struct DeveloperApiServer {
     node_config: Arc<NodeConfig>,
     cluster: Cluster,
-    control_plane_mailbox_opt: Option<Mailbox<ControlPlane>>,
-    ingest_router_opt: Option<IngestRouter>,
-    ingester_opt: Option<Ingester>,
 }
 
 impl fmt::Debug for DeveloperApiServer {
@@ -54,9 +47,6 @@ impl DeveloperApiServer {
         Self {
             node_config: services.node_config.clone(),
             cluster: services.cluster.clone(),
-            control_plane_mailbox_opt: services.control_plane_server_opt.clone(),
-            ingest_router_opt: services.ingest_router_opt.clone(),
-            ingester_opt: services.ingester_opt.clone(),
         }
     }
 }
@@ -67,7 +57,7 @@ impl DeveloperService for DeveloperApiServer {
         &self,
         request: GetDebugInfoRequest,
     ) -> DeveloperResult<GetDebugInfoResponse> {
-        let roles: HashSet<QuickwitService> = request
+        let _roles: std::collections::HashSet<QuickwitService> = request
             .roles
             .into_iter()
             .map(|role| role.parse())
@@ -80,7 +70,7 @@ impl DeveloperService for DeveloperApiServer {
         let mut node_config = (*self.node_config).clone();
         node_config.redact();
 
-        let mut debug_info = json!({
+        let debug_info = json!({
             "build_info": BuildInfo::get(),
             "runtime_info": RuntimeInfo::get(),
             "node_config": node_config,
@@ -91,24 +81,6 @@ impl DeveloperService for DeveloperApiServer {
                 "chitchat_state": cluster_snapshot.chitchat_state_snapshot.node_states,
             })
         });
-        if let Some(control_plane_mailbox) = &self.control_plane_mailbox_opt
-            && (roles.is_empty() || roles.contains(&QuickwitService::ControlPlane))
-        {
-            debug_info["control_plane"] = match control_plane_mailbox.ask(GetDebugInfo).await {
-                Ok(debug_info) => debug_info,
-                Err(error) => {
-                    json!({"error": error.to_string()})
-                }
-            };
-        }
-        if let Some(ingest_router) = &self.ingest_router_opt {
-            debug_info["ingest_router"] = ingest_router.debug_info().await;
-        }
-        if let Some(ingester) = &self.ingester_opt
-            && (roles.is_empty() || roles.contains(&QuickwitService::Indexer))
-        {
-            debug_info["ingester"] = ingester.debug_info().await;
-        };
         let debug_info_json = serde_json::to_vec(&debug_info).map_err(|error| {
             let message = format!("failed to JSON serialize debug info: {error}");
             DeveloperError::Internal(message)
@@ -134,7 +106,7 @@ mod tests {
         let self_node_readiness = true;
         let cluster = create_cluster_for_test(
             peer_seeds,
-            &["metastore", "control-plane", "indexer"],
+            &["metastore", "indexer"],
             &transport,
             self_node_readiness,
         )
@@ -149,9 +121,6 @@ mod tests {
         let developer_api_server = DeveloperApiServer {
             node_config,
             cluster,
-            control_plane_mailbox_opt: None,
-            ingest_router_opt: None,
-            ingester_opt: None,
         };
         let request = GetDebugInfoRequest { roles: Vec::new() };
         let response = developer_api_server.get_debug_info(request).await.unwrap();

@@ -22,7 +22,7 @@ use quickwit_metastore::{Split, SplitState};
 use quickwit_proto::types::SplitId;
 use quickwit_serve::ListSplitsQueryParams;
 
-use super::{accept, assert_no_shards, create_index, start_cluster, wait_for_hits};
+use super::{accept, create_index, start_cluster, wait_for_hits};
 use crate::test_utils::ClusterSandbox;
 
 pub(super) async fn wait_for_splits(
@@ -160,6 +160,5 @@ async fn test_ingesthree_compaction_recovers_outputs_after_planner_restart() {
     wait_for_hits(&sandbox, index_id, 2).await;
     sandbox.assert_hit_count(index_id, "body:before", 1).await;
     sandbox.assert_hit_count(index_id, "body:restart", 1).await;
-    assert_no_shards(&sandbox, index_id).await;
     sandbox.shutdown().await.unwrap();
 }

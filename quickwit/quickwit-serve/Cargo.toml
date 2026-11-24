@@ -61,7 +61,6 @@ quickwit-cluster = { workspace = true }
 quickwit-common = { workspace = true }
 quickwit-compaction = { workspace = true }
 quickwit-config = { workspace = true }
-quickwit-control-plane = { workspace = true }
 quickwit-doc-mapper = { workspace = true }
 quickwit-index-management = { workspace = true }
 quickwit-indexing = { workspace = true }
@@ -100,7 +99,6 @@ quickwit-actors = { workspace = true, features = ["testsuite"] }
 quickwit-cluster = { workspace = true, features = ["testsuite"] }
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
-quickwit-control-plane = { workspace = true, features = ["testsuite"] }
 quickwit-indexing = { workspace = true, features = ["testsuite"] }
 quickwit-ingest = { workspace = true, features = ["testsuite"] }
 quickwit-janitor = { workspace = true, features = ["testsuite"] }

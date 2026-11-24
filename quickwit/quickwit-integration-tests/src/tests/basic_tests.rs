@@ -112,16 +112,13 @@ async fn test_multi_nodes_cluster_during_cluster_id_migration() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_config()
         .await;
 
-    // Separate the metastore and control plane from their clients across the rename.
+    // Separate the metastore from its clients across the rename.
     for (node_config, services) in &mut cluster_config.node_configs {
-        let (cluster_id, accepted_id) = if services.contains(&QuickwitService::Metastore)
-            || services.contains(&QuickwitService::ControlPlane)
-        {
+        let (cluster_id, accepted_id) = if services.contains(&QuickwitService::Metastore) {
             ("new-cluster", "old-cluster")
         } else {
             ("old-cluster", "new-cluster")
@@ -174,7 +171,6 @@ async fn test_multi_nodes_cluster() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;

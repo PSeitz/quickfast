@@ -12,90 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Weak};
+use std::collections::HashSet;
 
 use quickwit_common::rate_limited_error;
-use quickwit_common::thread_pool::run_cpu_intensive;
-use quickwit_config::{DocMapping, SearchSettings, build_doc_mapper};
 use quickwit_doc_mapper::DocMapper;
-use quickwit_proto::ingest::{
-    DocBatchV2, IngestV2Error, IngestV2Result, ParseFailure, ParseFailureReason,
-};
-use quickwit_proto::types::{DocMappingUid, DocUid};
+use quickwit_proto::ingest::{DocBatchV2, ParseFailure, ParseFailureReason};
+use quickwit_proto::types::DocUid;
 use serde_json_borrow::Value as JsonValue;
-use tracing::{info, instrument};
 
 use crate::DocBatchV2Builder;
 
-/// Attempts to get the doc mapper identified by the given doc mapping UID `doc_mapping_uid` from
-/// the `doc_mappers` cache. If it is not found, it is built from the specified JSON doc mapping
-/// `doc_mapping_json` and inserted into the cache before being returned.
-pub(super) fn get_or_try_build_doc_mapper(
-    doc_mappers: &mut HashMap<DocMappingUid, Weak<DocMapper>>,
-    doc_mapping_uid: DocMappingUid,
-    doc_mapping_json: &str,
-) -> IngestV2Result<Arc<DocMapper>> {
-    if let Entry::Occupied(occupied) = doc_mappers.entry(doc_mapping_uid) {
-        if let Some(doc_mapper) = occupied.get().upgrade() {
-            return Ok(doc_mapper);
-        }
-        occupied.remove();
-    }
-    let doc_mapper = try_build_doc_mapper(doc_mapping_json)?;
-
-    if doc_mapper.doc_mapping_uid() != doc_mapping_uid {
-        let message = format!(
-            "doc mapping UID mismatch: expected `{doc_mapping_uid}`, got `{}`",
-            doc_mapper.doc_mapping_uid()
-        );
-        return Err(IngestV2Error::Internal(message));
-    }
-    doc_mappers.insert(doc_mapping_uid, Arc::downgrade(&doc_mapper));
-    info!("inserted doc mapper `{doc_mapping_uid}` into cache`");
-
-    Ok(doc_mapper)
-}
-
-/// Attempts to build a doc mapper from the specified JSON doc mapping `doc_mapping_json`.
-pub(super) fn try_build_doc_mapper(doc_mapping_json: &str) -> IngestV2Result<Arc<DocMapper>> {
-    let doc_mapping: DocMapping = serde_json::from_str(doc_mapping_json).map_err(|error| {
-        IngestV2Error::Internal(format!("failed to parse doc mapping: {error}"))
-    })?;
-    let search_settings = SearchSettings::default();
-    let doc_mapper = build_doc_mapper(&doc_mapping, &search_settings)
-        .map_err(|error| IngestV2Error::Internal(format!("failed to build doc mapper: {error}")))?;
-    Ok(doc_mapper)
-}
-
-/// Parses the JSON documents contained in the batch and applies the doc mapper. Returns the
-/// original batch and a list of parse failures.
-pub(super) async fn validate_doc_batch(
-    doc_batch: DocBatchV2,
-    doc_mapper: Arc<DocMapper>,
-) -> IngestV2Result<(DocBatchV2, Vec<ParseFailure>)> {
-    if is_document_validation_enabled() {
-        return validate_doc_batch_cpu_intensive(doc_batch, doc_mapper).await;
-    }
-    Ok((doc_batch, Vec::new()))
-}
-
 pub(crate) fn is_document_validation_enabled() -> bool {
     !quickwit_common::get_bool_from_env_cached!("QW_DISABLE_DOCUMENT_VALIDATION", false)
-}
-
-#[instrument(name = "ingester.validate_doc_batch", skip_all, fields(num_docs = doc_batch.num_docs(), num_bytes = doc_batch.num_bytes()))]
-async fn validate_doc_batch_cpu_intensive(
-    doc_batch: DocBatchV2,
-    doc_mapper: Arc<DocMapper>,
-) -> IngestV2Result<(DocBatchV2, Vec<ParseFailure>)> {
-    run_cpu_intensive(move || validate_doc_batch_impl(doc_batch, &doc_mapper))
-        .await
-        .map_err(|error| {
-            let message = format!("failed to validate documents: {error}");
-            IngestV2Error::Internal(message)
-        })
 }
 
 /// Validates a batch of docs.
@@ -170,87 +98,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_or_try_build_doc_mapper() {
-        let mut doc_mappers: HashMap<DocMappingUid, Weak<DocMapper>> = HashMap::new();
-
-        let doc_mapping_uid = DocMappingUid::random();
-        let doc_mapping_json = r#"{
-            "field_mappings": [{
-                "name": "message",
-                "type": "text"
-            }]
-        }"#;
-        let error =
-            get_or_try_build_doc_mapper(&mut doc_mappers, doc_mapping_uid, doc_mapping_json)
-                .unwrap_err();
-        assert!(
-            matches!(error, IngestV2Error::Internal(message) if message.contains("doc mapping UID mismatch"))
-        );
-
-        let doc_mapping_json = format!(
-            r#"{{
-                "doc_mapping_uid": "{doc_mapping_uid}",
-                "field_mappings": [{{
-                        "name": "message",
-                        "type": "text"
-                }}]
-            }}"#
-        );
-        let doc_mapper =
-            get_or_try_build_doc_mapper(&mut doc_mappers, doc_mapping_uid, &doc_mapping_json)
-                .unwrap();
-        assert_eq!(doc_mappers.len(), 1);
-        assert_eq!(doc_mapper.doc_mapping_uid(), doc_mapping_uid);
-        assert_eq!(Arc::strong_count(&doc_mapper), 1);
-
-        drop(doc_mapper);
-        assert!(
-            doc_mappers
-                .get(&doc_mapping_uid)
-                .unwrap()
-                .upgrade()
-                .is_none()
-        );
-
-        let error = get_or_try_build_doc_mapper(&mut doc_mappers, doc_mapping_uid, "").unwrap_err();
-        assert!(
-            matches!(error, IngestV2Error::Internal(message) if message.contains("parse doc mapping"))
-        );
-        assert_eq!(doc_mappers.len(), 0);
-    }
-
-    #[test]
-    fn test_try_build_doc_mapper() {
-        let error = try_build_doc_mapper("").unwrap_err();
-        assert!(
-            matches!(error, IngestV2Error::Internal(message) if message.contains("parse doc mapping"))
-        );
-
-        let error = try_build_doc_mapper(r#"{"timestamp_field": ".timestamp"}"#).unwrap_err();
-        assert!(
-            matches!(error, IngestV2Error::Internal(message) if message.contains("build doc mapper"))
-        );
-
-        let doc_mapping_json = r#"{
-            "mode": "strict",
-            "field_mappings": [{
-                "name": "message",
-                "type": "text"
-        }]}"#;
-        let doc_mapper = try_build_doc_mapper(doc_mapping_json).unwrap();
-        let schema = doc_mapper.schema();
-        assert_eq!(schema.num_fields(), 2);
-
-        let contains_message_field = schema
-            .fields()
-            .map(|(_field, entry)| entry.name())
-            .any(|field_name| field_name == "message");
-        assert!(contains_message_field);
-    }
-
-    #[test]
     fn test_validate_doc_batch() {
-        let doc_mapping_json = r#"{
+        let doc_mapping: quickwit_config::DocMapping = serde_json::from_str(
+            r#"{
             "mode": "strict",
             "field_mappings": [
                 {
@@ -258,8 +108,14 @@ mod tests {
                     "type": "text"
                 }
             ]
-        }"#;
-        let doc_mapper = try_build_doc_mapper(doc_mapping_json).unwrap();
+        }"#,
+        )
+        .unwrap();
+        let doc_mapper = quickwit_config::build_doc_mapper(
+            &doc_mapping,
+            &quickwit_config::SearchSettings::default(),
+        )
+        .unwrap();
         let doc_batch = DocBatchV2::default();
 
         let (_, parse_failures) = validate_doc_batch_impl(doc_batch, &doc_mapper);

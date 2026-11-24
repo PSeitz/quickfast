@@ -51,27 +51,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run()
         .unwrap();
 
-    // Control plane.
-    let mut prost_config = prost_build::Config::default();
-    prost_config.file_descriptor_set_path("src/codegen/quickwit/control_plane_descriptor.bin");
-
-    prost_config
-        .extern_path(
-            ".quickwit.common.DocMappingUid",
-            "crate::types::DocMappingUid",
-        )
-        .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/control_plane.proto"])
-        .with_includes(&["protos"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::control_plane::ControlPlaneResult")
-        .with_error_type_path("crate::control_plane::ControlPlaneError")
-        .run()
-        .unwrap();
-
     // Developer service.
     let mut prost_config = prost_build::Config::default();
     prost_config

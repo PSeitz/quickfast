@@ -212,7 +212,7 @@ command = "quickwit run --service indexer --service metastore --endpoint=http://
 
 [[run.examples]]
 name = "Start a control plane, metastore and janitor services"
-command = "quickwit run --service control_plane --service metastore --service janitor --config=./config/quickwit.yaml"
+command = "quickwit run --service metastore --service janitor --config=./config/quickwit.yaml"
 
 [[run.examples]]
 name = "Make a search request on a wikipedia index"

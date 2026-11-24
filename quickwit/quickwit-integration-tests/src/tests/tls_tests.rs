@@ -122,7 +122,6 @@ async fn test_tls_grpc() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_config()
         .await;

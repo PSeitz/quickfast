@@ -34,10 +34,10 @@ use crate::{config_cli_arg, get_resolvers, load_node_config, start_actor_runtime
 pub fn build_run_command() -> Command {
     Command::new("run")
         .about("Starts a Quickfast node.")
-        .long_about("Starts a Quickfast node with the default services enabled: `indexer`, `compactor`, `searcher`, `metastore`, `control-plane`, and `janitor`.")
+        .long_about("Starts a Quickfast node with the default services enabled: `indexer`, `compactor`, `searcher`, `metastore`, and `janitor`.")
         .arg(config_cli_arg())
         .args(&[
-            arg!(--"service" <SERVICE> "Services (`indexer`, `compactor`, `searcher`, `metastore`, `metastore-read-replica`, `control-plane`, or `janitor`) to run. If unspecified, services from the config are used.")
+            arg!(--"service" <SERVICE> "Services (`indexer`, `compactor`, `searcher`, `metastore`, `metastore-read-replica`, or `janitor`) to run. If unspecified, services from the config are used.")
                 .action(ArgAction::Append)
                 .required(false),
         ])

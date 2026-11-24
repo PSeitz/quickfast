@@ -30,12 +30,6 @@ use super::index_resource::{
     create_index_handler, delete_index_handler, describe_index_handler,
     list_indexes_metadata_handler, update_index_handler,
 };
-use super::source_resource::{
-    __path_create_source, __path_delete_source, __path_reset_source_checkpoint,
-    __path_toggle_source, __path_update_source, ToggleSource, create_source_handler,
-    delete_source_handler, get_source_handler, get_source_shards_handler,
-    reset_source_checkpoint_handler, toggle_source_handler, update_source_handler,
-};
 use super::split_resource::{
     __path_list_splits, __path_mark_splits_for_deletion, SplitsForDeletion, list_splits_handler,
     mark_splits_for_deletion_handler,
@@ -56,13 +50,8 @@ use crate::simple_list::from_simple_list;
         list_splits,
         describe_index,
         mark_splits_for_deletion,
-        create_source,
-        update_source,
-        reset_source_checkpoint,
-        toggle_source,
-        delete_source,
     ),
-    components(schemas(ToggleSource, SplitsForDeletion, IndexStats))
+    components(schemas(SplitsForDeletion, IndexStats))
 )]
 pub struct IndexApi;
 
@@ -101,15 +90,6 @@ pub fn index_management_handlers(
         .or(list_splits_handler(index_service.metastore()))
         .or(describe_index_handler(index_service.metastore()))
         .or(mark_splits_for_deletion_handler(index_service.metastore()))
-        .boxed()
-        // Sources handlers.
-        .or(reset_source_checkpoint_handler(index_service.metastore()))
-        .or(toggle_source_handler(index_service.metastore()))
-        .or(create_source_handler(index_service.clone()))
-        .or(update_source_handler(index_service.clone()))
-        .or(get_source_handler(index_service.metastore()))
-        .or(delete_source_handler(index_service.metastore()))
-        .or(get_source_shards_handler(index_service.metastore()))
         .boxed()
         // Tokenizer handlers.
         .or(analyze_request_handler())
@@ -213,20 +193,17 @@ mod tests {
     use assert_json_diff::assert_json_include;
     use quickwit_common::ServiceStream;
     use quickwit_common::uri::Uri;
-    use quickwit_config::{
-        CLI_SOURCE_ID, INGEST_API_SOURCE_ID, NodeConfig, SourceParams, VecSourceParams,
-    };
+    use quickwit_config::NodeConfig;
     use quickwit_indexing::{MockSplitBuilder, mock_split};
     use quickwit_metastore::{
         IndexMetadata, IndexMetadataResponseExt, ListIndexesMetadataResponseExt,
         ListSplitsRequestExt, ListSplitsResponseExt, SplitState, metastore_for_test,
     };
     use quickwit_proto::metastore::{
-        DeleteSourceRequest, EmptyResponse, EntityKind, IndexMetadataRequest,
-        IndexMetadataResponse, ListIndexesMetadataRequest, ListIndexesMetadataResponse,
-        ListSplitsRequest, ListSplitsResponse, MarkSplitsForDeletionRequest, MetastoreError,
-        MetastoreService, MetastoreServiceClient, MockMetastoreService,
-        ResetSourceCheckpointRequest, SourceType, ToggleSourceRequest,
+        EmptyResponse, IndexMetadataRequest, IndexMetadataResponse, ListIndexesMetadataRequest,
+        ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse,
+        MarkSplitsForDeletionRequest, MetastoreError, MetastoreService, MetastoreServiceClient,
+        MockMetastoreService,
     };
     use quickwit_proto::types::IndexUid;
     use quickwit_storage::StorageResolver;
@@ -760,91 +737,10 @@ mod tests {
         });
         assert_json_include!(actual: resp_json, expected: expected_response_json);
 
-        // Create source.
-        let source_config_body = r#"{"version": "0.7", "source_id": "vec-source", "source_type": "vec", "params": {"docs": [], "batch_num_docs": 10}}"#;
-        let resp = warp::test::request()
-            .path("/indexes/hdfs-logs/sources")
-            .method("POST")
-            .json(&true)
-            .body(source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-
-        // Get source.
-        let resp = warp::test::request()
-            .path("/indexes/hdfs-logs/sources/vec-source")
-            .method("GET")
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-
-        // Check that the source has been added to index metadata.
-        let index_metadata = metastore
-            .index_metadata(IndexMetadataRequest::for_index_id("hdfs-logs".to_string()))
-            .await
-            .unwrap()
-            .deserialize_index_metadata()
-            .unwrap();
-        assert!(index_metadata.sources.contains_key("vec-source"));
-        let source_config = index_metadata.sources.get("vec-source").unwrap();
-        assert_eq!(source_config.source_type(), SourceType::Vec);
-        assert_eq!(
-            source_config.source_params,
-            SourceParams::Vec(VecSourceParams {
-                docs: Vec::new(),
-                batch_num_docs: 10,
-                partition: "".to_string(),
-            })
-        );
-
-        // Check delete source.
-        let resp = warp::test::request()
-            .path("/indexes/hdfs-logs/sources/vec-source")
-            .method("DELETE")
-            .body(source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-        let index_metadata = metastore
-            .index_metadata(IndexMetadataRequest::for_index_id("hdfs-logs".to_string()))
-            .await
-            .unwrap()
-            .deserialize_index_metadata()
-            .unwrap();
-        assert!(!index_metadata.sources.contains_key("file-source"));
-
-        // Check cannot delete source managed by Quickwit.
-        let resp = warp::test::request()
-            .path(format!("/indexes/hdfs-logs/sources/{INGEST_API_SOURCE_ID}").as_str())
-            .method("DELETE")
-            .body(source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 403);
-
-        let resp = warp::test::request()
-            .path(format!("/indexes/hdfs-logs/sources/{CLI_SOURCE_ID}").as_str())
-            .method("DELETE")
-            .body(source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 403);
-
-        // Check get a non existing source returns 404.
-        let resp = warp::test::request()
-            .path("/indexes/hdfs-logs/sources/file-source")
-            .method("GET")
-            .body(source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 404);
-
         // Check delete index.
         let resp = warp::test::request()
             .path("/indexes/hdfs-logs")
             .method("DELETE")
-            .body(source_config_body)
             .reply(&index_management_handler)
             .await;
         assert_eq!(resp.status(), 200);
@@ -1062,349 +958,6 @@ mod tests {
             let body = std::str::from_utf8(resp.body()).unwrap();
             assert_eq!(resp.status(), 200, "{body}",);
         }
-    }
-
-    #[tokio::test]
-    async fn test_create_source_with_bad_config() {
-        let metastore = metastore_for_test();
-        let index_service = IndexService::new(metastore, StorageResolver::unconfigured());
-        let index_management_handler =
-            super::index_management_handlers(index_service, Arc::new(NodeConfig::for_test()))
-                .recover(recover_fn);
-        {
-            // Source config with bad version.
-            let resp = warp::test::request()
-                .path("/indexes/my-index/sources")
-                .method("POST")
-                .json(&true)
-                .body(r#"{"version": 0.4, "source_id": "file-source"}"#)
-                .reply(&index_management_handler)
-                .await;
-            assert_eq!(resp.status(), 400);
-            let body = std::str::from_utf8(resp.body()).unwrap();
-            assert!(body.contains("invalid type: floating point `0.4`"));
-        }
-        {
-            // Invalid pulsar source config with number of pipelines > 1, not supported yet.
-            let resp = warp::test::request()
-                .path("/indexes/my-index/sources")
-                .method("POST")
-                .json(&true)
-                .body(
-                    r#"{"version": "0.8", "source_id": "pulsar-source",
-    "num_pipelines": 2, "source_type": "pulsar", "params": {"topics": ["my-topic"],
-    "address": "pulsar://localhost:6650" }}"#,
-                )
-                .reply(&index_management_handler)
-                .await;
-            assert_eq!(resp.status(), 400);
-            let body = std::str::from_utf8(resp.body()).unwrap();
-            assert!(body.contains(
-                "Quickwit currently supports multiple pipelines only for GCP PubSub or Kafka \
-                 sources"
-            ));
-        }
-        {
-            let resp = warp::test::request()
-                .path("/indexes/hdfs-logs/sources")
-                .method("POST")
-                .body(
-                    r#"{"version": "0.8", "source_id": "my-stdin-source", "source_type": "stdin"}"#,
-                )
-                .reply(&index_management_handler)
-                .await;
-            assert_eq!(resp.status(), 400);
-            let response_body = std::str::from_utf8(resp.body()).unwrap();
-            assert!(
-                response_body.contains("stdin can only be used as source through the CLI command")
-            )
-        }
-        {
-            let resp = warp::test::request()
-                .path("/indexes/hdfs-logs/sources")
-                .method("POST")
-                .body(
-                    r#"{"version": "0.8", "source_id": "my-local-file-source", "source_type": "file", "params": {"filepath": "localfile"}}"#,
-                )
-                .reply(&index_management_handler)
-                .await;
-            assert_eq!(resp.status(), 400);
-            let response_body = std::str::from_utf8(resp.body()).unwrap();
-            assert!(response_body.contains("limited to a local usage"))
-        }
-    }
-
-    #[cfg(feature = "sqs-for-tests")]
-    #[tokio::test]
-    async fn test_update_source() {
-        use quickwit_indexing::source::sqs_queue::test_helpers::start_mock_sqs_get_queue_attributes_endpoint;
-
-        let metastore = metastore_for_test();
-        let (queue_url, _guard) = start_mock_sqs_get_queue_attributes_endpoint().await;
-        let index_service = IndexService::new(metastore.clone(), StorageResolver::unconfigured());
-        let mut node_config = NodeConfig::for_test();
-        node_config.default_index_root_uri = Uri::for_test("file:///default-index-root-uri");
-        let index_management_handler =
-            super::index_management_handlers(index_service, Arc::new(node_config));
-        let resp = warp::test::request()
-            .path("/indexes")
-            .method("POST")
-            .json(&true)
-            .body(r#"{"version": "0.7", "index_id": "hdfs-logs", "doc_mapping": {"field_mappings":[{"name": "timestamp", "type": "i64", "fast": true, "indexed": true}]}}"#)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-        let resp_json: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
-        let expected_response_json = serde_json::json!({
-            "index_config": {
-                "index_id": "hdfs-logs",
-                "index_uri": "file:///default-index-root-uri/hdfs-logs",
-            }
-        });
-        assert_json_include!(actual: resp_json, expected: expected_response_json);
-
-        // Create source.
-        let source_config_body = serde_json::json!({
-            "version": "0.7",
-            "source_id": "sqs-source",
-            "source_type": "file",
-            "params": {"notifications": [{"type": "sqs", "queue_url": queue_url, "message_type": "s3_notification"}]},
-        });
-        let resp = warp::test::request()
-            .path("/indexes/hdfs-logs/sources")
-            .method("POST")
-            .json(&source_config_body)
-            .reply(&index_management_handler)
-            .await;
-        let resp_body = std::str::from_utf8(resp.body()).unwrap();
-        assert_eq!(resp.status(), 200, "{resp_body}");
-
-        {
-            // Update the source.
-            let update_source_config_body = serde_json::json!({
-                "version": "0.7",
-                "source_id": "sqs-source",
-                "source_type": "file",
-                "params": {"notifications": [{"type": "sqs", "queue_url": queue_url, "message_type": "s3_notification"}]},
-            });
-            let resp = warp::test::request()
-                .path("/indexes/hdfs-logs/sources/sqs-source")
-                .method("PUT")
-                .json(&update_source_config_body)
-                .reply(&index_management_handler)
-                .await;
-            let resp_body = std::str::from_utf8(resp.body()).unwrap();
-            assert_eq!(resp.status(), 200, "{resp_body}");
-            // Check that the source has been updated.
-            let index_metadata = metastore
-                .index_metadata(IndexMetadataRequest::for_index_id("hdfs-logs".to_string()))
-                .await
-                .unwrap()
-                .deserialize_index_metadata()
-                .unwrap();
-            let metastore_source_config = index_metadata.sources.get("sqs-source").unwrap();
-            assert_eq!(metastore_source_config.source_type(), SourceType::File);
-            assert_eq!(
-                metastore_source_config,
-                &serde_json::from_value(update_source_config_body).unwrap(),
-            );
-        }
-        {
-            // Update the source with a different source_id (forbidden)
-            let update_source_config_body = serde_json::json!({
-                "version": "0.7",
-                "source_id": "new-source-id",
-                "source_type": "file",
-                "params": {"notifications": [{"type": "sqs", "queue_url": queue_url, "message_type": "s3_notification"}]},
-            });
-            let resp = warp::test::request()
-                .path("/indexes/hdfs-logs/sources/sqs-source")
-                .method("PUT")
-                .json(&update_source_config_body)
-                .reply(&index_management_handler)
-                .await;
-            let resp_body = std::str::from_utf8(resp.body()).unwrap();
-            assert_eq!(resp.status(), 400, "{resp_body}");
-            // Check that the source hasn't been updated.
-            let index_metadata = metastore
-                .index_metadata(IndexMetadataRequest::for_index_id("hdfs-logs".to_string()))
-                .await
-                .unwrap()
-                .deserialize_index_metadata()
-                .unwrap();
-            assert!(index_metadata.sources.contains_key("sqs-source"));
-            assert!(!index_metadata.sources.contains_key("other-source-id"));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_delete_non_existing_source() {
-        let mut mock_metastore = MockMetastoreService::new();
-        mock_metastore.expect_index_metadata().return_once(|_| {
-            Ok(
-                IndexMetadataResponse::try_from_index_metadata(&IndexMetadata::for_test(
-                    "quickwit-demo-index",
-                    "file:///path/to/index/quickwit-demo-index",
-                ))
-                .unwrap(),
-            )
-        });
-        // TODO
-        // metastore
-        //     .expect_index_exists()
-        //     .return_once(|index_id: &str| Ok(index_id == "quickwit-demo-index"));
-        mock_metastore.expect_delete_source().return_once(
-            |delete_source_request: DeleteSourceRequest| {
-                let index_uid: IndexUid = delete_source_request.index_uid().clone();
-                let source_id = delete_source_request.source_id;
-                assert_eq!(index_uid.index_id, "quickwit-demo-index");
-                Err(MetastoreError::NotFound(EntityKind::Source {
-                    index_id: "quickwit-demo-index".to_string(),
-                    source_id: source_id.to_string(),
-                }))
-            },
-        );
-        let index_service = IndexService::new(
-            MetastoreServiceClient::from_mock(mock_metastore),
-            StorageResolver::unconfigured(),
-        );
-        let index_management_handler =
-            super::index_management_handlers(index_service, Arc::new(NodeConfig::for_test()))
-                .recover(recover_fn);
-        let resp = warp::test::request()
-            .path("/indexes/quickwit-demo-index/sources/foo-source")
-            .method("DELETE")
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 404);
-    }
-
-    #[tokio::test]
-    async fn test_source_reset_checkpoint() -> anyhow::Result<()> {
-        let mut mock_metastore = MockMetastoreService::new();
-        mock_metastore
-            .expect_index_metadata()
-            .returning(|_| {
-                Ok(
-                    IndexMetadataResponse::try_from_index_metadata(&IndexMetadata::for_test(
-                        "quickwit-demo-index",
-                        "file:///path/to/index/quickwit-demo-index",
-                    ))
-                    .unwrap(),
-                )
-            })
-            .times(2);
-        mock_metastore
-            .expect_reset_source_checkpoint()
-            .returning(
-                |reset_source_checkpoint_request: ResetSourceCheckpointRequest| {
-                    let index_uid: IndexUid = reset_source_checkpoint_request.index_uid().clone();
-                    let source_id = reset_source_checkpoint_request.source_id;
-                    if index_uid.index_id == "quickwit-demo-index" && source_id == "source-to-reset"
-                    {
-                        return Ok(EmptyResponse {});
-                    }
-                    Err(MetastoreError::Internal {
-                        message: "".to_string(),
-                        cause: "".to_string(),
-                    })
-                },
-            )
-            .times(2);
-        let index_service = IndexService::new(
-            MetastoreServiceClient::from_mock(mock_metastore),
-            StorageResolver::unconfigured(),
-        );
-        let index_management_handler =
-            super::index_management_handlers(index_service, Arc::new(NodeConfig::for_test()))
-                .recover(recover_fn);
-        let resp = warp::test::request()
-            .path("/indexes/quickwit-demo-index/sources/source-to-reset/reset-checkpoint")
-            .method("PUT")
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-        let resp = warp::test::request()
-            .path("/indexes/quickwit-demo-index/sources/source-to-reset-2/reset-checkpoint")
-            .method("PUT")
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 500);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_source_toggle() -> anyhow::Result<()> {
-        let mut mock_metastore = MockMetastoreService::new();
-        mock_metastore
-            .expect_index_metadata()
-            .returning(|_| {
-                Ok(
-                    IndexMetadataResponse::try_from_index_metadata(&IndexMetadata::for_test(
-                        "quickwit-demo-index",
-                        "file:///path/to/index/quickwit-demo-index",
-                    ))
-                    .unwrap(),
-                )
-            })
-            .times(3);
-        mock_metastore.expect_toggle_source().return_once(
-            |toggle_source_request: ToggleSourceRequest| {
-                let index_uid: IndexUid = toggle_source_request.index_uid().clone();
-                let source_id = toggle_source_request.source_id;
-                let enable = toggle_source_request.enable;
-                if index_uid.index_id == "quickwit-demo-index"
-                    && source_id == "source-to-toggle"
-                    && enable
-                {
-                    return Ok(EmptyResponse {});
-                }
-                Err(MetastoreError::Internal {
-                    message: "".to_string(),
-                    cause: "".to_string(),
-                })
-            },
-        );
-        let index_service = IndexService::new(
-            MetastoreServiceClient::from_mock(mock_metastore),
-            StorageResolver::unconfigured(),
-        );
-        let index_management_handler =
-            super::index_management_handlers(index_service, Arc::new(NodeConfig::for_test()))
-                .recover(recover_fn);
-        let resp = warp::test::request()
-            .path("/indexes/quickwit-demo-index/sources/source-to-toggle/toggle")
-            .method("PUT")
-            .json(&true)
-            .body(r#"{"enable": true}"#)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 200);
-        let resp = warp::test::request()
-            .path("/indexes/quickwit-demo-index/sources/source-to-toggle/toggle")
-            .method("PUT")
-            .json(&true)
-            .body(r#"{"toggle": true}"#) // unknown field, should return 400.
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 400);
-        // Check cannot toggle source managed by Quickwit.
-        let resp = warp::test::request()
-            .path(format!("/indexes/hdfs-logs/sources/{INGEST_API_SOURCE_ID}/toggle").as_str())
-            .method("PUT")
-            .body(r#"{"enable": true}"#)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 403);
-
-        let resp = warp::test::request()
-            .path(format!("/indexes/hdfs-logs/sources/{CLI_SOURCE_ID}/toggle").as_str())
-            .method("PUT")
-            .body(r#"{"enable": true}"#)
-            .reply(&index_management_handler)
-            .await;
-        assert_eq!(resp.status(), 403);
-        Ok(())
     }
 
     #[tokio::test]

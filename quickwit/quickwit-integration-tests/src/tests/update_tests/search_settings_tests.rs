@@ -30,7 +30,6 @@ async fn test_update_search_settings_on_multi_nodes_cluster() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;

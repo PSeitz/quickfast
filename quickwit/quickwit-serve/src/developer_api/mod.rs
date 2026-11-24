@@ -27,7 +27,9 @@ use log_level::log_level_handler;
 use pprof::pprof_handlers;
 use quickwit_cluster::Cluster;
 pub(crate) use server::DeveloperApiServer;
-use warp::{Filter, Rejection};
+use warp::filters::BoxedFilter;
+use warp::reply::Response;
+use warp::{Filter, Reply};
 
 use crate::EnvFilterReloadFn;
 use crate::rest::recover_fn;
@@ -39,13 +41,22 @@ pub struct DeveloperApi;
 pub(crate) fn developer_api_routes(
     cluster: Cluster,
     env_filter_reload_fn: EnvFilterReloadFn,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
+) -> BoxedFilter<(Response,)> {
     warp::path!("api" / "developer" / ..)
         .and(
             debug_handler(cluster.clone())
-                .or(log_level_handler(env_filter_reload_fn.clone()).boxed())
-                .or(pprof_handlers())
-                .or(heap_prof_handlers()),
+                .map(Reply::into_response)
+                .boxed()
+                .or(log_level_handler(env_filter_reload_fn.clone())
+                    .map(Reply::into_response)
+                    .boxed())
+                .unify()
+                .or(pprof_handlers().map(Reply::into_response).boxed())
+                .unify()
+                .or(heap_prof_handlers().map(Reply::into_response).boxed())
+                .unify(),
         )
         .recover(recover_fn)
+        .map(Reply::into_response)
+        .boxed()
 }

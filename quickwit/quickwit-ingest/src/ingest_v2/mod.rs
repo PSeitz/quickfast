@@ -12,38 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod broadcast;
-mod debouncing;
 mod doc_mapper;
 mod fetch;
-mod idle;
-mod ingester;
 pub(crate) mod metrics;
-mod models;
 mod mrecord;
-mod mrecordlog_utils;
-mod publish_tracker;
-mod rate_meter;
-mod reconcile;
-mod router;
-mod routing_table;
-mod state;
-mod wal_capacity_tracker;
-mod workbench;
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::fmt;
 use std::ops::{Add, AddAssign};
-use std::time::Duration;
-use std::{env, fmt};
 
-pub use broadcast::{
-    LocalShardsUpdate, ShardInfo, ShardInfos, setup_ingester_capacity_update_listener,
-    setup_local_shards_update_listener,
-};
 use bytes::buf::Writer;
 use bytes::{BufMut, BytesMut};
-use bytesize::ByteSize;
 use quickwit_cluster::GenerationId;
 use quickwit_common::tower::Pool;
 use quickwit_proto::ingest::ingester::{IngesterServiceClient, IngesterStatus};
@@ -53,15 +33,10 @@ use quickwit_proto::types::{
     AvailabilityZone, DocUid, DocUidGenerator, IndexId, IndexUid, NodeId, SourceId, SubrequestId,
 };
 use serde::Serialize;
-use tracing::{error, info};
-use workbench::pending_subrequests;
 
 pub(crate) use self::doc_mapper::{is_document_validation_enabled, validate_doc_batch_impl};
 pub use self::fetch::{FetchStreamError, MultiFetchStream};
-pub use self::ingester::Ingester;
-use self::mrecord::MRECORD_HEADER_LEN;
 pub use self::mrecord::{MRecord, decoded_mrecords};
-pub use self::router::IngestRouter;
 
 /// An ingester as represented in the pool, bundling the gRPC client with node metadata.
 #[derive(Debug, Clone)]
@@ -100,51 +75,6 @@ pub type IngesterPool = Pool<NodeId, IngesterPoolEntry>;
 pub type ClientId = String;
 
 pub type OpenShardCounts = Vec<(IndexUid, SourceId, usize)>;
-
-const IDLE_SHARD_TIMEOUT_ENV_KEY: &str = "QW_IDLE_SHARD_TIMEOUT_SECS";
-
-const DEFAULT_IDLE_SHARD_TIMEOUT: Duration = Duration::from_mins(15);
-
-pub fn get_idle_shard_timeout() -> Duration {
-    env::var(IDLE_SHARD_TIMEOUT_ENV_KEY)
-        .ok()
-        .and_then(|idle_shard_timeout_str| {
-            if let Ok(idle_shard_timeout_secs) = idle_shard_timeout_str.parse::<u64>() {
-                info!("overriding idle shard timeout to {idle_shard_timeout_secs} seconds");
-                Some(idle_shard_timeout_secs)
-            } else {
-                error!(
-                    "failed to parse environment variable \
-                     `{IDLE_SHARD_TIMEOUT_ENV_KEY}={idle_shard_timeout_str}`"
-                );
-                None
-            }
-        })
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_IDLE_SHARD_TIMEOUT)
-}
-
-const INGEST_ROUTER_BUFFER_SIZE_ENV_KEY: &str = "QW_INGEST_ROUTER_BUFFER_SIZE_BYTES";
-
-const DEFAULT_INGEST_ROUTER_BUFFER_SIZE: ByteSize = ByteSize::mib(if cfg!(test) { 8 } else { 256 }); // 256 MiB
-
-pub(crate) fn get_ingest_router_buffer_size() -> ByteSize {
-    env::var(INGEST_ROUTER_BUFFER_SIZE_ENV_KEY)
-        .ok()
-        .and_then(|buffer_size_bytes_str| {
-            if let Ok(buffer_size) = buffer_size_bytes_str.parse::<ByteSize>() {
-                info!("overriding ingest router buffer size to {buffer_size}");
-                Some(buffer_size)
-            } else {
-                error!(
-                    "failed to parse environment variable \
-                     `{INGEST_ROUTER_BUFFER_SIZE_ENV_KEY}={buffer_size_bytes_str}`"
-                );
-                None
-            }
-        })
-        .unwrap_or(DEFAULT_INGEST_ROUTER_BUFFER_SIZE)
-}
 
 /// Helper struct to build a [`DocBatchV2`]`.
 #[derive(Debug, Default)]
@@ -286,11 +216,6 @@ impl IngestRequestV2Builder {
         };
         Some(ingest_request)
     }
-}
-
-pub(super) fn estimate_size(doc_batch: &DocBatchV2) -> ByteSize {
-    let estimate = doc_batch.num_bytes() + doc_batch.num_docs() * MRECORD_HEADER_LEN;
-    ByteSize(estimate as u64)
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd)]
@@ -469,22 +394,5 @@ mod tests {
                 .doc_uids,
             [hola_doc_uid, mundo_doc_uid]
         );
-    }
-
-    #[test]
-    fn test_estimate_size() {
-        let doc_batch = DocBatchV2 {
-            doc_buffer: Vec::new().into(),
-            doc_lengths: Vec::new(),
-            doc_uids: Vec::new(),
-        };
-        assert_eq!(estimate_size(&doc_batch), ByteSize(0));
-
-        let doc_batch = DocBatchV2 {
-            doc_buffer: vec![0u8; 100].into(),
-            doc_lengths: vec![10, 20, 30],
-            doc_uids: Vec::new(),
-        };
-        assert_eq!(estimate_size(&doc_batch), ByteSize(118));
     }
 }

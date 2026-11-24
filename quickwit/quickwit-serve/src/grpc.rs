@@ -128,15 +128,6 @@ pub(crate) async fn start_grpc_server(
         None
     };
 
-    let ingester_grpc_service = if let Some(ingester_service) = services.ingester_service() {
-        enabled_grpc_services.insert("ingester");
-        file_descriptor_sets.push(quickwit_proto::ingest::INGEST_FILE_DESCRIPTOR_SET);
-        let ingester_grpc_service = ingester_service.as_grpc_service(grpc_config.max_message_size);
-        Some(ingester_grpc_service)
-    } else {
-        None
-    };
-
     let ingesthree_grpc_service = services.ingesthree_service_opt.clone().map(|service| {
         enabled_grpc_services.insert("ingesthree");
         file_descriptor_sets
@@ -164,23 +155,6 @@ pub(crate) async fn start_grpc_server(
     } else {
         None
     };
-    // Mount gRPC control plane service if `QuickwitService::ControlPlane` is enabled on node.
-    let control_plane_grpc_service = if services
-        .node_config
-        .is_service_enabled(QuickwitService::ControlPlane)
-    {
-        enabled_grpc_services.insert("control-plane");
-        file_descriptor_sets.push(quickwit_proto::control_plane::CONTROL_PLANE_FILE_DESCRIPTOR_SET);
-
-        Some(
-            services
-                .control_plane_client
-                .as_grpc_service(grpc_config.max_message_size),
-        )
-    } else {
-        None
-    };
-
     let otlp_trace_grpc_service =
         if let Some(otlp_traces_service) = services.otlp_traces_service_opt.clone() {
             enabled_grpc_services.insert("otlp-traces");
@@ -262,11 +236,9 @@ pub(crate) async fn start_grpc_server(
         .add_service(health_service)
         .add_service(reflection_service)
         .add_optional_service(compaction_grpc_service)
-        .add_optional_service(control_plane_grpc_service)
         .add_optional_service(indexing_grpc_service)
         .add_optional_service(ingest_api_grpc_service)
         .add_optional_service(ingest_router_grpc_service)
-        .add_optional_service(ingester_grpc_service)
         .add_optional_service(ingesthree_grpc_service)
         .add_optional_service(jaeger_grpc_service)
         .add_optional_service(jaeger_v2_grpc_service)

@@ -37,7 +37,6 @@ pub(crate) mod tests;
 use std::ops::Range;
 
 pub use error::MetastoreResolverError;
-pub use metastore::control_plane_metastore::ControlPlaneMetastore;
 pub use metastore::file_backed::FileBackedMetastore;
 pub(crate) use metastore::index_metadata::serialize::{IndexMetadataV0_8, VersionedIndexMetadata};
 #[cfg(feature = "postgres")]

@@ -1529,7 +1529,6 @@ mod tests {
         // is a valid configuration.
         let node_config = NodeConfigBuilder {
             enabled_services: ConfigValue::for_test(List(vec![
-                "control_plane".to_string(),
                 "indexer".to_string(),
                 "searcher".to_string(),
                 "janitor".to_string(),

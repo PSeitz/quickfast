@@ -593,7 +593,6 @@ async fn test_update_doc_validation() {
             QuickwitService::Searcher,
             QuickwitService::Metastore,
             QuickwitService::Indexer,
-            QuickwitService::ControlPlane,
             QuickwitService::Janitor,
         ])
         .build_and_start()

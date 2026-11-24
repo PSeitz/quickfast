@@ -18,9 +18,7 @@ use quickwit_actors::{Actor, Handler, Healthz, Mailbox};
 use quickwit_cluster::Cluster;
 use quickwit_compaction::CompactorService;
 use quickwit_indexing::IndexingService;
-use quickwit_ingest::Ingester;
 use quickwit_janitor::JanitorService;
-use quickwit_proto::ingest::ingester::IngesterStatus;
 use tokio::time::timeout;
 use tracing::error;
 use warp::hyper::StatusCode;
@@ -46,13 +44,11 @@ pub(crate) fn health_check_handlers(
     indexer_service_opt: Option<Mailbox<IndexingService>>,
     janitor_service_opt: Option<Mailbox<JanitorService>>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
-    ingester_opt: Option<Ingester>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     liveness_handler(
         indexer_service_opt,
         janitor_service_opt,
         compactor_service_opt,
-        ingester_opt,
     )
     .or(startup_handler(cluster))
 }
@@ -61,14 +57,12 @@ fn liveness_handler(
     indexer_service_opt: Option<Mailbox<IndexingService>>,
     janitor_service_opt: Option<Mailbox<JanitorService>>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
-    ingester_opt: Option<Ingester>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     warp::path!("health" / "livez")
         .and(warp::get())
         .and(with_arg(indexer_service_opt))
         .and(with_arg(janitor_service_opt))
         .and(with_arg(compactor_service_opt))
-        .and(with_arg(ingester_opt))
         .then(get_liveness)
         .recover(recover_fn)
 }
@@ -110,7 +104,6 @@ async fn get_liveness(
     indexer_service_opt: Option<Mailbox<IndexingService>>,
     janitor_service_opt: Option<Mailbox<JanitorService>>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
-    ingester_opt: Option<Ingester>,
 ) -> impl warp::Reply {
     let mut is_live = true;
 
@@ -124,12 +117,6 @@ async fn get_liveness(
     }
     if is_actor_unhealthy(compactor_service_opt).await {
         error!("compactor service is unhealthy");
-        is_live = false;
-    }
-    if let Some(ingester) = ingester_opt
-        && ingester.status() == IngesterStatus::Failed
-    {
-        error!("ingester failed");
         is_live = false;
     }
     let status_code = if is_live {
@@ -173,8 +160,7 @@ mod tests {
         let cluster = create_cluster_for_test(Vec::new(), &[], &transport, false)
             .await
             .unwrap();
-        let health_check_handler =
-            super::health_check_handlers(cluster.clone(), None, None, None, None);
+        let health_check_handler = super::health_check_handlers(cluster.clone(), None, None, None);
         let resp = warp::test::request()
             .path("/health/livez")
             .reply(&health_check_handler)
@@ -214,7 +200,6 @@ mod tests {
             None,
             None,
             Some(compactor_mailbox.clone()),
-            None,
         );
         let resp = warp::test::request()
             .path("/health/livez")

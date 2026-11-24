@@ -18,8 +18,6 @@ pub(crate) mod index_metadata;
 pub mod postgres;
 mod staged_file;
 
-pub mod control_plane_metastore;
-
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ops::{Bound, RangeInclusive};

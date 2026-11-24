@@ -42,9 +42,3 @@ pub(crate) static PENDING_REQUESTS: LazyGauge = lazy_gauge!(
         description: "Number of pending requests.",
         subsystem: "",
 );
-
-pub(crate) static CIRCUIT_BREAK_TOTAL: LazyCounter = lazy_counter!(
-        name: "circuit_break_total",
-        description: "Circuit breaker counter",
-        subsystem: "grpc",
-);

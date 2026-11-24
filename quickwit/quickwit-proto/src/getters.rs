@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::control_plane::*;
 use crate::indexing::*;
 use crate::ingest::ingester::*;
 use crate::ingest::router::*;
@@ -88,9 +87,6 @@ generate_copy_getters! {
 // [`IndexUid`] getters
 generate_getters! {
     impl fn index_uid() -> &IndexUid {} for
-    // Control Plane API
-    GetOrCreateOpenShardsSuccess,
-
     // Indexing API
     IndexingTask,
 

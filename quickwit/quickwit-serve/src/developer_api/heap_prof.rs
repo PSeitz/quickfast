@@ -18,7 +18,7 @@ use warp::Filter;
 use warp::reply::Reply;
 
 pub fn heap_prof_handlers()
--> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(Deserialize)]
     struct ProfilerQueryParams {
         min_alloc_size: Option<u64>,

@@ -50,7 +50,6 @@ async fn test_ingest_traces_with_otlp_grpc_api() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node_with_otlp([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;
@@ -141,7 +140,6 @@ async fn test_ingest_logs_with_otlp_grpc_api() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node_with_otlp([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;
@@ -213,7 +211,6 @@ async fn test_jaeger_api() {
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node_with_otlp([QuickwitService::Indexer])
-        .add_node([QuickwitService::ControlPlane])
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;

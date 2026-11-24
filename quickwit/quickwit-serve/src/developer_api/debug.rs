@@ -194,14 +194,10 @@ mod tests {
         let peer_seeds = Vec::new();
         let transport = ChitchatTransport::default();
         let self_node_readiness = true;
-        let cluster = create_cluster_for_test(
-            peer_seeds,
-            &["control-plane"],
-            &transport,
-            self_node_readiness,
-        )
-        .await
-        .unwrap();
+        let cluster =
+            create_cluster_for_test(peer_seeds, &["metastore"], &transport, self_node_readiness)
+                .await
+                .unwrap();
 
         let debug_handler = debug_handler(cluster);
 

@@ -102,8 +102,6 @@ impl TestNodeConfig {
 pub struct ClusterSandboxBuilder {
     temp_dir: TempDir,
     node_configs: Vec<TestNodeConfig>,
-    use_legacy_ingest: bool,
-    enable_ingesthree: bool,
     enable_standalone_compactors: bool,
 }
 
@@ -112,8 +110,6 @@ impl Default for ClusterSandboxBuilder {
         Self {
             temp_dir: tempfile::tempdir().unwrap(),
             node_configs: Vec::new(),
-            use_legacy_ingest: false,
-            enable_ingesthree: true,
             enable_standalone_compactors: true,
         }
     }
@@ -150,17 +146,6 @@ impl ClusterSandboxBuilder {
         self
     }
 
-    pub fn use_legacy_ingest(mut self) -> Self {
-        self.use_legacy_ingest = true;
-        self.enable_ingesthree = false;
-        self
-    }
-
-    pub fn disable_ingesthree(mut self) -> Self {
-        self.enable_ingesthree = false;
-        self
-    }
-
     /// Opts every node into the external compactor mode. Required for any node running the
     /// `Compactor` service, and makes janitor nodes host the compaction planner.
     pub fn enable_standalone_compactors(mut self) -> Self {
@@ -193,7 +178,6 @@ impl ClusterSandboxBuilder {
                 )
                 .await;
             config.enable_standalone_compactors = self.enable_standalone_compactors;
-            config.ingest_api_config.enable_ingesthree = self.enable_ingesthree;
             peers.push(config.gossip_advertise_addr.to_string());
             resolved_node_configs.push((config, node_builder.services.clone()));
         }
@@ -442,56 +426,6 @@ impl ClusterSandbox {
         .build()
     }
 
-    /// Returns a client targeting the node with the given id specifically, or `None` if no such
-    /// node exists. Unlike [`Self::rest_client`], which returns a client for an arbitrary node
-    /// running a service, this pins the client to a known node — e.g. to keep querying a specific
-    /// node while it is being decommissioned.
-    pub fn rest_client_for_node(&self, node_id: &NodeId) -> Option<QuickwitClient> {
-        let node_config = self
-            .node_configs
-            .iter()
-            .find(|(config, _)| &config.node_id == node_id)?
-            .0
-            .clone();
-        let (ca_cert, identity) = Self::tls_parts(&node_config);
-        let client = QuickwitClientBuilder::new(transport_url(
-            node_config.rest_config.listen_addr,
-            ca_cert.is_some(),
-        ))
-        .set_tls_ca(ca_cert)
-        .set_tls_identity(identity)
-        .build();
-        Some(client)
-    }
-
-    /// A client configured to ingest documents and return detailed parse failures.
-    pub fn detailed_ingest_client(&self) -> QuickwitClient {
-        let node_config = self.find_node_for_service(QuickwitService::Indexer);
-        let (ca_cert, identity) = Self::tls_parts(&node_config);
-        QuickwitClientBuilder::new(transport_url(
-            node_config.rest_config.listen_addr,
-            ca_cert.is_some(),
-        ))
-        .set_tls_ca(ca_cert)
-        .set_tls_identity(identity)
-        .detailed_response(true)
-        .build()
-    }
-
-    // TODO(#5604)
-    pub fn rest_client_legacy_indexer(&self) -> QuickwitClient {
-        let node_config = self.find_node_for_service(QuickwitService::Indexer);
-        let (ca_cert, identity) = Self::tls_parts(&node_config);
-        QuickwitClientBuilder::new(transport_url(
-            node_config.rest_config.listen_addr,
-            ca_cert.is_some(),
-        ))
-        .set_tls_ca(ca_cert)
-        .set_tls_identity(identity)
-        .use_legacy_ingest(true)
-        .build()
-    }
-
     pub fn jaeger_client(&self) -> SpanReaderPluginClient<tonic::transport::Channel> {
         SpanReaderPluginClient::new(self.channel(QuickwitService::Searcher))
     }
@@ -553,46 +487,6 @@ impl ClusterSandbox {
         Ok(())
     }
 
-    /// Waits for the needed number of indexing pipeline to start.
-    ///
-    /// WARNING! does not work if multiple indexers are running
-    pub async fn wait_for_indexing_pipelines(
-        &self,
-        required_pipeline_num: usize,
-    ) -> anyhow::Result<()> {
-        wait_until_predicate(
-            || async move {
-                match self
-                    .rest_client(QuickwitService::Indexer)
-                    .node_stats()
-                    .indexing()
-                    .await
-                {
-                    Ok(result) => {
-                        if result.num_running_pipelines != required_pipeline_num {
-                            debug!(
-                                "wait_for_indexing_pipelines expected {} pipelines, got {}",
-                                required_pipeline_num, result.num_running_pipelines
-                            );
-                            false
-                        } else {
-                            true
-                        }
-                    }
-                    Err(err) => {
-                        debug!("wait_for_cluster_num_ready_nodes error {err}");
-                        false
-                    }
-                }
-            },
-            Duration::from_secs(10),
-            Duration::from_millis(100),
-        )
-        .await?;
-        Ok(())
-    }
-
-    // Waits for the needed number of indexing pipeline to start.
     pub async fn wait_for_splits(
         &self,
         index_id: &str,
@@ -762,20 +656,6 @@ impl ClusterSandbox {
             .await
     }
 
-    /// Remove a node from the sandbox and return its shutdown handle.
-    /// After this call, `rest_client` and other lookup methods skip the removed
-    /// node, so callers can trigger shutdown concurrently with other sandbox
-    /// operations.
-    pub fn remove_node_with_service(&mut self, service: QuickwitService) -> NodeShutdownHandle {
-        let idx = self
-            .node_shutdown_handles
-            .iter()
-            .position(|h| h.node_services.contains(&service))
-            .unwrap_or_else(|| panic!("no node with service {service:?}"));
-        self.node_configs.remove(idx);
-        self.node_shutdown_handles.remove(idx)
-    }
-
     /// Remove the node with the given id from the sandbox and return its shutdown handle, or
     /// `None` if no such node exists. After this call, `rest_client` and other lookup methods
     /// skip the removed node, so callers can trigger its shutdown independently.
@@ -793,11 +673,7 @@ impl ClusterSandbox {
 #[tokio::test]
 async fn test_sandbox_happy_path() {
     let sandbox = ClusterSandboxBuilder::default()
-        .add_node([
-            QuickwitService::ControlPlane,
-            QuickwitService::Metastore,
-            QuickwitService::Janitor,
-        ])
+        .add_node([QuickwitService::Metastore, QuickwitService::Janitor])
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Indexer])
         .build_and_start()
@@ -810,11 +686,7 @@ async fn test_sandbox_happy_path() {
 #[tokio::test]
 async fn test_sandbox_add_node_dynamically() {
     let mut sandbox = ClusterSandboxBuilder::default()
-        .add_node([
-            QuickwitService::ControlPlane,
-            QuickwitService::Metastore,
-            QuickwitService::Janitor,
-        ])
+        .add_node([QuickwitService::Metastore, QuickwitService::Janitor])
         .add_node([QuickwitService::Searcher])
         .build_and_start()
         .await;

@@ -38,8 +38,8 @@ fn frames_post_processor(frames: &mut pprof::Frames) {
 /// Query parameters:
 /// - duration: duration of the profiling in seconds, default is 30 seconds. max value is 300
 /// - sampling: the sampling rate, default is 100, max value is 1000
-pub fn pprof_handlers() -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone
-{
+pub fn pprof_handlers()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     use std::sync::{Arc, Mutex};
 
     use pprof::ProfilerGuard;

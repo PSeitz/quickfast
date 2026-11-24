@@ -25,7 +25,6 @@ use serde::Serialize;
 #[serde(into = "&'static str")]
 pub enum QuickwitService {
     Compactor,
-    ControlPlane,
     Indexer,
     Janitor,
     Metastore,
@@ -47,7 +46,6 @@ impl QuickwitService {
     pub fn as_str(&self) -> &'static str {
         match self {
             QuickwitService::Compactor => "compactor",
-            QuickwitService::ControlPlane => "control-plane",
             QuickwitService::Indexer => "indexer",
             QuickwitService::Janitor => "janitor",
             QuickwitService::Metastore => "metastore",
@@ -84,7 +82,6 @@ impl FromStr for QuickwitService {
     fn from_str(service_str: &str) -> Result<Self, Self::Err> {
         match service_str {
             "compactor" => Ok(QuickwitService::Compactor),
-            "control-plane" | "control_plane" => Ok(QuickwitService::ControlPlane),
             "indexer" => Ok(QuickwitService::Indexer),
             "janitor" => Ok(QuickwitService::Janitor),
             "metastore" => Ok(QuickwitService::Metastore),

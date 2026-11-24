@@ -39,11 +39,7 @@ async fn start_cluster(indexer_modes: &[bool]) -> ClusterSandbox {
     quickwit_common::setup_logging_for_tests();
     let mut builder = ClusterSandboxBuilder::default()
         .enable_standalone_compactors()
-        .add_node([
-            QuickwitService::ControlPlane,
-            QuickwitService::Metastore,
-            QuickwitService::Searcher,
-        ]);
+        .add_node([QuickwitService::Metastore, QuickwitService::Searcher]);
     for _ in indexer_modes {
         builder = builder.add_node([QuickwitService::Indexer]);
     }
@@ -145,19 +141,6 @@ async fn wait_for_hits(sandbox: &ClusterSandbox, index_id: &str, expected: u64) 
     .unwrap();
 }
 
-async fn assert_no_shards(sandbox: &ClusterSandbox, index_id: &str) {
-    let shards = sandbox
-        .rest_client(QuickwitService::Metastore)
-        .sources(index_id)
-        .get_shards(INGEST_V2_SOURCE_ID)
-        .await
-        .unwrap();
-    assert!(
-        shards.is_empty(),
-        "ingesthree created v2 shards: {shards:?}"
-    );
-}
-
 fn input_files(directory: &Path) -> Vec<PathBuf> {
     if !directory.try_exists().unwrap() {
         return Vec::new();
@@ -191,8 +174,8 @@ fn payload(index_id: &str, commit: CommitTypeV2) -> IngestRequestV2 {
 }
 
 #[tokio::test]
-async fn test_ingesthree_http_and_bulk_compact_through_router_with_v2_member() {
-    let sandbox = start_cluster(&[true, false]).await;
+async fn test_ingesthree_http_and_bulk_compact_through_router() {
+    let sandbox = start_cluster(&[true]).await;
     let index_id = "ingesthree-http";
     create_index(&sandbox, index_id).await;
     accept(&sandbox, index_id, r#"{"body":"native"}"#).await;
@@ -221,17 +204,8 @@ async fn test_ingesthree_http_and_bulk_compact_through_router_with_v2_member() {
     wait_for_hits(&sandbox, index_id, 2).await;
     sandbox.assert_hit_count(index_id, "body:native", 1).await;
     sandbox.assert_hit_count(index_id, "body:elastic", 1).await;
-    assert_no_shards(&sandbox, index_id).await;
     assert!(
         !sandbox.node_configs[0]
-            .0
-            .data_dir_path
-            .join("ingesthree")
-            .try_exists()
-            .unwrap()
-    );
-    assert!(
-        !sandbox.node_configs[2]
             .0
             .data_dir_path
             .join("ingesthree")
@@ -314,7 +288,6 @@ async fn test_ingesthree_guards_reject_before_writes() {
         "rejected requests wrote local input"
     );
     assert!(input_files(&upload_directory(&sandbox)).is_empty());
-    assert_no_shards(&sandbox, index_id).await;
     sandbox.assert_hit_count(index_id, "*", 0).await;
 
     let mut request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
@@ -379,49 +352,5 @@ async fn test_ingesthree_shutdown_uploads_tail_and_restart_indexes_it() {
     sandbox
         .assert_hit_count(index_id, "body:afterrestart", 1)
         .await;
-    assert_no_shards(&sandbox, index_id).await;
-    sandbox.shutdown().await.unwrap();
-}
-
-#[tokio::test]
-async fn test_ingesthree_router_never_falls_back_to_v2() {
-    let sandbox = start_cluster(&[false]).await;
-    let index_id = "ingesthree-no-fallback";
-    create_index(&sandbox, index_id).await;
-    let response = post(
-        &sandbox,
-        &format!("{index_id}/ingest"),
-        r#"{"body":"rejected"}"#,
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    let response = post(
-        &sandbox,
-        &format!("_elastic/{index_id}/_bulk"),
-        "{\"index\":{\"_id\":\"unavailable\"}}\n{\"body\":\"rejected\"}\n",
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let response: Value = response.json().await.unwrap();
-    assert_eq!(response["errors"], true, "{response}");
-    assert_eq!(response["items"][0]["index"]["status"], 503, "{response}");
-    assert_eq!(
-        response["items"][0]["index"]["_id"], "unavailable",
-        "{response}"
-    );
-    let endpoint = format!("http://{}", sandbox.node_configs[1].0.grpc_listen_addr);
-    let mut client = IngesthreeServiceClient::connect(endpoint).await.unwrap();
-    let mut request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
-    request
-        .metadata_mut()
-        .insert("ingest-version", "ingesthree".parse().unwrap());
-    assert_eq!(
-        client.ingest(request).await.unwrap_err().code(),
-        tonic::Code::Unimplemented
-    );
-    drop(client);
-    assert_no_shards(&sandbox, index_id).await;
-    assert!(input_files(&upload_directory(&sandbox)).is_empty());
-    sandbox.assert_hit_count(index_id, "*", 0).await;
     sandbox.shutdown().await.unwrap();
 }

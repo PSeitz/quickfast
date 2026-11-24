@@ -220,7 +220,6 @@ pub fn start_actor_runtimes(
 ) -> anyhow::Result<()> {
     if services.contains(&QuickwitService::Indexer)
         || services.contains(&QuickwitService::Janitor)
-        || services.contains(&QuickwitService::ControlPlane)
         || services.contains(&QuickwitService::Compactor)
     {
         quickwit_common::runtimes::initialize_runtimes(runtimes_config)
