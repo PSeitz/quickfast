@@ -110,8 +110,7 @@ impl SourceConfigForSerialization {
             | SourceParams::Kafka(_)
             | SourceParams::PubSub(_)
             | SourceParams::Ingest
-            | SourceParams::IngestCli
-            | SourceParams::Void(_) => {}
+            | SourceParams::IngestCli => {}
         }
 
         if self.transform.is_some()

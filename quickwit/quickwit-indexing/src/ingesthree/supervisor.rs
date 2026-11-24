@@ -144,7 +144,6 @@ mod tests {
     use quickwit_storage::StorageResolver;
 
     use super::*;
-    use crate::IndexingSplitCache;
 
     #[test]
     fn test_retry_after_secs_from_assignment_target() {
@@ -291,7 +290,6 @@ mod tests {
             metastore: quickwit_proto::metastore::MetastoreServiceClient::from_mock(metastore),
             storage_resolver: StorageResolver::for_test(),
             scratch_directory: TempDirectory::for_test(),
-            split_cache: Arc::new(IndexingSplitCache::no_caching()),
             max_concurrent_split_uploads: 1,
             indexing_io_throughput_limiter: None,
             clustering_config: None,

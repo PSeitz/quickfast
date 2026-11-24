@@ -382,7 +382,6 @@ impl SourceType {
             SourceType::PubSub => "pubsub",
             SourceType::Stdin => "stdin",
             SourceType::Unspecified => "unspecified",
-            SourceType::Void => "void",
         }
     }
 }
@@ -397,7 +396,6 @@ impl fmt::Display for SourceType {
             SourceType::PubSub => "Google Cloud Pub/Sub",
             SourceType::Stdin => "Stdin",
             SourceType::Unspecified => "unspecified",
-            SourceType::Void => "void",
         };
         write!(f, "{source_type_str}")
     }

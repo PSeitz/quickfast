@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use quickwit_metrics::{LabelNames, LazyCounter, LazyGauge, label_names, lazy_counter, lazy_gauge};
+use quickwit_metrics::{LabelNames, LazyCounter, label_names, lazy_counter};
 
 pub(crate) const VALIDITY: LabelNames<1> = label_names!("validity");
 
@@ -25,12 +25,5 @@ pub(crate) static DOCS_BYTES_TOTAL: LazyCounter = lazy_counter!(
 pub(crate) static DOCS_TOTAL: LazyCounter = lazy_counter!(
         name: "docs_total",
         description: "Total number of docs ingested, measured after validation and before persistence",
-        subsystem: "ingest",
-);
-
-#[allow(dead_code)] // this really shouldn't be dead, it needs to be used somewhere
-pub(crate) static QUEUE_COUNT: LazyGauge = lazy_gauge!(
-        name: "queue_count",
-        description: "Number of queues currently active",
         subsystem: "ingest",
 );

@@ -158,54 +158,6 @@ quickwit_compactor_decommission_result_total:
   module: quickwit_compaction::metrics
   kind: counter
   description: Number of compactor decommission attempts by result
-quickwit_control_plane_apply_plan_total:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of control plane `apply plan` operations.
-quickwit_control_plane_indexed_shards:
-  module: quickwit_control_plane::metrics
-  kind: gauge
-  description: Number of (remote/zonal/local) shards in the indexing plan
-quickwit_control_plane_indexes_total:
-  module: quickwit_control_plane::metrics
-  kind: gauge
-  description: Number of indexes tracked by the control plane.
-quickwit_control_plane_indexing_plan_density:
-  module: quickwit_control_plane::metrics
-  kind: gauge
-  description: Ratio of occupied shard slots in the indexing plan.
-quickwit_control_plane_locality_repairs_total:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of successful physical-plan locality repairs.
-quickwit_control_plane_metastore_error_aborted:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of aborted metastore transaction (= do not trigger a control plane restart)
-quickwit_control_plane_metastore_error_maybe_executed:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of metastore transaction with an uncertain outcome (= do trigger a control plane restart)
-quickwit_control_plane_rebalance_shards:
-  module: quickwit_control_plane::metrics
-  kind: gauge
-  description: Number of shards rebalanced by the control plane.
-quickwit_control_plane_restart_total:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of control plane restarts.
-quickwit_control_plane_schedule_total:
-  module: quickwit_control_plane::metrics
-  kind: counter
-  description: Number of control plane `schedule` operations.
-quickwit_control_plane_shards:
-  module: quickwit_control_plane::metrics
-  kind: gauge
-  description: Number of open and closed shards tracked by the ingest controller
-quickwit_grpc_circuit_break_total:
-  module: quickwit_serve::metrics
-  kind: counter
-  description: Circuit breaker counter
 quickwit_grpc_request_duration_seconds:
   module: quickwit_common::tower::metrics
   kind: histogram
@@ -222,10 +174,6 @@ quickwit_http_requests_total:
   module: quickwit_serve::metrics
   kind: counter
   description: Total number of HTTP requests processed.
-quickwit_indexing_backpressure_micros:
-  module: quickwit_indexing::metrics
-  kind: counter
-  description: Amount of time spent in backpressure (in micros). This time only includes the amount of time spent waiting for a place in the queue of another actor.
 quickwit_indexing_concurrent_upload_available_permits_num:
   module: quickwit_indexing::metrics
   kind: gauge
@@ -234,14 +182,30 @@ quickwit_indexing_docs_cluster_group_size:
   module: quickwit_indexing::metrics
   kind: histogram
   description: Document cluster group size when finalizing an indexed split.
-quickwit_indexing_indexing_pipelines:
-  module: quickwit_indexing::metrics
+quickwit_indexing_ingesthree_active_assignments:
+  module: quickwit_indexing::ingesthree::metrics
   kind: gauge
-  description: Number of running indexing pipelines
-quickwit_indexing_kafka_rebalance_total:
-  module: quickwit_indexing::metrics
+  description: Assigned groups being indexed or published, including blocking work awaiting cancellation.
+quickwit_indexing_ingesthree_configured_supervisors:
+  module: quickwit_indexing::ingesthree::metrics
+  kind: gauge
+  description: Worker supervisors owned by the indexing service, including restart backoff.
+quickwit_indexing_ingesthree_live_supervisors:
+  module: quickwit_indexing::ingesthree::metrics
+  kind: gauge
+  description: Live worker supervisor tasks, including idle polling and restart backoff.
+quickwit_indexing_ingesthree_memory_flushes_total:
+  module: quickwit_indexing::ingesthree::metrics
   kind: counter
-  description: Number of kafka rebalances
+  description: Flushes triggered by the split-writer memory threshold, including attempts that later fail.
+quickwit_indexing_ingesthree_worker_failures_total:
+  module: quickwit_indexing::ingesthree::metrics
+  kind: counter
+  description: Worker runs ending with an error, panic, or unexpected exit, by reason.
+quickwit_indexing_ingesthree_worker_restarts_total:
+  module: quickwit_indexing::ingesthree::metrics
+  kind: counter
+  description: Worker restarts begun after failure backoff.
 quickwit_indexing_ongoing_merge_operations:
   module: quickwit_indexing::metrics
   kind: gauge
@@ -282,14 +246,6 @@ quickwit_indexing_published_splits_total:
   module: quickwit_indexing::metrics
   kind: counter
   description: Number of successfully published splits.
-quickwit_indexing_split_builders:
-  module: quickwit_indexing::metrics
-  kind: gauge
-  description: Number of existing index writer instances.
-quickwit_ingest_decommission_result_total:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: counter
-  description: Number of ingester decommission attempts by result
 quickwit_ingest_docs_bytes_total:
   module: quickwit_ingest::metrics
   kind: counter
@@ -299,81 +255,41 @@ quickwit_ingest_docs_total:
   kind: counter
   description: Total number of docs ingested, measured after validation and before persistence
 quickwit_ingest_ingest_attempts:
-  module: quickwit_ingest::ingest_v2::metrics
+  module: quickwit_ingest::ingesthree::router::metrics
   kind: counter
   description: Number of routing attempts by AZ locality
 quickwit_ingest_ingest_result_total:
-  module: quickwit_ingest::ingest_v2::metrics
+  module: quickwit_ingest::ingesthree::router::metrics
   kind: counter
   description: Number of ingest requests by result
-quickwit_ingest_queue_count:
-  module: quickwit_ingest::metrics
-  kind: gauge
-  description: Number of queues currently active
-quickwit_ingest_reset_shards_operations_total:
-  module: quickwit_ingest::ingest_v2::metrics
+quickwit_ingesthree_admission_rejections_total:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: counter
-  description: Total number of reset shards operations performed.
-quickwit_ingest_reset_shards_unsafe_deletes_total:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: counter
-  description: Total number of shards the control plane advised deleting while they held unpublished data or were open and not empty. These shards are closed instead of deleted.
-quickwit_ingest_shard_lt_throughput_mib:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: histogram
-  description: Shard long term throughput as reported through chitchat
-quickwit_ingest_shard_st_throughput_mib:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: histogram
-  description: Shard short term throughput as reported through chitchat
-quickwit_ingest_shards:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Append admission rejections by reason, counted at the rejecting destination.
+quickwit_ingesthree_capacity_score:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: Number of shards hosted by the ingester.
-quickwit_ingest_skipped_mrecords_total:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: counter
-  description: Number of mrecords skipped during decoding, by reason (e.g. an unknown header version or record type written by a newer binary).
-quickwit_ingest_wal_acquire_lock_request_duration_secs:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: histogram
-  description: Duration of acquire lock requests in seconds.
-quickwit_ingest_wal_acquire_lock_requests_in_flight:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Last sampled admission capacity score (0-10), zero before sampling and after intake closes. One writer per node.
+quickwit_ingesthree_disk_bytes:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: Number of acquire lock requests in-flight.
-quickwit_ingest_wal_bytes_written_total:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: counter
-  description: Total number of bytes written to the WAL by write operations (create_queue, append_records, truncate_queue, delete_queue), including frame headers and end-of-block padding.
-quickwit_ingest_wal_disk_limit_bytes:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Logical framed-file bytes retained in the node's ingesthree directory, including recovered files, released after local deletion.
+quickwit_ingesthree_disk_limit_bytes:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: WAL disk space limit in bytes.
-quickwit_ingest_wal_disk_usage_ratio:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Configured logical disk byte budget of the node's ingesthree writer.
+quickwit_ingesthree_disk_reserved_bytes:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: Ratio of WAL disk space used to the disk limit.
-quickwit_ingest_wal_disk_used_bytes:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Maximum compressed record bytes reserved for queued and processing appends, including framing and a possible new file header.
+quickwit_ingesthree_queue_bytes:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: WAL disk space used in bytes.
-quickwit_ingest_wal_lock_hold_duration_secs:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: histogram
-  description: Duration for which the WAL lock was held in seconds.
-quickwit_ingest_wal_memory_limit_bytes:
-  module: quickwit_ingest::ingest_v2::metrics
+  description: Reserved bytes for input, validation copies and descriptors, compression serialization and maximum output capacity. Validator and zstd working scratch are separate.
+quickwit_ingesthree_queue_limit_bytes:
+  module: quickwit_ingest::ingesthree::write_queue::queue_metrics
   kind: gauge
-  description: WAL memory limit in bytes.
-quickwit_ingest_wal_memory_usage_ratio:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: gauge
-  description: Ratio of WAL memory used to the memory limit.
-quickwit_ingest_wal_memory_used_bytes:
-  module: quickwit_ingest::ingest_v2::metrics
-  kind: gauge
-  description: WAL memory used in bytes.
+  description: Configured queue byte budget of the node's ingesthree writer.
 quickwit_io_read_bytes_total:
   module: quickwit_common::metrics
   kind: counter

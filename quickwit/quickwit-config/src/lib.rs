@@ -57,8 +57,7 @@ use source_config::FileSourceParamsForSerde;
 pub use source_config::{
     CLI_SOURCE_ID, FileSourceMessageType, FileSourceNotification, FileSourceParams, FileSourceSqs,
     INGEST_V2_SOURCE_ID, KafkaSourceParams, PubSubSourceParams, SourceConfig, SourceInputFormat,
-    SourceParams, TransformConfig, VoidSourceParams, load_source_config_from_user_config,
-    load_source_config_update,
+    SourceParams, TransformConfig, load_source_config_from_user_config, load_source_config_update,
 };
 use tracing::warn;
 
@@ -111,7 +110,6 @@ pub use crate::storage_config::{
     VersionedIndexConfig,
     VersionedIndexTemplate,
     VersionedSourceConfig,
-    VoidSourceParams,
 )))]
 /// Schema used for the OpenAPI generation which are apart of this crate.
 pub struct ConfigApiSchemas;

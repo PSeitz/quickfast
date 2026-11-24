@@ -81,7 +81,6 @@ impl SourceConfig {
             SourceParams::IngestCli => serde_json::to_value(()),
             SourceParams::Kafka(params) => serde_json::to_value(params),
             SourceParams::Stdin => serde_json::to_value(()),
-            SourceParams::Void(params) => serde_json::to_value(params),
         }
         .expect("`SourceParams` should be JSON serializable")
     }
@@ -204,7 +203,6 @@ pub enum SourceParams {
     #[serde(rename = "pubsub")]
     PubSub(PubSubSourceParams),
     Stdin,
-    Void(VoidSourceParams),
 }
 
 impl SourceParams {
@@ -220,10 +218,6 @@ impl SourceParams {
         Self::Stdin
     }
 
-    pub fn void() -> Self {
-        Self::Void(VoidSourceParams)
-    }
-
     fn source_type(&self) -> SourceType {
         match self {
             SourceParams::File(_) => SourceType::File,
@@ -232,7 +226,6 @@ impl SourceParams {
             SourceParams::Kafka(_) => SourceType::Kafka,
             SourceParams::PubSub(_) => SourceType::PubSub,
             SourceParams::Stdin => SourceType::Stdin,
-            SourceParams::Void(_) => SourceType::Void,
         }
     }
 
@@ -436,10 +429,6 @@ impl PubSubSourceParams {
         Ok(())
     }
 }
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct VoidSourceParams;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -844,7 +833,7 @@ mod tests {
     #[cfg(feature = "vrl")]
     #[test]
     fn test_source_config_transform_compiled_on_load_not_on_deserialize() {
-        let current_source_config = SourceConfig::for_test("void-source", SourceParams::void());
+        let current_source_config = SourceConfig::for_test("stdin-source", SourceParams::stdin());
         let mut source_config = current_source_config.clone();
         source_config.transform_config = Some(TransformConfig::for_test("foo"));
         let source_config_json = serde_json::to_string(&source_config).unwrap();
@@ -921,7 +910,7 @@ mod tests {
             // the source type cannot be updated
             let mut existing_source_config =
                 load_source_config_from_user_config(config_format, &file_content).unwrap();
-            existing_source_config.source_params = SourceParams::void();
+            existing_source_config.source_params = SourceParams::stdin();
             load_source_config_update(config_format, &file_content, &existing_source_config)
                 .unwrap_err();
         }

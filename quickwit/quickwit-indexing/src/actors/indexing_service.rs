@@ -31,7 +31,6 @@ use tracing::info;
 
 use crate::ingesthree::S3IndexerSupervisor;
 use crate::source::{IngestRouterSink, SourceForwarderManager};
-use crate::split_store::IndexingSplitCache;
 
 #[path = "../ingesthree/service.rs"]
 mod file_indexing;
@@ -58,7 +57,6 @@ pub struct IndexingService {
     indexing_root_directory: PathBuf,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
-    split_cache: Arc<IndexingSplitCache>,
     max_concurrent_split_uploads: usize,
     indexing_io_throughput_limiter_opt: Option<io::Limiter>,
     clustering_config: Option<DocsClusteringConfig>,
@@ -85,7 +83,6 @@ impl IndexingService {
         indexer_config: IndexerConfig,
         metastore: MetastoreServiceClient,
         storage_resolver: StorageResolver,
-        split_cache: Arc<IndexingSplitCache>,
         clustering_config: Option<DocsClusteringConfig>,
         ingest_router_opt: Option<IngestRouterClient>,
     ) -> anyhow::Result<Self> {
@@ -113,7 +110,6 @@ impl IndexingService {
             indexing_root_directory,
             metastore,
             storage_resolver,
-            split_cache,
             max_concurrent_split_uploads: indexer_config.max_concurrent_split_uploads,
             indexing_io_throughput_limiter_opt: INDEXING_IO_THROUGHPUT_LIMITER.clone(),
             clustering_config,

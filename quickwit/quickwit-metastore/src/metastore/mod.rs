@@ -1101,7 +1101,10 @@ mod tests {
 
     #[test]
     fn test_add_source_request_rejects_uncompilable_vrl_transform() {
-        let mut source_config = SourceConfig::for_test("test-source", SourceParams::void());
+        let mut source_config = SourceConfig::for_test(
+            "test-source",
+            SourceParams::file_from_str("ram:///test-source").unwrap(),
+        );
         source_config.transform_config = Some(TransformConfig::for_test("foo"));
         let index_uid = IndexUid::for_test("test-index", 0);
         let request = AddSourceRequest::try_from_source_config(index_uid, &source_config).unwrap();

@@ -459,7 +459,6 @@ fn validate_metastore_read_replica(node_config: &NodeConfig) -> anyhow::Result<(
 #[derive(Default, Debug)]
 struct ExpectedDiskUsage {
     // indexer / ingester
-    split_store_max_num_bytes: Option<ByteSize>,
     max_queue_disk_usage: Option<ByteSize>,
     // searcher
     split_cache: Option<ByteSize>,
@@ -471,8 +470,6 @@ impl ExpectedDiskUsage {
         if node_config.is_service_enabled(QuickwitService::Indexer) {
             expected.max_queue_disk_usage =
                 Some(node_config.ingest_api_config.max_queue_disk_usage);
-            expected.split_store_max_num_bytes =
-                Some(node_config.indexer_config.split_store_max_num_bytes);
         }
         if node_config.is_service_enabled(QuickwitService::Searcher) {
             expected.split_cache = node_config
@@ -484,9 +481,7 @@ impl ExpectedDiskUsage {
     }
 
     fn total(&self) -> ByteSize {
-        self.split_store_max_num_bytes.unwrap_or_default()
-            + self.max_queue_disk_usage.unwrap_or_default()
-            + self.split_cache.unwrap_or_default()
+        self.max_queue_disk_usage.unwrap_or_default() + self.split_cache.unwrap_or_default()
     }
 }
 
@@ -861,8 +856,6 @@ mod tests {
             config.indexer_config,
             IndexerConfig {
                 enable_otlp_endpoint: true,
-                split_store_max_num_bytes: ByteSize::tb(1),
-                split_store_max_num_splits: 10_000,
                 max_concurrent_split_uploads: 8,
             }
         );

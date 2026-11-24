@@ -207,10 +207,7 @@ pub async fn check_source_connectivity(
                 bail!("GCP PubSub source requires the `gcp-pubsub` cargo feature")
             }
         }
-        SourceParams::Ingest
-        | SourceParams::IngestCli
-        | SourceParams::Stdin
-        | SourceParams::Void(_) => Ok(()),
+        SourceParams::Ingest | SourceParams::IngestCli | SourceParams::Stdin => Ok(()),
     }
 }
 

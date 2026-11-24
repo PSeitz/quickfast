@@ -51,10 +51,10 @@ use ulid::Ulid;
 
 use self::indexing::{PreparedSplit, SplitBuilders};
 use self::metrics::ACTIVE_ASSIGNMENTS;
+use crate::IndexingSplitStore;
 use crate::actors::acquire_indexing_upload_permit;
 use crate::merge_policy::merge_policy_from_settings;
 use crate::metrics::record_published_split;
-use crate::{IndexingSplitCache, IndexingSplitStore};
 
 /// Indexes assigned input files from S3 and publishes their output splits.
 /// Other storage backends remain usable through the storage resolver.
@@ -68,7 +68,6 @@ pub struct S3Indexer {
     pub metastore: MetastoreServiceClient,
     pub storage_resolver: StorageResolver,
     pub scratch_directory: TempDirectory,
-    pub split_cache: Arc<IndexingSplitCache>,
     pub max_concurrent_split_uploads: usize,
     pub indexing_io_throughput_limiter: Option<Limiter>,
     pub clustering_config: Option<DocsClusteringConfig>,
@@ -144,7 +143,7 @@ impl S3Indexer {
             .await?
             .last_delete_opstamp;
         let split_storage = self.storage_resolver.resolve(&config.index_uri).await?;
-        let split_store = IndexingSplitStore::new(split_storage, self.split_cache.clone());
+        let split_store = IndexingSplitStore::new(split_storage);
         let merge_policy = merge_policy_from_settings(&config.indexing_settings);
         let retention = config.retention_policy_opt.clone();
         let cancellation = StopIndexingOnDrop(KillSwitch::default());

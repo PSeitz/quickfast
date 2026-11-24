@@ -65,7 +65,10 @@ pub async fn test_metastore_publish_splits_empty_splits_array_is_allowed<
     // Publishing an empty array of splits is allowed.
     {
         let index_config = IndexConfig::for_test(&index_id, &index_uri);
-        let source_configs = &[SourceConfig::for_test(&source_id, SourceParams::void())];
+        let source_configs = &[SourceConfig::for_test(
+            &source_id,
+            SourceParams::file_from_str("ram:///test-source").unwrap(),
+        )];
         let create_index_request =
             CreateIndexRequest::try_from_index_and_source_configs(&index_config, source_configs)
                 .unwrap();
@@ -100,7 +103,10 @@ pub async fn test_metastore_publish_splits<
     let index_config = IndexConfig::for_test(&index_id, &index_uri);
 
     let source_id = format!("{index_id}--source");
-    let source_configs = &[SourceConfig::for_test(&source_id, SourceParams::void())];
+    let source_configs = &[SourceConfig::for_test(
+        &source_id,
+        SourceParams::file_from_str("ram:///test-source").unwrap(),
+    )];
 
     let split_id_1 = format!("{index_id}--split-1");
     let split_metadata_1 = SplitMetadata {
@@ -586,7 +592,10 @@ pub async fn test_metastore_publish_splits_concurrency<
     let index_config = IndexConfig::for_test(&index_id, &index_uri);
     let source_id = format!("{index_id}--source");
 
-    let source_config = SourceConfig::for_test(&source_id, SourceParams::void());
+    let source_config = SourceConfig::for_test(
+        &source_id,
+        SourceParams::file_from_str("ram:///test-source").unwrap(),
+    );
     let create_index_request =
         CreateIndexRequest::try_from_index_and_source_configs(&index_config, &[source_config])
             .unwrap();
@@ -1323,7 +1332,10 @@ pub async fn test_metastore_split_update_timestamp<
     let index_config = IndexConfig::for_test(&index_id, &index_uri);
 
     let source_id = format!("{index_id}--source");
-    let source_config = SourceConfig::for_test(&source_id, SourceParams::void());
+    let source_config = SourceConfig::for_test(
+        &source_id,
+        SourceParams::file_from_str("ram:///test-source").unwrap(),
+    );
 
     let split_id = format!("{index_id}--split");
     let split_metadata = SplitMetadata {

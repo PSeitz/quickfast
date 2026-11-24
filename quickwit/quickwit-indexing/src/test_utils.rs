@@ -45,7 +45,7 @@ use crate::actors::{DocumentConverter, create_packaged_split, prepare_split_for_
 use crate::local_merge::run_local_merges;
 use crate::merge_policy::{MergePolicy, merge_policy_from_settings};
 use crate::models::IndexedSplitBuilder;
-use crate::split_store::{IndexingSplitCache, IndexingSplitStore};
+use crate::split_store::IndexingSplitStore;
 
 /// Creates a test environment backed by RAM storage and a local scratch directory.
 pub struct TestSandbox {
@@ -108,8 +108,7 @@ impl TestSandbox {
         let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
         let temp_dir = tempfile::tempdir()?;
         let storage = storage_resolver.resolve(&index_uri).await?;
-        let split_store =
-            IndexingSplitStore::new(storage.clone(), Arc::new(IndexingSplitCache::no_caching()));
+        let split_store = IndexingSplitStore::new(storage.clone());
         let universe = Universe::with_accelerated_time();
         Ok(TestSandbox {
             node_id,

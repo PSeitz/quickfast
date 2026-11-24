@@ -93,7 +93,6 @@ glob = "0.3"
 google-cloud-auth = { version = "0.17", default-features = false, features = ["rustls-tls"] }
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-pubsub = { version = "0.30", default-features = false, features = ["auth", "rustls-tls"] }
-governor = "0.10"
 heck = "0.5"
 hex = "0.4"
 home = "0.5"
@@ -104,7 +103,6 @@ http-body-util = "0.1"
 http-serde = "2.1"
 humantime = "2.4"
 hyper = { version = "1.12", features = ["client", "http1", "http2", "server"] }
-hyper-rustls = "0.27"
 hyper-util = { version = "0.1", default-features = false, features = [
   "client-legacy",
   "server-auto",
@@ -184,7 +182,6 @@ rdkafka = { version = "0.39", default-features = false, features = [
   "zstd",
 ] }
 regex = "1.13"
-regex-automata = "0.4"
 regex-syntax = "0.8"
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
@@ -215,7 +212,6 @@ serial_test = { version = "4.0", features = ["file_locks"] }
 sha2 = "0.11"
 siphasher = "1.0"
 stable_deref_trait = "1.2"
-smallvec = "1"
 sqlx = { version = "0.8", features = [
   "migrate",
   "postgres",
@@ -276,10 +272,8 @@ tracing-subscriber = { version = "0.3", features = [
   "time",
 ] }
 ttl_cache = "0.5"
-typetag = "0.2"
 ulid = "3.0"
 ureq = "3"
-username = "0.2"
 # We cannot upgrade to utoipa 5.0+ due to significant breaking changes:
 # 1. The `OpenApi` struct structure changed (fields are private), breaking our manual merging logic in openapi.rs
 # in `quickwit-serve`. This code is fundamentally incompatible with version 5.x.
@@ -313,7 +307,6 @@ aws-smithy-types = { version = "1.9", features = [
   "byte-stream-poll-next",
   "http-body-1-x",
 ] }
-aws-types = "1.7"
 
 azure_core = { version = "1", default-features = false, features = [
   "hmac_rust",

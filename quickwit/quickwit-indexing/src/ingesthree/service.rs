@@ -71,7 +71,6 @@ impl IndexingService {
             metastore: self.metastore.clone(),
             storage_resolver: self.storage_resolver.clone(),
             scratch_directory,
-            split_cache: self.split_cache.clone(),
             max_concurrent_split_uploads: self.max_concurrent_split_uploads,
             indexing_io_throughput_limiter: self.indexing_io_throughput_limiter_opt.clone(),
             clustering_config: self.clustering_config.clone(),
@@ -157,7 +156,6 @@ mod tests {
             metastore,
             storage_resolver: StorageResolver::for_test(),
             scratch_directory: TempDirectory::for_test(),
-            split_cache: Arc::new(IndexingSplitCache::no_caching()),
             max_concurrent_split_uploads: 2,
             indexing_io_throughput_limiter: None,
             clustering_config: None,
@@ -207,7 +205,6 @@ mod tests {
             IndexerConfig::for_test().unwrap(),
             worker.metastore.clone(),
             worker.storage_resolver.clone(),
-            worker.split_cache.clone(),
             None,
             None,
         )

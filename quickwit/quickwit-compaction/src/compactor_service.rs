@@ -31,8 +31,8 @@ use quickwit_config::{
     CompactorConfig, IndexingSettings, RetentionPolicy, SearchSettings, build_doc_mapper,
 };
 use quickwit_doc_mapper::DocMapping;
+use quickwit_indexing::IndexingSplitStore;
 use quickwit_indexing::merge_policy::{MergeOperation, merge_policy_from_settings};
-use quickwit_indexing::{IndexingSplitCache, IndexingSplitStore};
 use quickwit_metastore::SplitMetadata;
 use quickwit_metrics::{gauge, label_values};
 use quickwit_proto::compaction::{
@@ -92,7 +92,6 @@ pub struct CompactorService {
     io_throughput_limiter: Option<Limiter>,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
-    split_cache: Arc<IndexingSplitCache>,
     max_concurrent_split_uploads: NonZeroUsize,
     event_broker: EventBroker,
     // Scratch directory root (<data_dir>/compaction/).
@@ -108,7 +107,6 @@ impl CompactorService {
         compactor_config: &CompactorConfig,
         metastore: MetastoreServiceClient,
         storage_resolver: StorageResolver,
-        split_cache: Arc<IndexingSplitCache>,
         event_broker: EventBroker,
         compaction_root_directory: TempDirectory,
     ) -> Self {
@@ -135,7 +133,6 @@ impl CompactorService {
             io_throughput_limiter,
             metastore,
             storage_resolver,
-            split_cache,
             max_concurrent_split_uploads,
             event_broker,
             compaction_root_directory,
@@ -283,7 +280,7 @@ impl CompactorService {
 
         let index_storage_uri = Uri::from_str(&assignment.index_storage_uri)?;
         let index_storage = self.storage_resolver.resolve(&index_storage_uri).await?;
-        let split_store = IndexingSplitStore::new(index_storage, self.split_cache.clone());
+        let split_store = IndexingSplitStore::new(index_storage);
 
         let doc_mapper = build_doc_mapper(&doc_mapping, &search_settings)?;
         let merge_policy = merge_policy_from_settings(&indexing_settings);
@@ -552,7 +549,6 @@ mod tests {
             &compactor_config,
             metastore,
             StorageResolver::for_test(),
-            Arc::new(IndexingSplitCache::no_caching()),
             EventBroker::default(),
             TempDirectory::for_test(),
         )
@@ -779,7 +775,6 @@ mod tests {
             &compactor_config,
             metastore,
             StorageResolver::for_test(),
-            Arc::new(IndexingSplitCache::no_caching()),
             EventBroker::default(),
             TempDirectory::for_test(),
         );
@@ -946,7 +941,6 @@ mod tests {
             &compactor_config,
             metastore,
             StorageResolver::for_test(),
-            Arc::new(IndexingSplitCache::no_caching()),
             EventBroker::default(),
             TempDirectory::for_test(),
         );
@@ -981,7 +975,6 @@ mod tests {
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
         let compactor_config = CompactorConfig::for_test();
         let storage_resolver = StorageResolver::for_test();
-        let split_cache = Arc::new(IndexingSplitCache::no_caching());
         let event_broker = EventBroker::default();
         let compaction_root_directory = TempDirectory::for_test();
         let (mailbox, _supervisor_handle) = universe.spawn_builder().supervise_fn(move || {
@@ -991,7 +984,6 @@ mod tests {
                 &compactor_config,
                 metastore.clone(),
                 storage_resolver.clone(),
-                split_cache.clone(),
                 event_broker.clone(),
                 compaction_root_directory.clone(),
             )

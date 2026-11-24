@@ -554,7 +554,6 @@ pub enum SourceType {
     Kafka = 6,
     /// Google Cloud Pub/Sub
     PubSub = 3,
-    Void = 11,
     Stdin = 13,
 }
 impl SourceType {
@@ -570,7 +569,6 @@ impl SourceType {
             Self::IngestV2 => "SOURCE_TYPE_INGEST_V2",
             Self::Kafka => "SOURCE_TYPE_KAFKA",
             Self::PubSub => "SOURCE_TYPE_PUB_SUB",
-            Self::Void => "SOURCE_TYPE_VOID",
             Self::Stdin => "SOURCE_TYPE_STDIN",
         }
     }
@@ -583,7 +581,6 @@ impl SourceType {
             "SOURCE_TYPE_INGEST_V2" => Some(Self::IngestV2),
             "SOURCE_TYPE_KAFKA" => Some(Self::Kafka),
             "SOURCE_TYPE_PUB_SUB" => Some(Self::PubSub),
-            "SOURCE_TYPE_VOID" => Some(Self::Void),
             "SOURCE_TYPE_STDIN" => Some(Self::Stdin),
             _ => None,
         }

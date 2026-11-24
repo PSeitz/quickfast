@@ -14,8 +14,6 @@
 
 #![deny(clippy::disallowed_methods)]
 
-use std::sync::Arc;
-
 use quickwit_actors::{Mailbox, Universe};
 use quickwit_config::NodeConfig;
 use quickwit_ingest::router_client::IngestRouterClient;
@@ -26,10 +24,7 @@ use tracing::info;
 pub use crate::actors::{IndexingService, IndexingServiceCounters, PublisherType};
 pub use crate::controlled_directory::ControlledDirectory;
 pub use crate::local_merge::run_local_merges;
-pub use crate::split_store::{
-    IndexingSplitCache, IndexingSplitStore, SplitStoreQuota,
-    get_tantivy_directory_from_split_bundle,
-};
+pub use crate::split_store::{IndexingSplitStore, get_tantivy_directory_from_split_bundle};
 
 pub mod actors;
 mod controlled_directory;
@@ -62,7 +57,6 @@ pub async fn start_indexing_service(
     config: &NodeConfig,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
-    indexing_split_cache: Arc<IndexingSplitCache>,
     ingest_router: IngestRouterClient,
 ) -> anyhow::Result<Mailbox<IndexingService>> {
     info!("starting indexer service");
@@ -72,7 +66,6 @@ pub async fn start_indexing_service(
         config.indexer_config.clone(),
         metastore,
         storage_resolver,
-        indexing_split_cache,
         config.docs_clustering_config.clone(),
         Some(ingest_router),
     )

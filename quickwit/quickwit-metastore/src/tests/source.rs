@@ -49,7 +49,7 @@ pub async fn test_metastore_add_source<MetastoreToTest: MetastoreServiceExt + De
     let source = SourceConfig {
         source_id: source_id.to_string(),
         enabled: true,
-        source_params: SourceParams::void(),
+        source_params: SourceParams::file_from_str("ram:///test-source").unwrap(),
         transform_config: None,
         input_format: SourceInputFormat::Json,
     };
@@ -71,7 +71,7 @@ pub async fn test_metastore_add_source<MetastoreToTest: MetastoreServiceExt + De
     assert_eq!(sources.get(&source_id).unwrap().source_id, source_id);
     assert_eq!(
         sources.get(&source_id).unwrap().source_type(),
-        SourceType::Void
+        SourceType::File
     );
 
     assert!(matches!(
@@ -132,7 +132,7 @@ pub async fn test_metastore_update_source<MetastoreToTest: MetastoreServiceExt +
     let mut source = SourceConfig {
         source_id: source_id.to_string(),
         enabled: true,
-        source_params: SourceParams::void(),
+        source_params: SourceParams::file_from_str("ram:///test-source").unwrap(),
         transform_config: None,
         input_format: SourceInputFormat::Json,
     };
@@ -165,7 +165,7 @@ pub async fn test_metastore_update_source<MetastoreToTest: MetastoreServiceExt +
         assert_eq!(sources.get(&source_id).unwrap().source_id, source_id);
         assert_eq!(
             sources.get(&source_id).unwrap().source_type(),
-            SourceType::Void
+            SourceType::File
         );
         assert_eq!(
             sources.get(&source_id).unwrap().transform_config,
@@ -220,7 +220,7 @@ pub async fn test_metastore_toggle_source<MetastoreToTest: MetastoreServiceExt +
     let source = SourceConfig {
         source_id: source_id.to_string(),
         enabled: true,
-        source_params: SourceParams::void(),
+        source_params: SourceParams::file_from_str("ram:///test-source").unwrap(),
         transform_config: None,
         input_format: SourceInputFormat::Json,
     };
@@ -285,7 +285,7 @@ pub async fn test_metastore_delete_source<MetastoreToTest: MetastoreServiceExt +
     let source = SourceConfig {
         source_id: source_id.to_string(),
         enabled: true,
-        source_params: SourceParams::void(),
+        source_params: SourceParams::file_from_str("ram:///test-source").unwrap(),
         transform_config: None,
         input_format: SourceInputFormat::Json,
     };

@@ -85,8 +85,8 @@ pub fn build_index_command() -> Command {
             Command::new("clear")
                 .display_order(3)
                 .alias("clr")
-                .about("Clears an index: deletes all splits and resets checkpoint.")
-                .long_about("Deletes all its splits and resets its checkpoint. This operation is destructive and cannot be undone, proceed with caution.")
+                .about("Clears an index: deletes all splits.")
+                .long_about("Deletes all its splits. This operation is destructive and cannot be undone, proceed with caution.")
                 .args(&[
                     arg!(--index <INDEX> "Index ID")
                         .display_order(1)
@@ -488,8 +488,7 @@ pub async fn clear_index_cli(args: ClearIndexArgs) -> anyhow::Result<()> {
     debug!(args=?args, "clear-index");
     if !args.assume_yes {
         let prompt = format!(
-            "This operation will delete all the splits of the index `{}` and reset its \
-             checkpoint. Do you want to proceed?",
+            "This operation will delete all the splits of the index `{}`. Do you want to proceed?",
             args.index_id
         );
         if !prompt_confirmation(&prompt, false) {

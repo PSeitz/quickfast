@@ -77,7 +77,7 @@ use quickwit_config::NodeConfig;
 use quickwit_config::service::QuickwitService;
 use quickwit_index_management::{IndexService as IndexManager, IndexServiceError};
 use quickwit_indexing::actors::IndexingService;
-use quickwit_indexing::{IndexingSplitCache, start_indexing_service};
+use quickwit_indexing::start_indexing_service;
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_jaeger::JaegerService;
 use quickwit_janitor::{JanitorService, start_janitor_service};
@@ -262,24 +262,6 @@ async fn get_compaction_planner_client_if_needed(
     Ok((Some(planner_client), None))
 }
 
-/// The split cache is shared when a node runs both indexer and compactor services locally.
-async fn indexing_split_cache_for_config(
-    node_config: &NodeConfig,
-) -> anyhow::Result<Arc<IndexingSplitCache>> {
-    let runs_indexer = node_config.is_service_enabled(QuickwitService::Indexer);
-    let runs_local_compactor = node_config.is_service_enabled(QuickwitService::Compactor);
-    if runs_indexer && runs_local_compactor {
-        let cache = IndexingSplitCache::from_config(
-            &node_config.indexer_config,
-            &node_config.data_dir_path,
-        )
-        .await?;
-        Ok(Arc::new(cache))
-    } else {
-        Ok(Arc::new(IndexingSplitCache::no_caching()))
-    }
-}
-
 /// Waits for an external shutdown signal or for the server supervisor to exit, then notifies all
 /// other services.
 ///
@@ -394,8 +376,6 @@ pub async fn serve_quickwit(
         .await
         .context("failed to initialize compaction service client")?;
 
-    let indexing_split_cache = indexing_split_cache_for_config(&node_config).await?;
-
     let router = quickwit_ingest::ingesthree::IngesthreeRouter::new(
         cluster.clone(),
         node_config.availability_zone.clone(),
@@ -404,13 +384,11 @@ pub async fn serve_quickwit(
     let ingest_router_service = IngestRouterClient::from(router);
 
     let indexing_service_opt = if node_config.is_service_enabled(QuickwitService::Indexer) {
-        let split_cache = indexing_split_cache.clone();
         let indexing_service = start_indexing_service(
             &universe,
             &node_config,
             primary_metastore_client.clone(),
             storage_resolver.clone(),
-            split_cache,
             ingest_router_service.clone(),
         )
         .await
@@ -580,7 +558,6 @@ pub async fn serve_quickwit(
         let compaction_client = compaction_service_client_opt
             .clone()
             .expect("compactor service enabled but no compaction client available");
-        let split_cache = indexing_split_cache.clone();
         let compactor_mailbox = start_compactor_service(
             &universe,
             cluster.self_node_id(),
@@ -588,7 +565,6 @@ pub async fn serve_quickwit(
             &node_config.compactor_config,
             primary_metastore_client.clone(),
             storage_resolver.clone(),
-            split_cache,
             event_broker.clone(),
             compaction_root_directory,
         )
@@ -829,6 +805,17 @@ async fn setup_searcher(
         searcher_context,
     )
     .await?;
+    if node_config.is_service_enabled(QuickwitService::Searcher) {
+        let grpc_addr = node_config.grpc_advertise_addr;
+        let client = SearchServiceClient::from_service(search_service.clone(), grpc_addr);
+        searcher_pool.insert(
+            grpc_addr,
+            SearcherNode {
+                node_id: node_config.node_id.clone(),
+                client,
+            },
+        );
+    }
     let search_service_clone = search_service.clone();
     let max_message_size = node_config.grpc_config.max_message_size;
     let request_timeout = node_config.searcher_config.request_timeout();
@@ -1206,31 +1193,6 @@ mod tests {
         assert!(handle_opt.is_none());
 
         universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_indexing_split_cache_for_config() {
-        async fn cache_created(services: &[QuickwitService]) -> bool {
-            let temp_dir = tempfile::tempdir().unwrap();
-            let mut node_config = NodeConfig::for_test();
-            node_config.data_dir_path = temp_dir.path().to_path_buf();
-            node_config.enabled_services = services.iter().copied().collect();
-            indexing_split_cache_for_config(&node_config).await.unwrap();
-            temp_dir
-                .path()
-                .join("indexer-split-cache")
-                .join("splits")
-                .is_dir()
-        }
-
-        // Indexer co-located with a compactor → shared real cache.
-        assert!(cache_created(&[QuickwitService::Indexer, QuickwitService::Compactor]).await);
-        // Indexer offloading merges to remote compactors → no cache.
-        assert!(!cache_created(&[QuickwitService::Indexer]).await);
-        // Standalone compactor → no cache by default.
-        assert!(!cache_created(&[QuickwitService::Compactor]).await);
-        // Node that neither produces nor merges splits → no cache.
-        assert!(!cache_created(&[QuickwitService::Searcher]).await);
     }
 
     #[tokio::test]

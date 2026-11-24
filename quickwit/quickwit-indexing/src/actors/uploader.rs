@@ -509,8 +509,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
         let ram_storage = RamStorage::default();
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(Arc::new(ram_storage.clone()));
+        let split_store = IndexingSplitStore::new(Arc::new(ram_storage.clone()));
         let merge_policy = Arc::new(NopMergePolicy);
         let uploader = Uploader::new(
             UploaderType::IndexUploader,
@@ -599,8 +598,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
         let ram_storage = RamStorage::default();
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(Arc::new(ram_storage.clone()));
+        let split_store = IndexingSplitStore::new(Arc::new(ram_storage.clone()));
         let merge_policy = Arc::new(NopMergePolicy);
         let uploader = Uploader::new(
             UploaderType::IndexUploader,
@@ -731,8 +729,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
         let ram_storage = RamStorage::default();
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(Arc::new(ram_storage.clone()));
+        let split_store = IndexingSplitStore::new(Arc::new(ram_storage.clone()));
         let merge_policy = Arc::new(NopMergePolicy);
         let uploader = Uploader::new(
             UploaderType::IndexUploader,
@@ -830,8 +827,7 @@ mod tests {
             .times(1)
             .returning(|_| Ok(EmptyResponse {}));
         let ram_storage = RamStorage::default();
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(Arc::new(ram_storage.clone()));
+        let split_store = IndexingSplitStore::new(Arc::new(ram_storage.clone()));
         let merge_policy = Arc::new(NopMergePolicy);
         let (publisher_mailbox, _publisher_inbox) = universe.create_test_mailbox();
         let uploader = Uploader::new(

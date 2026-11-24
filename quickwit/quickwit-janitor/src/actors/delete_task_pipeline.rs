@@ -167,8 +167,7 @@ impl DeleteTaskPipeline {
         );
         let (publisher_mailbox, publisher_supervisor_handler) =
             ctx.spawn_actor().supervise(publisher);
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(self.index_storage.clone());
+        let split_store = IndexingSplitStore::new(self.index_storage.clone());
         let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
         let uploader = Uploader::new(
             UploaderType::DeleteUploader,

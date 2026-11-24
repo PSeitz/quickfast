@@ -391,7 +391,7 @@ pub(crate) mod tests {
 
     pub fn test_pipeline(task_id: &str, split_ids: &[&str]) -> CompactionPipeline {
         let storage = Arc::new(RamStorage::default());
-        let split_store = IndexingSplitStore::create_without_local_store_for_test(storage);
+        let split_store = IndexingSplitStore::new(storage);
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
         let splits: Vec<SplitMetadata> = split_ids
             .iter()

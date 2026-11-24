@@ -56,16 +56,6 @@ impl From<AskError<IngestServiceError>> for IngestServiceError {
     }
 }
 
-impl From<quickwit_common::tower::BufferError> for IngestServiceError {
-    fn from(error: quickwit_common::tower::BufferError) -> Self {
-        use quickwit_common::tower::BufferError;
-        match error {
-            BufferError::Closed => IngestServiceError::Unavailable(error.to_string()),
-            BufferError::Unknown => IngestServiceError::Internal(error.to_string()),
-        }
-    }
-}
-
 impl From<io::Error> for IngestServiceError {
     fn from(io_error: io::Error) -> Self {
         IngestServiceError::IoError(io_error.to_string())

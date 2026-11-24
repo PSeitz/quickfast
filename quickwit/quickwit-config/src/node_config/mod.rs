@@ -26,7 +26,6 @@ use bytesize::ByteSize;
 use http::HeaderMap;
 use quickwit_common::net::HostAddr;
 use quickwit_common::uri::Uri;
-use quickwit_proto::tonic::codec::CompressionEncoding;
 use quickwit_proto::types::{AvailabilityZone, NodeId};
 use serde::{Deserialize, Deserializer, Serialize};
 use tracing::warn;
@@ -190,12 +189,7 @@ fn default_cert_poll_interval() -> HumanDuration {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct IndexerConfig {
-    #[serde(default = "IndexerConfig::default_split_store_max_num_bytes")]
-    pub split_store_max_num_bytes: ByteSize,
-    #[serde(default = "IndexerConfig::default_split_store_max_num_splits")]
-    pub split_store_max_num_splits: usize,
     #[serde(default = "IndexerConfig::default_max_concurrent_split_uploads")]
     pub max_concurrent_split_uploads: usize,
     /// Enables the OpenTelemetry exporter endpoint to ingest logs and traces via the OpenTelemetry
@@ -220,20 +214,10 @@ impl IndexerConfig {
         12
     }
 
-    pub fn default_split_store_max_num_bytes() -> ByteSize {
-        ByteSize::gib(100)
-    }
-
-    pub fn default_split_store_max_num_splits() -> usize {
-        1_000
-    }
-
     #[cfg(any(test, feature = "testsuite"))]
     pub fn for_test() -> anyhow::Result<Self> {
         let indexer_config = IndexerConfig {
             enable_otlp_endpoint: true,
-            split_store_max_num_bytes: ByteSize::mb(1),
-            split_store_max_num_splits: 3,
             max_concurrent_split_uploads: 4,
         };
         Ok(indexer_config)
@@ -244,8 +228,6 @@ impl Default for IndexerConfig {
     fn default() -> Self {
         Self {
             enable_otlp_endpoint: Self::default_enable_otlp_endpoint(),
-            split_store_max_num_bytes: Self::default_split_store_max_num_bytes(),
-            split_store_max_num_splits: Self::default_split_store_max_num_splits(),
             max_concurrent_split_uploads: Self::default_max_concurrent_split_uploads(),
         }
     }
@@ -703,14 +685,7 @@ impl SearcherConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CompressionAlgorithm {
-    Gzip,
-    Zstd,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, default)]
+#[serde(default)]
 pub struct IngestApiConfig {
     /// Maximum memory space taken by the ingest queue
     pub max_queue_memory_usage: ByteSize,
@@ -721,8 +696,6 @@ pub struct IngestApiConfig {
     pub max_body_size: ByteSize,
     /// Maximum size of a request body after decompression.
     pub max_decompressed_body_size: ByteSize,
-    #[serde(default)]
-    pub grpc_compression_algorithm: Option<CompressionAlgorithm>,
     /// Maximum amount of time to wait for the ingester to finish decommissioning gracefully
     /// on shutdown before giving up. Can be overridden with the
     /// `QW_INGEST_DECOMMISSION_TIMEOUT` environment variable.
@@ -736,7 +709,6 @@ impl Default for IngestApiConfig {
             max_queue_disk_usage: ByteSize::gib(4),
             max_body_size: ByteSize::mib(10),
             max_decompressed_body_size: ByteSize::mib(256),
-            grpc_compression_algorithm: None,
             decommission_timeout: HumanDuration::try_from("300s".to_string())
                 .expect("`300s` should be a valid human duration"),
         }
@@ -751,15 +723,6 @@ impl IngestApiConfig {
             "QW_INGEST_DECOMMISSION_TIMEOUT",
             Duration::from(self.decommission_timeout.clone()),
         )
-    }
-
-    pub fn grpc_compression_encoding(&self) -> Option<CompressionEncoding> {
-        self.grpc_compression_algorithm
-            .as_ref()
-            .map(|algorithm| match algorithm {
-                CompressionAlgorithm::Gzip => CompressionEncoding::Gzip,
-                CompressionAlgorithm::Zstd => CompressionEncoding::Zstd,
-            })
     }
 
     fn validate(&self) -> anyhow::Result<()> {
@@ -1137,17 +1100,12 @@ mod tests {
             let ingest_api_config: IngestApiConfig = serde_yaml::from_str(
                 r#"
                     max_queue_disk_usage: 100M
-                    grpc_compression_algorithm: zstd
                 "#,
             )
             .unwrap();
             assert_eq!(
                 ingest_api_config.validate().unwrap_err().to_string(),
                 "max_queue_disk_usage must be at least 256 MiB, got `100.0 MB`"
-            );
-            assert_eq!(
-                ingest_api_config.grpc_compression_encoding().unwrap(),
-                CompressionEncoding::Zstd
             );
         }
         {

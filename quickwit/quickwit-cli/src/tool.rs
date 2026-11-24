@@ -16,7 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{env, io};
 
@@ -40,7 +39,7 @@ use quickwit_indexing::merge_policy::merge_policy_from_settings;
 use quickwit_indexing::models::IndexedSplitBuilder;
 use quickwit_indexing::source::BATCH_NUM_BYTES_LIMIT;
 use quickwit_indexing::source::doc_file_reader::DocFileReader;
-use quickwit_indexing::{IndexingSplitCache, IndexingSplitStore, run_local_merges};
+use quickwit_indexing::{IndexingSplitStore, run_local_merges};
 use quickwit_metastore::{IndexMetadataResponseExt, StageSplitsRequestExt};
 use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
 use quickwit_proto::metastore::{
@@ -443,7 +442,7 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
     let doc_mapper = build_doc_mapper(&index_config.doc_mapping, &index_config.search_settings)?;
     let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
     let storage = storage_resolver.resolve(&index_config.index_uri).await?;
-    let split_store = IndexingSplitStore::new(storage, Arc::new(IndexingSplitCache::no_caching()));
+    let split_store = IndexingSplitStore::new(storage);
 
     if args.input_path_opt.is_none() && io::stdin().is_terminal() {
         let eof_shortcut = match env::consts::OS {
@@ -648,7 +647,7 @@ pub async fn merge_cli(args: MergeArgs) -> anyhow::Result<()> {
     let index_config = index_metadata.index_config;
     let doc_mapper = build_doc_mapper(&index_config.doc_mapping, &index_config.search_settings)?;
     let storage = storage_resolver.resolve(&index_config.index_uri).await?;
-    let split_store = IndexingSplitStore::new(storage, Arc::new(IndexingSplitCache::no_caching()));
+    let split_store = IndexingSplitStore::new(storage);
     let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
     let scratch_root = tempfile::tempdir()?;
     let indexing_directory = quickwit_common::temp_dir::Builder::default()

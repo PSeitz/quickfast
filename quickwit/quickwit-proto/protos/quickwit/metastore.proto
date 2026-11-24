@@ -27,8 +27,8 @@ enum SourceType {
   SOURCE_TYPE_KAFKA = 6;
   // Google Cloud Pub/Sub
   SOURCE_TYPE_PUB_SUB = 3;
-  SOURCE_TYPE_VOID = 11;
   SOURCE_TYPE_STDIN = 13;
+  reserved 11;
 }
 
 // Immutable metadata embedded directly in a split so that the metastore split metadata can be
