@@ -10,10 +10,10 @@ repository.workspace = true
 authors.workspace = true
 license.workspace = true
 
-default-run = "quickwit"
+default-run = "quickfast"
 
 [[bin]]
-name = "quickwit"
+name = "quickfast"
 path = "src/main.rs"
 
 [[bin]]

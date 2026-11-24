@@ -107,7 +107,7 @@ jobs:
           tool: cargo-nextest
       - name: cargo check
         if: always() && steps.modified.outputs.rust_src == 'true'
-        run: cargo check --features=postgres --tests --bin quickwit
+        run: cargo check --features=postgres --tests --bin quickfast
         working-directory: ./quickwit
       - name: cargo nextest
         if: always() && steps.modified.outputs.rust_src == 'true'
@@ -121,7 +121,7 @@ jobs:
         working-directory: ./quickwit/rest-api-tests
       - name: Run REST API tests
         if: always() && steps.modified.outputs.rust_src == 'true'
-        run: pipenv run python3 ./run_tests.py --binary ../target/debug/quickwit
+        run: pipenv run python3 ./run_tests.py --binary ../target/debug/quickfast
         working-directory: ./quickwit/rest-api-tests
 
   lints:

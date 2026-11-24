@@ -41,7 +41,7 @@ runs:
         echo "QW_COMMIT_TAGS=$(git tag --points-at HEAD | tr '\n' ',')" >> $GITHUB_ENV
       shell: bash
     - name: Build binary
-      run: cargo build --release --features release-macos-feature-vendored-set --target ${{ matrix.target }} --bin quickwit
+      run: cargo build --release --features release-macos-feature-vendored-set --target ${{ matrix.target }} --bin quickfast
       shell: bash
       working-directory: ./quickwit
       env:
@@ -50,7 +50,7 @@ runs:
         QW_COMMIT_TAGS: ${{ env.QW_COMMIT_TAGS }}
     - name: Bundle archive
       run: |
-        make archive BINARY_FILE=quickwit/target/${{ inputs.target }}/release/quickwit \
+        make archive BINARY_FILE=quickwit/target/${{ inputs.target }}/release/quickfast \
           BINARY_VERSION=${{ inputs.version }} ARCHIVE_NAME=${{ env.ASSET_FULL_NAME }}
       shell: bash
     - name: Save binary archive for three days

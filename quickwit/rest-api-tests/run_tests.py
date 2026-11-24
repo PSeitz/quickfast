@@ -363,7 +363,8 @@ class QuickwitRunner:
         mkdir(config)
         shutil.copy("../../config/quickwit.yaml", config)
         shutil.copy(quickwit_bin_path, self.quickwit_dir.name)
-        self.proc = subprocess.Popen(["./quickwit", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=self.quickwit_dir.name)
+        bin_name = osp.basename(quickwit_bin_path)
+        self.proc = subprocess.Popen([f"./{bin_name}", "run"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=self.quickwit_dir.name)
         for i in range(100):
             try:
                 print("Checking on quickwit")

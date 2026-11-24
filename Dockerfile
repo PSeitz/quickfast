@@ -46,7 +46,7 @@ RUN echo "Building workspace with feature(s) '$CARGO_FEATURES' and profile '$CAR
     cargo build \
     -p quickwit-cli \
     --features $CARGO_FEATURES \
-    --bin quickwit \
+    --bin quickfast \
     $(test "$CARGO_PROFILE" = "release" && echo "--release") \
     && echo "Copying binaries to /quickwit/bin" \
     && mkdir -p /quickwit/bin \
@@ -67,13 +67,13 @@ RUN apt-get -y update \
 
 WORKDIR /quickwit
 RUN mkdir config qwdata
-COPY --from=bin-builder /quickwit/bin/quickwit /usr/local/bin/quickwit
+COPY --from=bin-builder /quickwit/bin/quickfast /usr/local/bin/quickfast
 COPY --from=bin-builder /quickwit/config/quickwit.yaml /quickwit/config/quickwit.yaml
 
 ENV QW_CONFIG=/quickwit/config/quickwit.yaml
 ENV QW_DATA_DIR=/quickwit/qwdata
 ENV QW_LISTEN_ADDRESS=0.0.0.0
 
-RUN quickwit --version
+RUN quickfast --version
 
-ENTRYPOINT ["quickwit"]
+ENTRYPOINT ["quickfast"]

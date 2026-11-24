@@ -42,7 +42,7 @@ runs:
         echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C target-cpu=neoverse-n1 -C link-arg=-lresolv --cfg tokio_unstable" >> "$GITHUB_ENV"
       shell: bash
     - name: Build Quickwit
-      run: cross build --release --features release-feature-vendored-set --target ${{ inputs.target }} --bin quickwit
+      run: cross build --release --features release-feature-vendored-set --target ${{ inputs.target }} --bin quickfast
       shell: bash
       env:
         QW_COMMIT_DATE: ${{ env.QW_COMMIT_DATE }}
@@ -51,7 +51,7 @@ runs:
       working-directory: ./quickwit
     - name: Bundle archive
       run: |
-        make archive BINARY_FILE=quickwit/target/${{ inputs.target }}/release/quickwit \
+        make archive BINARY_FILE=quickwit/target/${{ inputs.target }}/release/quickfast \
           BINARY_VERSION=${{ inputs.version }} ARCHIVE_NAME=${{ env.ASSET_FULL_NAME }}
       shell: bash
     - name: Save binary archive for three days
