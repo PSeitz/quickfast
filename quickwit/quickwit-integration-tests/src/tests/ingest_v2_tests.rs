@@ -64,7 +64,11 @@ async fn wait_for_each_query_to_match(
 #[tokio::test]
 #[ignore]
 async fn test_ingest_recreated_index() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test-ingest-recreated-index";
     let index_config = format!(
         r#"
@@ -194,7 +198,11 @@ async fn test_ingest_recreated_index() {
 #[tokio::test]
 #[ignore]
 async fn test_indexing_directory_cleanup() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test-ingest-directory-cleanup";
     let index_config = format!(
         r#"
@@ -261,6 +269,7 @@ async fn test_indexing_directory_cleanup() {
 #[tokio::test]
 async fn test_ingest_v2_index_not_found() {
     let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([
@@ -294,6 +303,7 @@ async fn test_ingest_v2_index_not_found() {
 #[tokio::test]
 async fn test_ingest_v2_happy_path() {
     let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([
@@ -361,7 +371,11 @@ async fn test_ingest_v2_happy_path() {
 
 #[tokio::test]
 async fn test_commit_force() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_commit_force";
     let index_config = format!(
         r#"
@@ -422,7 +436,11 @@ async fn test_commit_force() {
 
 #[tokio::test]
 async fn test_commit_wait_for() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_commit_wait_for";
     let index_config = format!(
         r#"
@@ -515,7 +533,11 @@ async fn test_commit_wait_for() {
 
 #[tokio::test]
 async fn test_commit_auto() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_commit_auto";
     let index_config = format!(
         r#"
@@ -572,7 +594,11 @@ async fn test_commit_auto() {
 
 #[tokio::test]
 async fn test_detailed_ingest_response() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_detailed_ingest_response";
     let index_config = format!(
         r#"
@@ -621,6 +647,7 @@ async fn test_detailed_ingest_response() {
 #[tokio::test]
 async fn test_very_large_index_name() {
     let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Searcher])
         .add_node([QuickwitService::Metastore])
         .add_node([QuickwitService::Indexer])
@@ -716,7 +743,11 @@ async fn test_very_large_index_name() {
 
 #[tokio::test]
 async fn test_shutdown_single_node() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_shutdown_single_node";
 
     sandbox
@@ -771,6 +802,7 @@ async fn test_shutdown_single_node() {
 #[tokio::test]
 async fn test_shutdown_control_plane_first() {
     let mut sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer])
         .add_node([
             QuickwitService::ControlPlane,
@@ -833,6 +865,7 @@ async fn test_shutdown_control_plane_first() {
 #[tokio::test]
 async fn test_shutdown_indexer_first() {
     let mut sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer])
         .add_node([
             QuickwitService::ControlPlane,
@@ -891,7 +924,11 @@ async fn test_shutdown_indexer_first() {
 /// even if we shut it down without waiting for the splits to be published.
 #[tokio::test]
 async fn test_graceful_shutdown_single_node() {
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let index_id = "test_graceful_shutdown_single_node";
     let index_config = format!(
         r#"
@@ -950,6 +987,7 @@ async fn test_graceful_shutdown_single_node() {
 #[tokio::test]
 async fn test_graceful_shutdown_no_data_loss() {
     let mut sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer])
         .add_node([
             QuickwitService::ControlPlane,
@@ -1080,6 +1118,7 @@ async fn test_graceful_shutdown_no_data_loss() {
 #[tokio::test]
 async fn test_retiring_indexer_receives_empty_plan() {
     let mut sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer])
         .add_node([QuickwitService::Indexer])
         .add_node([
@@ -1213,6 +1252,7 @@ async fn test_retiring_indexer_receives_empty_plan() {
 async fn test_retiring_indexer_decommissions_gracefully() {
     quickwit_common::setup_logging_for_tests();
     let mut sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer])
         .add_node([QuickwitService::Indexer])
         .add_node([
@@ -1339,6 +1379,7 @@ async fn test_ingest_after_index_recreate_multi_node() {
     quickwit_common::setup_logging_for_tests();
 
     let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([QuickwitService::Indexer, QuickwitService::Janitor])
         .add_node([

@@ -1,6 +1,6 @@
 # Ingesthree intake
 
-Experimental, opt-in ingestion through local files and object storage. V2 remains the default.
+Default ingestion through local files and object storage.
 
 ```text
 request → validate → zstd-compress batch → append locally → ACK
@@ -13,9 +13,8 @@ host-loss durability, upload, or searchability. Delivery is at least once.
 
 ## Setup
 
-- Set `ingest_api.enable_ingesthree: true` on routers and ingesthree indexers.
-- Set `enable_standalone_compactors: true` on ingesthree indexers. Compactor workers
-  handle later merges. Initial split publication works without them.
+- `ingest_api.enable_ingesthree` and `enable_standalone_compactors` default to `true`.
+  Compactor workers handle later merges. Initial split publication works without them.
 - Use the built-in JSON ingest source without a transform. Only `Auto` commits are supported.
 - Existing ingest, Elasticsearch bulk, and enabled OTLP endpoints need no new client header.
   Internal RPCs require exactly one `ingest-version: ingesthree` value. There is no v2 fallback.

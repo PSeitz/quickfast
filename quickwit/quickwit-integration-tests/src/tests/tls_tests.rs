@@ -171,9 +171,6 @@ async fn test_tls_grpc() {
             .unwrap()
     );
 
-    // Assert that at least 1 indexing pipelines is successfully started
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
-
     // Check that search is working
     let search_response_empty = sandbox
         .rest_client(QuickwitService::Searcher)

@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use quickwit_config::service::QuickwitService;
+use quickwit_metastore::SplitState;
 use quickwit_rest_client::rest_client::CommitType;
 use serde_json::json;
 
@@ -80,9 +81,6 @@ async fn test_update_search_settings_on_multi_nodes_cluster() {
             .unwrap()
     );
 
-    // Wait until indexing pipelines are started
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
-
     ingest(
         &sandbox.rest_client(QuickwitService::Indexer),
         "my-updatable-index",
@@ -93,7 +91,10 @@ async fn test_update_search_settings_on_multi_nodes_cluster() {
     .unwrap();
 
     // Wait until split is committed
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    sandbox
+        .wait_for_splits("my-updatable-index", Some(vec![SplitState::Published]), 1)
+        .await
+        .unwrap();
 
     // No hit because `default_search_fields`` only covers the `title` field
     assert_hits_unordered(&sandbox, "my-updatable-index", "record", Ok(&[])).await;

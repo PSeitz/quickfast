@@ -54,8 +54,6 @@ async fn test_ingest_traces_with_otlp_grpc_api() {
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;
-    // Wait for the pipelines to start (one for logs and one for traces)
-    sandbox.wait_for_indexing_pipelines(2).await.unwrap();
 
     fn build_span(span_name: String) -> Vec<ResourceSpans> {
         let scope_spans = vec![ScopeSpans {
@@ -147,8 +145,6 @@ async fn test_ingest_logs_with_otlp_grpc_api() {
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;
-    // Wait fo the pipelines to start (one for logs and one for traces)
-    sandbox.wait_for_indexing_pipelines(2).await.unwrap();
 
     fn build_log(body: String) -> Vec<ResourceLogs> {
         let log_record = LogRecord {
@@ -221,8 +217,6 @@ async fn test_jaeger_api() {
         .add_node([QuickwitService::Janitor])
         .build_and_start()
         .await;
-    // Wait fo the pipelines to start (one for logs and one for traces)
-    sandbox.wait_for_indexing_pipelines(2).await.unwrap();
 
     let export_trace_request = ExportTraceServiceRequest {
         resource_spans: make_resource_spans_for_test(),

@@ -30,6 +30,7 @@ async fn test_update_doc_mapping_restart_indexing_pipeline() {
     let index_id = "update-restart-ingest";
     quickwit_common::setup_logging_for_tests();
     let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
         .add_node([
             QuickwitService::Searcher,
             QuickwitService::Metastore,

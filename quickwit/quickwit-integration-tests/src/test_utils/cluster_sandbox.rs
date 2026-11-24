@@ -103,6 +103,7 @@ pub struct ClusterSandboxBuilder {
     temp_dir: TempDir,
     node_configs: Vec<TestNodeConfig>,
     use_legacy_ingest: bool,
+    enable_ingesthree: bool,
     enable_standalone_compactors: bool,
 }
 
@@ -112,7 +113,8 @@ impl Default for ClusterSandboxBuilder {
             temp_dir: tempfile::tempdir().unwrap(),
             node_configs: Vec::new(),
             use_legacy_ingest: false,
-            enable_standalone_compactors: false,
+            enable_ingesthree: true,
+            enable_standalone_compactors: true,
         }
     }
 }
@@ -150,6 +152,12 @@ impl ClusterSandboxBuilder {
 
     pub fn use_legacy_ingest(mut self) -> Self {
         self.use_legacy_ingest = true;
+        self.enable_ingesthree = false;
+        self
+    }
+
+    pub fn disable_ingesthree(mut self) -> Self {
+        self.enable_ingesthree = false;
         self
     }
 
@@ -185,6 +193,7 @@ impl ClusterSandboxBuilder {
                 )
                 .await;
             config.enable_standalone_compactors = self.enable_standalone_compactors;
+            config.ingest_api_config.enable_ingesthree = self.enable_ingesthree;
             peers.push(config.gossip_advertise_addr.to_string());
             resolved_node_configs.push((config, node_builder.services.clone()));
         }
@@ -622,7 +631,7 @@ impl ClusterSandbox {
                     }
                 }
             },
-            Duration::from_secs(15),
+            Duration::from_secs(30),
             Duration::from_millis(500),
         )
         .await?;

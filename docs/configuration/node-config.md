@@ -282,7 +282,7 @@ indexer:
 
 | Property | Description | Default value |
 | --- | --- | --- |
-| `enable_ingesthree` | Experimental file-based ingest routing. On indexer nodes, also starts local file intake and one S3 indexing worker per CPU (`QW_NUM_CPUS`), requiring `enable_standalone_compactors: true`. | `false` |
+| `enable_ingesthree` | File-based ingest routing. On indexer nodes, also starts local file intake and one S3 indexing worker per CPU (`QW_NUM_CPUS`), requiring `enable_standalone_compactors: true`. | `true` |
 | `max_queue_memory_usage` | Maximum size in bytes of the in-memory Ingest queue. Also limits queued/processing input in ingesthree. | `2GiB` |
 | `max_queue_disk_usage` | Maximum disk-space in bytes taken by the Ingest queue. The minimum size is at least `256M` and be at least `max_queue_memory_usage`. | `4GiB` |
 | `max_body_size` | Maximum size of a request body *before* decompression. Larger requests are rejected with HTTP 413. Prefer a [file source](../ingest-data/sqs-files.md) over raising it. Formerly `content_length_limit` (still accepted). | `10MiB` |
@@ -302,15 +302,14 @@ ingest_api:
   decommission_timeout: 300s
 ```
 
-### Experimental ingesthree
+### Ingesthree
 
-Enable this on nodes receiving public ingest requests and on the indexer nodes that
-will accept and index their input:
+Ingesthree and `enable_standalone_compactors` are enabled by default. To disable
+ingesthree and revert to legacy ingest:
 
 ```yaml
-enable_standalone_compactors: true  # Required on ingesthree indexers.
 ingest_api:
-  enable_ingesthree: true
+  enable_ingesthree: false
 ```
 
 Ingesthree supports standalone compaction on separate compactor nodes. An ingesthree

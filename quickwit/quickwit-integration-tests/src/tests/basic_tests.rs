@@ -17,6 +17,7 @@ use std::time::Duration;
 use hyper::{Method, Request, StatusCode};
 use hyper_util::rt::TokioExecutor;
 use quickwit_config::service::QuickwitService;
+use quickwit_metastore::SplitState;
 use quickwit_rest_client::rest_client::CommitType;
 use quickwit_serve::SearchRequestQueryString;
 use serde_json::json;
@@ -100,7 +101,6 @@ async fn test_standalone_server() {
                 .num_hits,
             0
         );
-        sandbox.wait_for_indexing_pipelines(1).await.unwrap();
     }
     sandbox.shutdown().await.unwrap();
 }
@@ -149,15 +149,18 @@ async fn test_multi_nodes_cluster_during_cluster_id_migration() {
         )
         .await
         .unwrap();
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
     ingest(
         &sandbox.rest_client(QuickwitService::Indexer),
         index_id,
         ingest_json!({"body": "mixed cluster ids remain operational"}),
-        CommitType::Force,
+        CommitType::Auto,
     )
     .await
     .unwrap();
+    sandbox
+        .wait_for_splits(index_id, Some(vec![SplitState::Published]), 1)
+        .await
+        .unwrap();
     sandbox
         .assert_hit_count(index_id, "body:operational", 1)
         .await;
@@ -204,9 +207,6 @@ async fn test_multi_nodes_cluster() {
             .await
             .unwrap()
     );
-
-    // Assert that at least 1 indexing pipelines is successfully started
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
 
     // Check that search is working
     let search_response_empty = sandbox

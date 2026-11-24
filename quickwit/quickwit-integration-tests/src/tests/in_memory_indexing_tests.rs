@@ -41,7 +41,11 @@ async fn test_in_memory_indexing() {
         return;
     }
     quickwit_common::setup_logging_for_tests();
-    let sandbox = ClusterSandboxBuilder::build_and_start_standalone().await;
+    let sandbox = ClusterSandboxBuilder::default()
+        .disable_ingesthree()
+        .add_node(QuickwitService::default_services())
+        .build_and_start()
+        .await;
     let client = sandbox.rest_client(QuickwitService::Indexer);
     let index_id = "in-memory-index";
     client

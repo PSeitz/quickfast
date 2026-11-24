@@ -94,14 +94,8 @@ impl FromStr for List {
     }
 }
 
-fn default_enabled_services() -> ConfigValue<List, QW_ENABLED_SERVICES> {
-    // Opt-in standalone services are excluded from all-in-one nodes by default.
-    ConfigValue::with_default(List(
-        QuickwitService::default_services()
-            .into_iter()
-            .map(|service| service.to_string())
-            .collect(),
-    ))
+fn default_enable_standalone_compactors() -> ConfigValue<bool, QW_ENABLE_STANDALONE_COMPACTORS> {
+    ConfigValue::with_default(true)
 }
 
 fn default_listen_address() -> ConfigValue<String, QW_LISTEN_ADDRESS> {
@@ -193,7 +187,7 @@ struct NodeConfigBuilder {
     node_id: ConfigValue<String, QW_NODE_ID>,
     #[serde(default = "default_availability_zone")]
     availability_zone: ConfigValue<String, QW_AVAILABILITY_ZONE>,
-    #[serde(default = "default_enabled_services")]
+    #[serde(default = "ConfigValue::none")]
     enabled_services: ConfigValue<List, QW_ENABLED_SERVICES>,
     #[serde(default = "default_listen_address")]
     listen_address: ConfigValue<String, QW_LISTEN_ADDRESS>,
@@ -214,7 +208,7 @@ struct NodeConfigBuilder {
     #[serde(default = "default_metastore_read_replica_uri")]
     metastore_read_replica_uri: ConfigValue<Uri, QW_METASTORE_READ_REPLICA_URI>,
     default_index_root_uri: ConfigValue<Uri, QW_DEFAULT_INDEX_ROOT_URI>,
-    #[serde(default)]
+    #[serde(default = "default_enable_standalone_compactors")]
     enable_standalone_compactors: ConfigValue<bool, QW_ENABLE_STANDALONE_COMPACTORS>,
     #[serde(rename = "rest")]
     #[serde(default)]
@@ -279,13 +273,20 @@ impl NodeConfigBuilder {
         let resolved_enabled_services: HashSet<QuickwitService> =
             if let Some(enabled_services) = enabled_services {
                 enabled_services.clone()
-            } else {
-                self.enabled_services
-                    .resolve(env_vars)?
+            } else if let Some(configured_services) =
+                self.enabled_services.resolve_optional(env_vars)?
+            {
+                configured_services
                     .0
                     .into_iter()
                     .map(|service| service.parse())
                     .collect::<Result<_, _>>()?
+            } else {
+                let mut services = QuickwitService::default_services();
+                if !enable_standalone_compactors {
+                    services.remove(&QuickwitService::Compactor);
+                }
+                services
             };
 
         let listen_address = self.listen_address.resolve(env_vars)?;
@@ -531,7 +532,7 @@ impl Default for NodeConfigBuilder {
             extra_cluster_ids: default_extra_cluster_ids(),
             node_id: default_node_id(),
             availability_zone: ConfigValue::none(),
-            enabled_services: default_enabled_services(),
+            enabled_services: ConfigValue::none(),
             listen_address: default_listen_address(),
             rest_listen_port: None,
             gossip_listen_port: ConfigValue::none(),
@@ -544,7 +545,7 @@ impl Default for NodeConfigBuilder {
             metastore_uri: ConfigValue::none(),
             metastore_read_replica_uri: default_metastore_read_replica_uri(),
             default_index_root_uri: ConfigValue::none(),
-            enable_standalone_compactors: Default::default(),
+            enable_standalone_compactors: default_enable_standalone_compactors(),
             rest_config_builder: RestConfigBuilder::default(),
             health_config_builder: HealthConfigBuilder::default(),
             grpc_config: GrpcConfig::default(),
@@ -707,7 +708,7 @@ pub fn node_config_for_tests_from_ports(
         ingest_api_config: IngestApiConfig::default(),
         jaeger_config: JaegerConfig::default(),
         compactor_config: CompactorConfig::default(),
-        enable_standalone_compactors: false,
+        enable_standalone_compactors: true,
         docs_clustering_config: None,
     }
 }
@@ -1034,6 +1035,8 @@ mod tests {
                 env::current_dir().unwrap().display()
             )
         );
+        assert!(config.enable_standalone_compactors);
+        assert!(config.ingest_api_config.enable_ingesthree);
         assert!(config.ingest_api_config._replication_factor.is_none());
     }
 
@@ -1488,13 +1491,14 @@ mod tests {
     #[tokio::test]
     async fn test_compactor_service_requires_standalone_flag() {
         // Compactor service enabled while `enable_standalone_compactors` is off is an
-        // invalid combination: the default indexer-local merge pipeline is in use, so a
+        // invalid combination: the indexer-local merge pipeline is in use, so a
         // dedicated compactor must not run.
         let error = NodeConfigBuilder {
             enabled_services: ConfigValue::for_test(List(vec![
                 "indexer".to_string(),
                 "compactor".to_string(),
             ])),
+            enable_standalone_compactors: ConfigValue::for_test(false),
             ..Default::default()
         }
         .build_and_validate(&HashMap::new(), None)
@@ -1504,6 +1508,19 @@ mod tests {
             error.to_string().contains("enable_standalone_compactors"),
             "expected error to mention `enable_standalone_compactors`, got: {error}",
         );
+    }
+
+    #[tokio::test]
+    async fn test_disabling_standalone_compactors_omits_default_compactor_service() {
+        let config = NodeConfigBuilder {
+            enable_standalone_compactors: ConfigValue::for_test(false),
+            ..Default::default()
+        }
+        .build_and_validate(&HashMap::new(), None)
+        .await
+        .unwrap();
+        assert!(!config.enable_standalone_compactors);
+        assert!(!config.is_service_enabled(QuickwitService::Compactor));
     }
 
     #[tokio::test]

@@ -437,16 +437,13 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_ingest_api_blocks_when_wait_is_specified() {
+        let mut config = IngestApiConfig::default();
+        config.enable_ingesthree = false;
         let (universe, _temp_dir, ingest_service_client, ingest_service_mailbox) =
-            setup_ingest_v1_service(&["my-index"], &IngestApiConfig::default()).await;
+            setup_ingest_v1_service(&["my-index"], &config).await;
         let ingest_router = IngestRouterServiceClient::mocked();
-        let ingest_api_handlers = ingest_api_handlers(
-            ingest_router,
-            ingest_service_client,
-            IngestApiConfig::default(),
-            true,
-            false,
-        );
+        let ingest_api_handlers =
+            ingest_api_handlers(ingest_router, ingest_service_client, config, true, false);
         let handle = tokio::spawn(async move {
             let resp = warp::test::request()
                 .path("/my-index/ingest?commit=wait_for")
@@ -488,16 +485,13 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_ingest_api_blocks_when_force_is_specified() {
+        let mut config = IngestApiConfig::default();
+        config.enable_ingesthree = false;
         let (universe, _temp_dir, ingest_service_client, ingest_service_mailbox) =
-            setup_ingest_v1_service(&["my-index"], &IngestApiConfig::default()).await;
+            setup_ingest_v1_service(&["my-index"], &config).await;
         let ingest_router = IngestRouterServiceClient::mocked();
-        let ingest_api_handlers = ingest_api_handlers(
-            ingest_router,
-            ingest_service_client,
-            IngestApiConfig::default(),
-            true,
-            false,
-        );
+        let ingest_api_handlers =
+            ingest_api_handlers(ingest_router, ingest_service_client, config, true, false);
         let handle = tokio::spawn(async move {
             let resp = warp::test::request()
                 .path("/my-index/ingest?commit=force")

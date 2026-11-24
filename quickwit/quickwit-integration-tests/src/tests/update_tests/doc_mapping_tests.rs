@@ -77,9 +77,6 @@ async fn validate_search_across_doc_mapping_updates(
             .unwrap()
     );
 
-    // Wait until indexing pipelines are started.
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
-
     // We use local ingest to always pick up the latest doc mapping
     sandbox
         .local_ingest(index_id, ingest_before_update)
@@ -647,9 +644,6 @@ async fn test_update_doc_validation() {
             .await
             .unwrap()
     );
-
-    // Wait until indexing pipelines are started.
-    sandbox.wait_for_indexing_pipelines(1).await.unwrap();
 
     let unsigned_payload = (0..20).fold(String::new(), |mut buffer, id| {
         writeln!(&mut buffer, "{{\"body\": {id}}}").unwrap();
