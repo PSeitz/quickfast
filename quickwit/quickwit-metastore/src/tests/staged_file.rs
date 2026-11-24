@@ -33,7 +33,7 @@ pub trait WriteStagedFileForTest {
 }
 
 pub(crate) fn registration_request(index_uid: IndexUid) -> RegisterFileForIndexing {
-    let file_id = Ulid::new().to_string();
+    let file_id = Ulid::generate().to_string();
     RegisterFileForIndexing {
         file_uri: format!("s3://test-bucket/ingesthree/{index_uid}/{file_id}.finished"),
         index_uid: Some(index_uid),
@@ -89,7 +89,7 @@ pub(crate) fn publication_request(
             .iter()
             .map(|split_id| split_id.to_string())
             .collect(),
-        publication_id: Ulid::new().to_string(),
+        publication_id: Ulid::generate().to_string(),
     }
 }
 

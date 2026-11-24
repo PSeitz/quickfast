@@ -241,7 +241,7 @@ fn test_recovery_rejects_invalid_metadata() {
 
 #[test]
 fn test_recovery_distinguishes_incomplete_metadata_from_missing_documents() {
-    let file_id = Ulid::new();
+    let file_id = Ulid::generate();
     let index_uid = IndexUid::for_test("logs", 1);
     let mut bytes = MAGIC.to_vec();
     write_record(&mut bytes, &encode_metadata(&index_uid).unwrap()).unwrap();
@@ -426,7 +426,7 @@ fn test_incomplete_creation_is_removed_but_unknown_files_are_errors() {
     let dir = tempfile::tempdir().unwrap();
     drop(Ingester::open(dir.path(), DISK_BUDGET).unwrap());
     let directory = dir.path().join("ingesthree");
-    let creating = directory.join(format!("{}.creating", Ulid::new()));
+    let creating = directory.join(format!("{}.creating", Ulid::generate()));
     fs::write(&creating, b"partial header").unwrap();
     let recovered = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
     assert!(!creating.try_exists().unwrap());

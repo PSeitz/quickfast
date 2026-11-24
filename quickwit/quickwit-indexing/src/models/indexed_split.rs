@@ -27,7 +27,7 @@ use quickwit_metrics::{GaugeGuard, histogram, label_values};
 use quickwit_proto::indexing::IndexingPipelineId;
 use quickwit_proto::types::{DocMappingUid, IndexUid, SplitId};
 use quickwit_query::get_quickwit_fastfield_normalizer_manager;
-use tantivy::directory::{Advice, MmapDirectory, RamDirectory};
+use tantivy::directory::{Advice, RamDirectory};
 use tantivy::store::{Compressor, ZstdCompressor};
 use tantivy::{ClusteringConfig, DateTime, IndexBuilder, IndexSettings};
 use tracing::{Span, instrument};

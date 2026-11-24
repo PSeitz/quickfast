@@ -67,7 +67,7 @@ async fn read_file(
 }
 
 async fn stage_output(metastore: &PostgresqlMetastore, index_uid: &IndexUid) -> String {
-    let split_id = Ulid::new().to_string();
+    let split_id = Ulid::generate().to_string();
     let metadata = SplitMetadata {
         index_uid: index_uid.clone(),
         split_id: split_id.clone().into(),
@@ -227,7 +227,7 @@ async fn test_assignment_and_publication_lock_order_with_index_deletion() {
         index_uid: Some(index_uid.clone()),
         file_ids: vec![requests[0].file_id.clone()],
         staged_split_ids: Vec::new(),
-        publication_id: Ulid::new().to_string(),
+        publication_id: Ulid::generate().to_string(),
     };
     let publishing = tokio::spawn(async move { publisher.publish_file_splits(publication).await });
     wait_for_blocked_query(&metastore, deleting_pid).await;
@@ -264,7 +264,7 @@ async fn test_publication_winner_survives_reopen() {
         index_uid: Some(index_uid.clone()),
         file_ids: vec![request.file_id.clone()],
         staged_split_ids: vec![output.clone()],
-        publication_id: Ulid::new().to_string(),
+        publication_id: Ulid::generate().to_string(),
     };
     assert!(
         metastore
@@ -292,7 +292,7 @@ async fn test_publication_winner_survives_reopen() {
             .published
     );
     let loser = PublishFileSplits {
-        publication_id: Ulid::new().to_string(),
+        publication_id: Ulid::generate().to_string(),
         ..winner
     };
     assert!(
@@ -409,7 +409,7 @@ async fn test_split_mutations_wait_in_publication_order() {
                 index_uid: Some(index_uid.clone()),
                 file_ids: vec![request.file_id],
                 staged_split_ids: vec!["z".to_string()],
-                publication_id: Ulid::new().to_string(),
+                publication_id: Ulid::generate().to_string(),
             }),
         )
         .await;
@@ -450,11 +450,11 @@ async fn test_publication_rolls_back_outputs_when_input_completion_fails() {
             .map(|request| request.file_id.clone())
             .collect(),
         staged_split_ids: vec![output.clone()],
-        publication_id: Ulid::new().to_string(),
+        publication_id: Ulid::generate().to_string(),
     };
     // Inject a database failure after the split UPDATE. The constraint is scoped to this file
     // and removed before assertions so even an unexpectedly successful RPC leaves no fault.
-    let constraint = format!("reject_completion_{}", Ulid::new());
+    let constraint = format!("reject_completion_{}", Ulid::generate());
     let sql = format!(
         "ALTER TABLE staged_files ADD CONSTRAINT {constraint} CHECK (file_id <> '{}' OR \
          completed_timestamp IS NULL)",

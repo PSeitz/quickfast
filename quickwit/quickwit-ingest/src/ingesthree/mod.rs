@@ -267,7 +267,7 @@ impl Ingester {
         // the ingester usable.
         self.requires_recovery = true;
         if let Some(header) = new_header {
-            let file_id = Ulid::new();
+            let file_id = Ulid::generate();
             let creating_path = self.directory.join(format!("{file_id}.creating"));
             let open_path = creating_path.with_extension("open");
             let finish_at = Instant::now() + self.file_limits.max_file_age;

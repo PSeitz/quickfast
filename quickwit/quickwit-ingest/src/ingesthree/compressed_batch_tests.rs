@@ -175,7 +175,7 @@ fn test_malformed_complete_batches_are_fatal_even_with_valid_outer_checksums() {
             let path = directory.path().join("input");
             fs::write(&path, &contents).unwrap();
             assert!(
-                recover(&path, Ulid::new(), finished).is_err(),
+                recover(&path, Ulid::generate(), finished).is_err(),
                 "case {case}, finished={finished}"
             );
             assert_eq!(
@@ -235,7 +235,7 @@ fn test_v1_recovery_retains_documents_and_never_resumes_legacy_files() {
     for prefix in 0..=last_record.len() {
         let directory = tempfile::tempdir().unwrap();
         drop(Ingester::open(directory.path(), 1_000_000).unwrap());
-        let file_id = Ulid::new();
+        let file_id = Ulid::generate();
         let path = directory
             .path()
             .join("ingesthree")
@@ -286,7 +286,7 @@ fn test_v1_corruption_and_finished_truncation_still_fail_recovery() {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("input");
             fs::write(&path, &corrupted).unwrap();
-            assert!(recover(&path, Ulid::new(), finished).is_err());
+            assert!(recover(&path, Ulid::generate(), finished).is_err());
             assert_eq!(fs::read(&path).unwrap(), corrupted);
         }
     }
@@ -306,7 +306,7 @@ fn test_v1_corruption_and_finished_truncation_still_fail_recovery() {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("input");
             fs::write(&path, &contents[..end]).unwrap();
-            assert!(recover(&path, Ulid::new(), true).is_err());
+            assert!(recover(&path, Ulid::generate(), true).is_err());
             assert_eq!(fs::read(&path).unwrap(), &contents[..end]);
         }
     }

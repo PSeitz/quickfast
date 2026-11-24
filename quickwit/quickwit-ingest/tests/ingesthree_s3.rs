@@ -120,7 +120,7 @@ async fn open(
 fn destination() -> (String, String) {
     let endpoint = std::env::var("INGESTHREE_S3_ENDPOINT").expect("start a local S3 server");
     let bucket = std::env::var("INGESTHREE_S3_BUCKET").unwrap_or("ingesthree-test".into());
-    (endpoint, format!("s3://{bucket}/{}", Ulid::new()))
+    (endpoint, format!("s3://{bucket}/{}", Ulid::generate()))
 }
 
 // Read persisted registrations directly: there is no staged-file listing API yet.

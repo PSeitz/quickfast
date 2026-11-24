@@ -134,7 +134,7 @@ pub async fn test_publish_file_splits_missing_inputs_and_index<
             MetastoreError::NotFound(EntityKind::Index { .. })
         ));
     }
-    for absent_file_id in [Ulid::new().to_string(), foreign_files[0].file_id.clone()] {
+    for absent_file_id in [Ulid::generate().to_string(), foreign_files[0].file_id.clone()] {
         let request = PublishFileSplits {
             file_ids: vec![files[0].file_id.clone(), absent_file_id],
             ..publication.clone()
@@ -191,7 +191,7 @@ pub async fn test_publish_file_splits_missing_inputs_and_index<
         file_ids: vec![
             files[0].file_id.clone(),
             files[1].file_id.clone(),
-            Ulid::new().to_string(),
+            Ulid::generate().to_string(),
         ],
         ..publication
     };
@@ -228,7 +228,7 @@ pub async fn test_publish_file_splits_invalid_request<M: MetastoreServiceExt + D
             ..publication.clone()
         },
         PublishFileSplits {
-            file_ids: (0..1001).map(|_| Ulid::new().to_string()).collect(),
+            file_ids: (0..1001).map(|_| Ulid::generate().to_string()).collect(),
             ..publication.clone()
         },
         PublishFileSplits {

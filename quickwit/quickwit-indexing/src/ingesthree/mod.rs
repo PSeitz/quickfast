@@ -196,7 +196,7 @@ impl S3Indexer {
                 .iter()
                 .map(|split| split.split_id.to_string())
                 .collect(),
-            publication_id: Ulid::new().to_string(),
+            publication_id: Ulid::generate().to_string(),
         };
         let published = publish_files(&mut self.metastore, publication).await?;
         if published {

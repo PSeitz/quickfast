@@ -213,7 +213,7 @@ mod tests {
                 index_uid: registration.index_uid,
                 file_ids: vec![registration.file_id],
                 staged_split_ids: Vec::new(),
-                publication_id: Ulid::new().to_string(),
+                publication_id: Ulid::generate().to_string(),
             })
             .unwrap();
         let completed = index.staged_files.clone();
@@ -277,7 +277,7 @@ mod tests {
                             index_uid: Some(index_uid.clone()),
                             file_ids: vec![input.file_id],
                             staged_split_ids: Vec::new(),
-                            publication_id: Ulid::new().to_string(),
+                            publication_id: Ulid::generate().to_string(),
                         })
                         .await
                         .unwrap();
@@ -374,7 +374,7 @@ mod tests {
             index_uid: Some(index_uid.clone()),
             file_ids: vec![input.file_id.clone()],
             staged_split_ids: vec![split.split_id.to_string()],
-            publication_id: Ulid::new().to_string(),
+            publication_id: Ulid::generate().to_string(),
         };
         assert!(matches!(
             metastore
