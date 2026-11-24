@@ -133,10 +133,25 @@ impl DecodedBatch {
         );
         // Allocate in proportion to decoded bytes, rather than trusting a corrupt
         // size declaration. Limit both the zstd window and total decoded output.
-        let mut decoder = zstd::stream::read::Decoder::with_buffer(compressed)?;
         // Level-1 frames need at most 512 KiB; cap decoder windows at 8 MiB regardless of size
-        // claims.
+        // claims. Check the frame header directly because libzstd's single-pass fast path skips
+        // `window_log_max` when the whole frame fits in our read buffer.
         let window_log = (usize::BITS - (decoded_len - 1).leading_zeros()).clamp(10, 23);
+        if compressed.len() >= 6 && compressed[4] & 0x20 == 0 {
+            let descriptor = compressed[5];
+            let frame_window_log = 10 + u32::from(descriptor >> 3);
+            ensure!(
+                frame_window_log <= window_log,
+                "zstd frame requires too much memory for decoding"
+            );
+            let window_base = 1u64 << frame_window_log;
+            let window_size = window_base + (window_base >> 3) * u64::from(descriptor & 7);
+            ensure!(
+                window_size <= (1u64 << window_log),
+                "zstd frame requires too much memory for decoding"
+            );
+        }
+        let mut decoder = zstd::stream::read::Decoder::with_buffer(compressed)?;
         decoder.window_log_max(window_log)?;
         let mut data = Vec::new();
         let mut buffer = [0u8; 8192];

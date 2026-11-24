@@ -134,7 +134,10 @@ pub async fn test_publish_file_splits_missing_inputs_and_index<
             MetastoreError::NotFound(EntityKind::Index { .. })
         ));
     }
-    for absent_file_id in [Ulid::generate().to_string(), foreign_files[0].file_id.clone()] {
+    for absent_file_id in [
+        Ulid::generate().to_string(),
+        foreign_files[0].file_id.clone(),
+    ] {
         let request = PublishFileSplits {
             file_ids: vec![files[0].file_id.clone(), absent_file_id],
             ..publication.clone()

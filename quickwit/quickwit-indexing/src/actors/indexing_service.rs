@@ -769,7 +769,7 @@ impl IndexingService {
                 per_index_uid_indexes_metadata.get(task_to_spawn.index_uid())
             {
                 if let Some(source_config) = index_metadata.sources.get(&task_to_spawn.source_id) {
-                    if disable_ingest_v1()
+                    if (disable_ingest_v1() || self.ingesthree_enabled)
                         && matches!(source_config.source_params, SourceParams::IngestApi)
                     {
                         debug!(

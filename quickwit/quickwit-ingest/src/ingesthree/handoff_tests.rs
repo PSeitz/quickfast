@@ -219,8 +219,22 @@ async fn test_handoff_after_file_deadline_releases_capacity() {
         let bytes = fs::read(&file.path).unwrap();
         files.push((file, bytes));
     }
-    core.max_disk_bytes = core.disk_bytes;
     let total_bytes = core.disk_bytes;
+    let (_, logs_reservation) = num_bytes(
+        &IndexUid::for_test("logs", 1),
+        &DocBatchV2::for_test(["logs"]),
+    )
+    .unwrap();
+    let (_, traces_reservation) = num_bytes(
+        &IndexUid::for_test("traces", 1),
+        &DocBatchV2::for_test(["traces"]),
+    )
+    .unwrap();
+    // Large enough to refill both files sequentially after release (first settled file plus
+    // worst-case compressed reservation for the second), but too small to accept either write
+    // while the original files are still retained.
+    core.max_disk_bytes = files[0].1.len() as u64 + traces_reservation;
+    assert!(total_bytes + logs_reservation > core.max_disk_bytes);
     let (storage, mut uploads) = capture_uploads(vec![Ok(()), Ok(())]);
     let expected_files = files.clone();
     let mut mock = MockMetastoreService::new();

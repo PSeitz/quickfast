@@ -72,22 +72,31 @@ async fn test_capacity_broadcast_updates_and_stops_with_writer() {
     let dir = tempfile::tempdir().unwrap();
     let ingester = Ingester::open(dir.path(), 100).unwrap();
     let (queue, receiver) = WriteQueue::channel(&ingester, 100);
-    let mut broadcast = pin!(queue.broadcast_capacity(&cluster));
+    let broadcast_queue = queue.clone();
+    let broadcast_cluster = cluster.clone();
+    let broadcast = tokio::spawn(async move {
+        broadcast_queue.broadcast_capacity(&broadcast_cluster).await;
+    });
     // The first sample is immediate. Later samples cover saturation and recovery.
     for (elapsed_secs, queue_bytes, score) in [(0, 0, "10"), (5, 95, "0"), (5, 0, "10")] {
         queue.admission.lock().unwrap().queue_bytes = queue_bytes;
         tokio::time::advance(Duration::from_secs(elapsed_secs)).await;
-        assert!(poll!(&mut broadcast).is_pending());
-        assert_eq!(
-            cluster
-                .get_self_key_value("ingesthree_capacity")
-                .await
-                .as_deref(),
-            Some(score)
-        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while cluster
+            .get_self_key_value("ingesthree_capacity")
+            .await
+            .as_deref()
+            != Some(score)
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for ingesthree_capacity={score}"
+            );
+            tokio::task::yield_now().await;
+        }
     }
     drop(receiver);
-    broadcast.await;
+    broadcast.await.unwrap();
     assert_eq!(
         cluster
             .get_self_key_value("ingesthree_capacity")
