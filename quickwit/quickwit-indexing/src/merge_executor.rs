@@ -580,8 +580,7 @@ async fn merge_split_directories(
                 "Delete all documents matched by query `{:?}`",
                 parsed_query_ast
             );
-            let (query, _) =
-                doc_mapper.query(union_index.schema(), parsed_query_ast, false, None)?;
+            let (query, _) = doc_mapper.query(union_index.schema(), parsed_query_ast, false)?;
             index_writer.delete_query(query)?;
         }
         debug!("commit-delete-operations");
