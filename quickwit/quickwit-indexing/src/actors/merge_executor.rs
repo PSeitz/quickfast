@@ -174,7 +174,6 @@ impl Handler<MergeScratch> for MergeExecutor {
                 &self.merge_packager_mailbox,
                 IndexedSplitBatch {
                     splits: vec![indexed_split],
-                    checkpoint_delta_opt: Default::default(),
                     publish_lock: PublishLock::default(),
                     batch_parent_span,
                     merge_task_opt,

@@ -17,11 +17,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, bail};
-use async_trait::async_trait;
 use bytes::Bytes;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::rate_limited_tracing::rate_limited_warn;
-use quickwit_common::runtimes::RuntimeType;
 use quickwit_config::{SourceInputFormat, TransformConfig};
 use quickwit_doc_mapper::{DocMapper, DocParsingError, JsonObject};
 use quickwit_metrics::{Counter, counter, labels};
@@ -35,13 +32,11 @@ use serde_json::Value as JsonValue;
 use tantivy::schema::{Field, Value};
 use tantivy::{DateTime, TantivyDocument};
 use thiserror::Error;
-use tokio::runtime::Handle;
 
 #[cfg(feature = "vrl")]
 use super::vrl_processing::*;
-use crate::actors::Indexer;
 use crate::metrics::{PROCESSED_BYTES, PROCESSED_DOCS_TOTAL};
-use crate::models::{NewPublishLock, ProcessedDoc, ProcessedDocBatch, PublishLock, RawDocBatch};
+use crate::models::ProcessedDoc;
 
 const PLAIN_TEXT: &str = "plain_text";
 pub(super) struct JsonDoc {
@@ -402,14 +397,8 @@ impl DocProcessorCounters {
     }
 }
 
-pub struct DocProcessor {
-    converter: DocumentConverter,
-    indexer_mailbox: Mailbox<Indexer>,
-    publish_lock: PublishLock,
-}
-
 /// Converts input documents using their format, mapping, and transform.
-pub(crate) struct DocumentConverter {
+pub struct DocumentConverter {
     doc_mapper: Arc<DocMapper>,
     timestamp_field_opt: Option<Field>,
     counters: Arc<DocProcessorCounters>,
@@ -418,32 +407,8 @@ pub(crate) struct DocumentConverter {
     input_format: SourceInputFormat,
 }
 
-impl DocProcessor {
-    pub fn try_new(
-        index_id: IndexId,
-        source_id: SourceId,
-        doc_mapper: Arc<DocMapper>,
-        indexer_mailbox: Mailbox<Indexer>,
-        transform_config_opt: Option<TransformConfig>,
-        input_format: SourceInputFormat,
-    ) -> anyhow::Result<Self> {
-        let converter = DocumentConverter::try_new(
-            index_id,
-            source_id,
-            doc_mapper,
-            transform_config_opt,
-            input_format,
-        )?;
-        Ok(Self {
-            converter,
-            indexer_mailbox,
-            publish_lock: PublishLock::default(),
-        })
-    }
-}
-
 impl DocumentConverter {
-    pub(crate) fn try_new(
+    pub fn try_new(
         index_id: IndexId,
         source_id: SourceId,
         doc_mapper: Arc<DocMapper>,
@@ -466,7 +431,7 @@ impl DocumentConverter {
         })
     }
 
-    pub(crate) fn counters(&self) -> &Arc<DocProcessorCounters> {
+    pub fn counters(&self) -> &Arc<DocProcessorCounters> {
         &self.counters
     }
 
@@ -490,11 +455,7 @@ impl DocumentConverter {
         Ok(Some(timestamp))
     }
 
-    pub(crate) fn process_raw_doc(
-        &mut self,
-        raw_doc: Bytes,
-        processed_docs: &mut Vec<ProcessedDoc>,
-    ) {
+    pub fn process_raw_doc(&mut self, raw_doc: Bytes, processed_docs: &mut Vec<ProcessedDoc>) {
         let num_bytes = raw_doc.len();
 
         #[cfg(feature = "vrl")]
@@ -553,101 +514,14 @@ fn extract_timestamp_field(doc_mapper: &DocMapper) -> anyhow::Result<Option<Fiel
 #[cfg(not(feature = "vrl"))]
 struct VrlProgram {}
 
-#[async_trait]
-impl Actor for DocProcessor {
-    type ObservableState = Arc<DocProcessorCounters>;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        self.converter.counters().clone()
-    }
-
-    fn queue_capacity(&self) -> QueueCapacity {
-        QueueCapacity::Bounded(10)
-    }
-
-    fn runtime_handle(&self) -> Handle {
-        RuntimeType::Blocking.get_runtime_handle()
-    }
-
-    #[inline]
-    fn yield_after_each_message(&self) -> bool {
-        false
-    }
-
-    async fn finalize(
-        &mut self,
-        exit_status: &ActorExitStatus,
-        ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<()> {
-        match exit_status {
-            ActorExitStatus::DownstreamClosed
-            | ActorExitStatus::Killed
-            | ActorExitStatus::Failure(_)
-            | ActorExitStatus::Panicked => return Ok(()),
-            ActorExitStatus::Quit | ActorExitStatus::Success => {
-                let _ = ctx.send_exit_with_success(&self.indexer_mailbox).await;
-            }
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<RawDocBatch> for DocProcessor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        raw_doc_batch: RawDocBatch,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        if self.publish_lock.is_dead() {
-            return Ok(());
-        }
-        let mut processed_docs: Vec<ProcessedDoc> = Vec::with_capacity(raw_doc_batch.docs.len());
-
-        for raw_doc in raw_doc_batch.docs {
-            let _protected_zone_guard = ctx.protect_zone();
-            self.converter.process_raw_doc(raw_doc, &mut processed_docs);
-            ctx.record_progress();
-        }
-        let processed_doc_batch = ProcessedDocBatch::new(
-            processed_docs,
-            raw_doc_batch.checkpoint_delta,
-            raw_doc_batch.force_commit,
-        );
-        ctx.send_message(&self.indexer_mailbox, processed_doc_batch)
-            .await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<NewPublishLock> for DocProcessor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        message: NewPublishLock,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        let NewPublishLock(publish_lock) = &message;
-        self.publish_lock = publish_lock.clone();
-        ctx.send_message(&self.indexer_mailbox, message).await?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use prost::Message;
-    use quickwit_actors::Universe;
     use quickwit_common::uri::Uri;
     use quickwit_config::{SearchSettings, build_doc_mapper};
     use quickwit_doc_mapper::{DocMapper, default_doc_mapper_for_test};
-    use quickwit_metastore::checkpoint::SourceCheckpointDelta;
     use quickwit_opentelemetry::otlp::{OtlpGrpcLogsService, OtlpGrpcTracesService};
     use quickwit_proto::opentelemetry::proto::collector::logs::v1::ExportLogsServiceRequest;
     use quickwit_proto::opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
@@ -660,10 +534,9 @@ mod tests {
     use tantivy::schema::NamedFieldDocument;
 
     use super::*;
-    use crate::models::{PublishLock, RawDocBatch};
 
     #[test]
-    fn test_document_converter() {
+    fn test_document_converter_basic_and_errors() {
         let mut converter = DocumentConverter::try_new(
             "test-index".to_string(),
             "test-source".to_string(),
@@ -674,11 +547,12 @@ mod tests {
         .unwrap();
         let raw_doc = Bytes::from_static(br#"{"body":"happy","timestamp":1628837062}"#);
         let missing_timestamp = Bytes::from_static(br#"{"body":"happy"}"#);
-        let num_bytes = raw_doc.len() + missing_timestamp.len() + 1;
+        let invalid_json = Bytes::from_static(b"{");
+        let num_bytes = raw_doc.len() + missing_timestamp.len() + invalid_json.len();
         let mut processed_docs = Vec::new();
         converter.process_raw_doc(raw_doc.clone(), &mut processed_docs);
         converter.process_raw_doc(missing_timestamp, &mut processed_docs);
-        converter.process_raw_doc(Bytes::from_static(b"{"), &mut processed_docs);
+        converter.process_raw_doc(invalid_json, &mut processed_docs);
 
         assert_eq!(processed_docs.len(), 1);
         assert_eq!(processed_docs[0].num_bytes, raw_doc.len());
@@ -696,700 +570,114 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_doc_processor_simple() {
-        let index_id = "my-index";
-        let source_id = "my-source";
-        let universe = Universe::with_accelerated_time();
-        let doc_mapper = Arc::new(default_doc_mapper_for_test());
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            index_id.to_string(),
-            source_id.to_string(),
-            doc_mapper.clone(),
-            indexer_mailbox,
-            None,
-            SourceInputFormat::Json,
-        )
-        .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        let checkpoint_delta = SourceCheckpointDelta::from_range(0..4);
-        doc_processor_mailbox
-            .send_message(RawDocBatch::for_test(
-                &[
-                    br#"{"body": "happy", "response_date": "2021-12-19T16:39:57+00:00", "response_time": 12, "response_payload": "YWJj"}"#, // missing timestamp
-                    br#"{"body": "happy", "timestamp": 1628837062, "response_date": "2021-12-19T16:39:59+00:00", "response_time": 2, "response_payload": "YWJj"}"#, // ok
-                    br#"{"body": "happy2", "timestamp": 1628837062, "response_date": "2021-12-19T16:40:57+00:00", "response_time": 13, "response_payload": "YWJj"}"#, // ok
-                    b"{", // invalid json
-                ],
-                0..4,
-            ))
-            .await.unwrap();
-
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.index_id, index_id);
-        assert_eq!(counters.source_id, source_id);
-        assert_eq!(counters.doc_mapper_errors.get_num_docs(), 1);
-        assert_eq!(counters.json_parse_errors.get_num_docs(), 1);
-        assert_eq!(counters.transform_errors.get_num_docs(), 0);
-        assert_eq!(counters.otlp_parse_errors.get_num_docs(), 0);
-        assert_eq!(counters.valid.get_num_docs(), 2);
-        assert_eq!(counters.num_bytes_total.load(Ordering::Relaxed), 387);
-
-        let output_messages = indexer_inbox.drain_for_test();
-        assert_eq!(output_messages.len(), 1);
-        let batch = *(output_messages
-            .into_iter()
-            .next()
-            .unwrap()
-            .downcast::<ProcessedDocBatch>()
-            .unwrap());
-        assert_eq!(batch.docs.len(), 2);
-        assert_eq!(batch.checkpoint_delta, checkpoint_delta);
-
-        let schema = doc_mapper.schema();
-        let NamedFieldDocument(named_field_doc_map) = batch.docs[0].doc.to_named_doc(&schema);
-        let doc_json = JsonValue::Object(doc_mapper.doc_to_json(named_field_doc_map).unwrap());
-        assert_eq!(
-            doc_json,
-            serde_json::json!({
-                "_source": {
-                    "body": "happy",
-                    "response_date": "2021-12-19T16:39:59Z",
-                    "response_payload": "YWJj",
-                    "response_time": 2,
-                    "timestamp": 1628837062
-                },
-                "body": "happy",
-                "response_date": "2021-12-19T16:39:59Z",
-                "response_payload": "YWJj",
-                "response_time": 2.0,
-                "timestamp": 1628837062
-            })
-        );
-        universe.assert_quit().await;
-    }
-
-    const DOCMAPPER_WITH_PARTITION_JSON: &str = r#"
-        {
-            "tag_fields": ["tenant"],
-            "partition_key": "tenant",
-            "field_mappings": [
-                { "name": "tenant", "type": "text", "tokenizer": "raw", "indexed": true },
-                { "name": "body", "type": "text" }
-            ]
-        }"#;
-
-    #[tokio::test]
-    async fn test_doc_processor_partitioning() {
-        let doc_mapper: Arc<DocMapper> =
-            Arc::new(serde_json::from_str::<DocMapper>(DOCMAPPER_WITH_PARTITION_JSON).unwrap());
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
-            None,
-            SourceInputFormat::Json,
-        )
-        .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        doc_processor_mailbox
-            .send_message(RawDocBatch::for_test(
-                &[
-                    br#"{"tenant": "tenant_1", "body": "first doc for tenant 1"}"#,
-                    br#"{"tenant": "tenant_2", "body": "first doc for tenant 2"}"#,
-                    br#"{"tenant": "tenant_1", "body": "second doc for tenant 1"}"#,
-                    br#"{"tenant": "tenant_2", "body": "second doc for tenant 2"}"#,
-                ],
-                0..2,
-            ))
-            .await
-            .unwrap();
-
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        let processed_doc_batches: Vec<ProcessedDocBatch> = indexer_inbox.drain_for_test_typed();
-        assert_eq!(processed_doc_batches.len(), 1);
-        let partition_ids: Vec<u64> = processed_doc_batches[0]
-            .docs
-            .iter()
-            .map(|doc| doc.partition)
-            .collect();
-        assert_eq!(partition_ids[0], partition_ids[2]);
-        assert_eq!(partition_ids[1], partition_ids[3]);
-        assert_ne!(partition_ids[0], partition_ids[1]);
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_forward_publish_lock() {
-        let doc_mapper = Arc::new(default_doc_mapper_for_test());
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
-            None,
-            SourceInputFormat::Json,
-        )
-        .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        let publish_lock = PublishLock::default();
-        doc_processor_mailbox
-            .send_message(NewPublishLock(publish_lock.clone()))
-            .await
-            .unwrap();
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        let publish_locks: Vec<NewPublishLock> = indexer_inbox.drain_for_test_typed();
-        assert_eq!(&publish_locks, &[NewPublishLock(publish_lock)]);
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_ignores_messages_when_publish_lock_is_dead() {
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_mapper = Arc::new(default_doc_mapper_for_test());
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
-            None,
-            SourceInputFormat::Json,
-        )
-        .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        let publish_lock = PublishLock::default();
-        doc_processor_mailbox
-            .send_message(NewPublishLock(publish_lock.clone()))
-            .await
-            .unwrap();
-        doc_processor_handle.process_pending_and_observe().await;
-        publish_lock.kill().await;
-        doc_processor_mailbox
-            .send_message(RawDocBatch::for_test(
-                &[
-                    br#"{"body": "happy", "timestamp": 1628837062, "response_date": "2021-12-19T16:39:59+00:00", "response_time": 2, "response_payload": "YWJj"}"#,
-                ],
-                0..1,
-            ))
-            .await.unwrap();
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-        let (exit_status, _indexer_counters) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        let indexer_messages: Vec<ProcessedDocBatch> = indexer_inbox.drain_for_test_typed();
-        assert!(indexer_messages.is_empty());
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_otlp_logs_json() {
-        let root_uri = Uri::for_test("ram:///indexes");
-        let index_config = OtlpGrpcLogsService::index_config(&root_uri).unwrap();
-        let doc_mapper =
-            build_doc_mapper(&index_config.doc_mapping, &SearchSettings::default()).unwrap();
-
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
-            None,
-            SourceInputFormat::OtlpLogsJson,
-        )
-        .unwrap();
-
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-
-        let scope_logs = vec![ScopeLogs {
-            log_records: vec![
-                LogRecord {
-                    time_unix_nano: 1_000_000_000,
-                    body: Some(OtlpAnyValue {
-                        value: Some(OtlpAnyValueValue::StringValue(
-                            "foo log message".to_string(),
-                        )),
-                    }),
-                    ..Default::default()
-                },
-                LogRecord {
-                    time_unix_nano: 1_000_000_001,
-                    body: Some(OtlpAnyValue {
-                        value: Some(OtlpAnyValueValue::StringValue(
-                            "bar log message".to_string(),
-                        )),
-                    }),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }];
-        let resource_logs = vec![ResourceLogs {
-            scope_logs,
-            ..Default::default()
-        }];
-        let request = ExportLogsServiceRequest { resource_logs };
-        let raw_doc_json = serde_json::to_vec(&request).unwrap();
-        let raw_doc_batch = RawDocBatch::for_test(&[&raw_doc_json], 0..2);
-        doc_processor_mailbox
-            .send_message(raw_doc_batch)
-            .await
-            .unwrap();
-
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.valid.get_num_docs(), 2);
-
-        let batch = indexer_inbox.drain_for_test_typed::<ProcessedDocBatch>();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].docs.len(), 2);
-
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_otlp_logs_proto() {
-        let root_uri = Uri::for_test("ram:///indexes");
-        let index_config = OtlpGrpcLogsService::index_config(&root_uri).unwrap();
-        let doc_mapper =
-            build_doc_mapper(&index_config.doc_mapping, &SearchSettings::default()).unwrap();
-
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
+    #[test]
+    fn test_document_converter_otlp_logs_and_traces() {
+        let logs_cfg = OtlpGrpcLogsService::index_config(&Uri::for_test("ram:///indexes")).unwrap();
+        let logs_mapper =
+            build_doc_mapper(&logs_cfg.doc_mapping, &SearchSettings::default()).unwrap();
+        let mut logs_converter = DocumentConverter::try_new(
+            "otel-logs".to_string(),
+            "source".to_string(),
+            logs_mapper,
             None,
             SourceInputFormat::OtlpLogsProtobuf,
         )
         .unwrap();
-
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-
-        let scope_logs = vec![ScopeLogs {
-            log_records: vec![
-                LogRecord {
-                    time_unix_nano: 1_000_000_000,
-                    body: Some(OtlpAnyValue {
-                        value: Some(OtlpAnyValueValue::StringValue(
-                            "foo log message".to_string(),
-                        )),
-                    }),
+        let log_req = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord {
+                        time_unix_nano: 1_700_000_000_000_000_000,
+                        body: Some(OtlpAnyValue {
+                            value: Some(OtlpAnyValueValue::StringValue("hello".to_string())),
+                        }),
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                },
-                LogRecord {
-                    time_unix_nano: 1_000_000_001,
-                    body: Some(OtlpAnyValue {
-                        value: Some(OtlpAnyValueValue::StringValue(
-                            "bar log message".to_string(),
-                        )),
-                    }),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }];
-        let resource_logs = vec![ResourceLogs {
-            scope_logs,
-            ..Default::default()
-        }];
-        let request = ExportLogsServiceRequest { resource_logs };
-        let mut raw_doc_buffer = Vec::new();
-        request.encode(&mut raw_doc_buffer).unwrap();
+                }],
+                ..Default::default()
+            }],
+        };
+        let mut processed = Vec::new();
+        logs_converter.process_raw_doc(Bytes::from(log_req.encode_to_vec()), &mut processed);
+        assert_eq!(processed.len(), 1);
 
-        let raw_doc_batch = RawDocBatch::for_test(&[&raw_doc_buffer], 0..2);
-        doc_processor_mailbox
-            .send_message(raw_doc_batch)
-            .await
-            .unwrap();
-
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.valid.get_num_docs(), 2);
-
-        let batch = indexer_inbox.drain_for_test_typed::<ProcessedDocBatch>();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].docs.len(), 2);
-
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_otlp_traces_json() {
-        let root_uri = Uri::for_test("ram:///indexes");
-        let index_config = OtlpGrpcTracesService::index_config(&root_uri).unwrap();
-        let doc_mapper =
-            build_doc_mapper(&index_config.doc_mapping, &SearchSettings::default()).unwrap();
-
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
-            None,
-            SourceInputFormat::OtlpTracesJson,
-        )
-        .unwrap();
-
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-
-        let scope_spans = vec![ScopeSpans {
-            spans: vec![
-                Span {
-                    trace_id: vec![1; 16],
-                    span_id: vec![2; 8],
-                    start_time_unix_nano: 1_000_000_001,
-                    end_time_unix_nano: 1_000_000_002,
-                    ..Default::default()
-                },
-                Span {
-                    trace_id: vec![3; 16],
-                    span_id: vec![4; 8],
-                    start_time_unix_nano: 2_000_000_001,
-                    end_time_unix_nano: 2_000_000_002,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }];
-        let resource_spans = vec![ResourceSpans {
-            scope_spans,
-            ..Default::default()
-        }];
-        let request = ExportTraceServiceRequest { resource_spans };
-        let raw_doc_json = serde_json::to_vec(&request).unwrap();
-        let raw_doc_batch = RawDocBatch::for_test(&[&raw_doc_json], 0..2);
-        doc_processor_mailbox
-            .send_message(raw_doc_batch)
-            .await
-            .unwrap();
-
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.valid.get_num_docs(), 2);
-
-        let batch = indexer_inbox.drain_for_test_typed::<ProcessedDocBatch>();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].docs.len(), 2);
-
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        universe.assert_quit().await;
-    }
-
-    #[tokio::test]
-    async fn test_doc_processor_otlp_traces_proto() {
-        let root_uri = Uri::for_test("ram:///indexes");
-        let index_config = OtlpGrpcTracesService::index_config(&root_uri).unwrap();
-        let doc_mapper =
-            build_doc_mapper(&index_config.doc_mapping, &SearchSettings::default()).unwrap();
-
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_processor = DocProcessor::try_new(
-            "my-index".to_string(),
-            "my-source".to_string(),
-            doc_mapper,
-            indexer_mailbox,
+        let traces_cfg =
+            OtlpGrpcTracesService::index_config(&Uri::for_test("ram:///indexes")).unwrap();
+        let traces_mapper =
+            build_doc_mapper(&traces_cfg.doc_mapping, &SearchSettings::default()).unwrap();
+        let mut traces_converter = DocumentConverter::try_new(
+            "otel-traces".to_string(),
+            "source".to_string(),
+            traces_mapper,
             None,
             SourceInputFormat::OtlpTracesProtobuf,
         )
         .unwrap();
-
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-
-        let scope_spans = vec![ScopeSpans {
-            spans: vec![
-                Span {
-                    trace_id: vec![1; 16],
-                    span_id: vec![2; 8],
-                    start_time_unix_nano: 1_000_000_001,
-                    end_time_unix_nano: 1_000_000_002,
+        let trace_req = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    spans: vec![Span {
+                        trace_id: vec![1; 16],
+                        span_id: vec![2; 8],
+                        name: "op".to_string(),
+                        start_time_unix_nano: 1_700_000_000_000_000_000,
+                        end_time_unix_nano: 1_700_000_001_000_000_000,
+                        ..Default::default()
+                    }],
                     ..Default::default()
-                },
-                Span {
-                    trace_id: vec![3; 16],
-                    span_id: vec![4; 8],
-                    start_time_unix_nano: 2_000_000_001,
-                    end_time_unix_nano: 2_000_000_002,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }];
-        let resource_spans = vec![ResourceSpans {
-            scope_spans,
-            ..Default::default()
-        }];
-        let request = ExportTraceServiceRequest { resource_spans };
-        let mut raw_doc_buffer = Vec::new();
-        request.encode(&mut raw_doc_buffer).unwrap();
-
-        let raw_doc_batch = RawDocBatch::for_test(&[&raw_doc_buffer], 0..2);
-        doc_processor_mailbox
-            .send_message(raw_doc_batch)
-            .await
-            .unwrap();
-
-        universe
-            .send_exit_with_success(&doc_processor_mailbox)
-            .await
-            .unwrap();
-
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.valid.get_num_docs(), 2);
-
-        let batch = indexer_inbox.drain_for_test_typed::<ProcessedDocBatch>();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0].docs.len(), 2);
-
-        let (exit_status, _) = doc_processor_handle.join().await;
-        assert!(matches!(exit_status, ActorExitStatus::Success));
-        universe.assert_quit().await;
-    }
-}
-
-#[cfg(feature = "vrl")]
-#[cfg(test)]
-mod tests_vrl {
-    use quickwit_actors::Universe;
-    use quickwit_doc_mapper::default_doc_mapper_for_test;
-    use quickwit_metastore::checkpoint::SourceCheckpointDelta;
-    use tantivy::Document;
-    use tantivy::schema::NamedFieldDocument;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_doc_processor_simple_vrl() -> anyhow::Result<()> {
-        let index_id = "my-index";
-        let source_id = "my-source";
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_mapper = Arc::new(default_doc_mapper_for_test());
-        let transform_config = TransformConfig::for_test(".body = upcase(string!(.body))");
-        let doc_processor = DocProcessor::try_new(
-            index_id.to_string(),
-            source_id.to_string(),
-            doc_mapper.clone(),
-            indexer_mailbox,
-            Some(transform_config),
-            SourceInputFormat::Json,
-        )
-        .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        doc_processor_mailbox
-            .send_message(RawDocBatch::for_test(
-                &[
-                    br#"{"body": "happy", "response_date": "2021-12-19T16:39:57+00:00", "response_time": 12, "response_payload": "YWJj"}"#, // missing timestamp
-                    br#"{"body": "happy using VRL", "timestamp": 1628837062, "response_date": "2021-12-19T16:39:59+00:00", "response_time": 2, "response_payload": "YWJj"}"#, // ok
-                    br#"{"body": "happy2", "timestamp": 1628837062, "response_date": "2021-12-19T16:40:57+00:00", "response_time": 13, "response_payload": "YWJj"}"#, // ok
-                    b"{", // invalid json
-                ],
-                0..4,
-            ))
-            .await?;
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.index_id, index_id.to_string());
-        assert_eq!(counters.source_id, source_id.to_string());
-        assert_eq!(counters.doc_mapper_errors.get_num_docs(), 1);
-        assert_eq!(counters.json_parse_errors.get_num_docs(), 1);
-        assert_eq!(counters.transform_errors.get_num_docs(), 0);
-        assert_eq!(counters.otlp_parse_errors.get_num_docs(), 0);
-        assert_eq!(counters.valid.get_num_docs(), 2);
-        assert_eq!(counters.num_bytes_total.load(Ordering::Relaxed), 397);
-
-        let output_messages = indexer_inbox.drain_for_test();
-        assert_eq!(output_messages.len(), 1);
-        let batch = *(output_messages
-            .into_iter()
-            .next()
-            .unwrap()
-            .downcast::<ProcessedDocBatch>()
-            .unwrap());
-        assert_eq!(batch.docs.len(), 2);
-        assert_eq!(
-            batch.checkpoint_delta,
-            SourceCheckpointDelta::from_range(0..4)
-        );
-
-        let schema = doc_mapper.schema();
-        let NamedFieldDocument(named_field_doc_map) = batch.docs[0].doc.to_named_doc(&schema);
-        let doc_json = JsonValue::Object(doc_mapper.doc_to_json(named_field_doc_map)?);
-        assert_eq!(
-            doc_json,
-            serde_json::json!({
-                "_source": {
-                    "body": "HAPPY USING VRL",
-                    "response_date": "2021-12-19T16:39:59Z",
-                    "response_payload": "YWJj",
-                    "response_time": 2,
-                    "timestamp": 1628837062
-                },
-                "body": "HAPPY USING VRL",
-                "response_date": "2021-12-19T16:39:59Z",
-                 "response_payload": "YWJj",
-                 "response_time": 2.0,
-                 "timestamp": 1628837062
-            })
-        );
-        universe.assert_quit().await;
-        Ok(())
+                }],
+                ..Default::default()
+            }],
+        };
+        let mut processed_spans = Vec::new();
+        traces_converter
+            .process_raw_doc(Bytes::from(trace_req.encode_to_vec()), &mut processed_spans);
+        assert_eq!(processed_spans.len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_doc_processor_with_plain_text_input() {
-        let index_id = "my-index";
-        let source_id = "my-source";
-        let universe = Universe::with_accelerated_time();
-        let (indexer_mailbox, indexer_inbox) = universe.create_test_mailbox();
-        let doc_mapper = Arc::new(default_doc_mapper_for_test());
-        let vrl_script = r#"
-            values = parse_csv!(.plain_text)
-            .body = upcase(string!(values[0]))
-            .timestamp = to_int!(values[1])
-            .response_date = values[2]
-            .response_time = to_int!(values[3])
-            .response_payload = values[4]
-            del(.plain_text)
-        "#;
-
-        let transform_config = TransformConfig::for_test(vrl_script);
-        let doc_processor = DocProcessor::try_new(
-            index_id.to_string(),
-            source_id.to_string(),
+    #[test]
+    fn test_document_converter_plain_text() {
+        let doc_mapper: Arc<DocMapper> = Arc::new(
+            serde_json::from_str(r#"{"field_mappings": [{"name": "plain_text", "type": "text"}]}"#)
+                .unwrap(),
+        );
+        let mut converter = DocumentConverter::try_new(
+            "plain-idx".to_string(),
+            "plain-src".to_string(),
             doc_mapper.clone(),
-            indexer_mailbox,
-            Some(transform_config),
+            None,
             SourceInputFormat::PlainText,
         )
         .unwrap();
-        let (doc_processor_mailbox, doc_processor_handle) =
-            universe.spawn_builder().spawn(doc_processor);
-        doc_processor_mailbox
-            .send_message(RawDocBatch::for_test(
-                &[
-                    // body,timestamp,response_date,response_time,response_payload
-                    br#""happy using VRL",1628837062,"2021-12-19T16:39:59+00:00",2,"YWJj""#,
-                    br#""happy2",1628837062,"2021-12-19T16:40:57+00:00",13,"YWJj""#,
-                    br#""happy2",1628837062,"2021-12-19T16:40:57+00:00","invalid-response_time","YWJj""#,
-                ],
-                0..4,
-            ))
-            .await.unwrap();
-        let counters = doc_processor_handle
-            .process_pending_and_observe()
-            .await
-            .state;
-        assert_eq!(counters.index_id, index_id);
-        assert_eq!(counters.source_id, source_id);
-        assert_eq!(counters.doc_mapper_errors.get_num_docs(), 0,);
-        assert_eq!(counters.transform_errors.get_num_docs(), 1,);
-        assert_eq!(counters.otlp_parse_errors.get_num_docs(), 0,);
-        assert_eq!(counters.valid.get_num_docs(), 2,);
-        assert_eq!(counters.num_bytes_total.load(Ordering::Relaxed), 200,);
+        let mut processed = Vec::new();
+        converter.process_raw_doc(Bytes::from_static(b"hello world"), &mut processed);
+        assert_eq!(processed.len(), 1);
+        let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
+        let json: JsonValue = serde_json::to_value(named).unwrap();
+        assert_eq!(json["plain_text"], serde_json::json!(["hello world"]));
+    }
 
-        let output_messages = indexer_inbox.drain_for_test();
-        assert_eq!(output_messages.len(), 1);
-        let batch = *(output_messages
-            .into_iter()
-            .next()
-            .unwrap()
-            .downcast::<ProcessedDocBatch>()
-            .unwrap());
-        assert_eq!(batch.docs.len(), 2);
-        assert_eq!(
-            batch.checkpoint_delta,
-            SourceCheckpointDelta::from_range(0..4)
+    #[cfg(feature = "vrl")]
+    #[test]
+    fn test_document_converter_vrl() {
+        let doc_mapper = Arc::new(default_doc_mapper_for_test());
+        let mut converter = DocumentConverter::try_new(
+            "vrl-idx".to_string(),
+            "vrl-src".to_string(),
+            doc_mapper.clone(),
+            Some(TransformConfig::for_test(".body = upcase(string!(.body))")),
+            SourceInputFormat::Json,
+        )
+        .unwrap();
+        let mut processed = Vec::new();
+        converter.process_raw_doc(
+            Bytes::from_static(br#"{"body":"hello","timestamp":1628837062}"#),
+            &mut processed,
         );
-
-        let schema = doc_mapper.schema();
-        let NamedFieldDocument(named_field_doc_map) = batch.docs[0].doc.to_named_doc(&schema);
-        let doc_json = JsonValue::Object(doc_mapper.doc_to_json(named_field_doc_map).unwrap());
-        assert_eq!(
-            doc_json,
-            serde_json::json!({
-                "_source": {
-                    "body": "HAPPY USING VRL",
-                    "response_date": "2021-12-19T16:39:59Z",
-                    "response_payload": "YWJj",
-                    "response_time": 2,
-                    "timestamp": 1628837062
-                },
-                "body": "HAPPY USING VRL",
-                "response_date": "2021-12-19T16:39:59Z",
-                "response_payload": "YWJj",
-                "response_time": 2.0,
-                "timestamp": 1628837062
-            })
-        );
-        universe.assert_quit().await;
+        assert_eq!(processed.len(), 1);
+        let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
+        let json: JsonValue = serde_json::to_value(named).unwrap();
+        assert_eq!(json["body"], serde_json::json!(["HELLO"]));
     }
 }

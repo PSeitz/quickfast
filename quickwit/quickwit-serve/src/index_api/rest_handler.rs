@@ -30,6 +30,11 @@ use super::index_resource::{
     create_index_handler, delete_index_handler, describe_index_handler,
     list_indexes_metadata_handler, update_index_handler,
 };
+use super::source_resource::{
+    __path_create_source, __path_delete_source, __path_get_source, __path_toggle_source,
+    __path_update_source, ToggleSourceRequest, create_source_handler, delete_source_handler,
+    get_source_handler, toggle_source_handler, update_source_handler,
+};
 use super::split_resource::{
     __path_list_splits, __path_mark_splits_for_deletion, SplitsForDeletion, list_splits_handler,
     mark_splits_for_deletion_handler,
@@ -50,8 +55,13 @@ use crate::simple_list::from_simple_list;
         list_splits,
         describe_index,
         mark_splits_for_deletion,
+        create_source,
+        update_source,
+        get_source,
+        toggle_source,
+        delete_source,
     ),
-    components(schemas(SplitsForDeletion, IndexStats))
+    components(schemas(SplitsForDeletion, IndexStats, ToggleSourceRequest))
 )]
 pub struct IndexApi;
 
@@ -90,6 +100,13 @@ pub fn index_management_handlers(
         .or(list_splits_handler(index_service.metastore()))
         .or(describe_index_handler(index_service.metastore()))
         .or(mark_splits_for_deletion_handler(index_service.metastore()))
+        .boxed()
+        // Sources handlers
+        .or(create_source_handler(index_service.clone()))
+        .or(update_source_handler(index_service.clone()))
+        .or(get_source_handler(index_service.metastore()))
+        .or(toggle_source_handler(index_service.metastore()))
+        .or(delete_source_handler(index_service.metastore()))
         .boxed()
         // Tokenizer handlers.
         .or(analyze_request_handler())

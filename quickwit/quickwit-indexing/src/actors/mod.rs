@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cooperative_indexing;
 mod doc_processor;
-mod index_serializer;
-mod indexer;
-mod indexing_pipeline;
 mod indexing_service;
 mod merge_executor;
 pub(crate) mod merge_pipeline;
@@ -30,12 +26,7 @@ mod uploader;
 #[cfg(feature = "vrl")]
 mod vrl_processing;
 
-pub(crate) use doc_processor::DocumentConverter;
-pub use doc_processor::{DocProcessor, DocProcessorCounters};
-pub use index_serializer::IndexSerializer;
-pub(crate) use indexer::OTHER_PARTITION_ID;
-pub use indexer::{Indexer, IndexerCounters};
-pub use indexing_pipeline::{IndexingPipeline, IndexingPipelineParams};
+pub use doc_processor::{DocProcessorCounters, DocumentConverter};
 pub use indexing_service::{INDEXING_DIR_NAME, IndexingService, IndexingServiceCounters};
 pub use merge_executor::{MergeExecutor, combine_partition_ids, merge_split_attrs};
 pub use merge_pipeline::{
@@ -46,10 +37,14 @@ pub(crate) use merge_planner::MergePlanner;
 pub(crate) use merge_planner::RunFinalizeMergePolicyAndQuit;
 pub use merge_scheduler_service::{MergePermit, MergeSchedulerService, schedule_merge};
 pub use merge_split_downloader::MergeSplitDownloader;
-pub use packager::Packager;
-pub(crate) use packager::create_packaged_split;
+pub use packager::{Packager, create_packaged_split};
 pub use publisher::{Publisher, PublisherCounters, PublisherType};
 pub use quickwit_proto::indexing::IndexingError;
 pub use sequencer::Sequencer;
-pub use uploader::{SplitsUpdateMailbox, Uploader, UploaderCounters, UploaderType};
-pub(crate) use uploader::{acquire_indexing_upload_permit, prepare_split_for_upload};
+pub(crate) use uploader::acquire_indexing_upload_permit;
+pub use uploader::{
+    SplitsUpdateMailbox, Uploader, UploaderCounters, UploaderType, prepare_split_for_upload,
+};
+
+/// Partition ID assigned to overflow splits when the number of partitions exceeds the split limit.
+pub(crate) const OTHER_PARTITION_ID: u64 = 3264326757911759461u64;

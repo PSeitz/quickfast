@@ -22,10 +22,9 @@ use quickwit_common::metrics::index_label;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::{DocsClusteringConfig, IndexingSettings};
 use quickwit_doc_mapper::DocMapper;
-use quickwit_metastore::checkpoint::IndexCheckpointDelta;
-use quickwit_metrics::{GaugeGuard, histogram, label_values};
+use quickwit_metrics::{histogram, label_values};
 use quickwit_proto::indexing::IndexingPipelineId;
-use quickwit_proto::types::{DocMappingUid, IndexUid, SplitId};
+use quickwit_proto::types::{DocMappingUid, SplitId};
 use quickwit_query::get_quickwit_fastfield_normalizer_manager;
 use tantivy::directory::{Advice, RamDirectory};
 use tantivy::store::{Compressor, ZstdCompressor};
@@ -84,7 +83,7 @@ impl fmt::Debug for IndexedSplitBuilder {
 impl IndexedSplitBuilder {
     /// Creates a split using the mapper's schema, tokenizers, and mapping UID.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_doc_mapper(
+    pub fn from_doc_mapper(
         pipeline_id: IndexingPipelineId,
         partition_id: u64,
         last_delete_opstamp: u64,
@@ -194,7 +193,7 @@ impl IndexedSplitBuilder {
     /// Adds a document and updates the split's metadata and clustering.
     /// The document must use this split's schema. The caller handles partition routing.
     /// Discard the builder on error: its metadata is updated before writing the document.
-    pub(crate) fn add_document(&mut self, processed_doc: ProcessedDoc) -> anyhow::Result<()> {
+    pub fn add_document(&mut self, processed_doc: ProcessedDoc) -> anyhow::Result<()> {
         let ProcessedDoc {
             doc,
             timestamp_opt,
@@ -288,49 +287,16 @@ fn record_timestamp(timestamp: DateTime, time_range: &mut Option<RangeInclusive<
 #[derive(Debug)]
 pub struct IndexedSplitBatch {
     pub splits: Vec<IndexedSplit>,
-    pub checkpoint_delta_opt: Option<IndexCheckpointDelta>,
     pub publish_lock: PublishLock,
     /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
     /// in the `MergePipeline` or `DeleteTaskPipeline`.
-    /// See planners docs to understand the usage.
-    /// If `None`, the split batch was built in the `IndexingPipeline`.
     pub merge_task_opt: Option<MergeTask>,
-    pub batch_parent_span: Span,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CommitTrigger {
-    Drained,
-    ForceCommit,
-    MemoryLimit,
-    NoMoreDocs,
-    NumDocsLimit,
-    Timeout,
-}
-
-#[derive(Debug)]
-pub struct IndexedSplitBatchBuilder {
-    pub splits: Vec<IndexedSplitBuilder>,
-    pub checkpoint_delta_opt: Option<IndexCheckpointDelta>,
-    pub publish_lock: PublishLock,
-    pub commit_trigger: CommitTrigger,
-    pub batch_parent_span: Span,
-    pub memory_usage: GaugeGuard,
-    pub _split_builders_guard: GaugeGuard,
-}
-
-/// Sends notifications to the Publisher that the last batch of splits was empty.
-#[derive(Debug)]
-pub struct EmptySplit {
-    pub index_uid: IndexUid,
-    pub checkpoint_delta: IndexCheckpointDelta,
-    pub publish_lock: PublishLock,
     pub batch_parent_span: Span,
 }
 
 #[cfg(test)]
 mod tests {
-    use quickwit_proto::types::NodeId;
+    use quickwit_proto::types::{IndexUid, NodeId};
     use tantivy::schema::{STORED, Schema};
     use tantivy::{Directory, DocAddress, TantivyDocument, doc};
 

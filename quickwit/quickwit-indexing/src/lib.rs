@@ -17,19 +17,16 @@
 use std::sync::Arc;
 
 use quickwit_actors::{Mailbox, Universe};
-use quickwit_cluster::Cluster;
-use quickwit_common::pubsub::EventBroker;
 use quickwit_config::NodeConfig;
-use quickwit_ingest::{IngestApiService, IngesterPool};
-use quickwit_proto::indexing::PipelineMetrics;
+use quickwit_ingest::router_client::IngestRouterClient;
+use quickwit_proto::indexing::{CpuCapacity, PipelineMetrics};
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_storage::StorageResolver;
 use tracing::info;
 
-use crate::actors::MergeSchedulerService;
 pub use crate::actors::{
-    FinishPendingMergesAndShutdownPipeline, IndexingError, IndexingPipeline,
-    IndexingPipelineParams, IndexingService, PublisherType, Sequencer, SplitsUpdateMailbox,
+    FinishPendingMergesAndShutdownPipeline, IndexingError, IndexingService, MergePipeline,
+    MergePipelineParams, PublisherType, Sequencer, SplitsUpdateMailbox,
 };
 pub use crate::controlled_directory::ControlledDirectory;
 use crate::models::IndexingStatistics;
@@ -53,7 +50,6 @@ mod split_store;
 #[cfg(any(test, feature = "testsuite"))]
 mod test_utils;
 
-use quickwit_proto::indexing::CpuCapacity;
 #[cfg(any(test, feature = "testsuite"))]
 pub use test_utils::{MockSplitBuilder, TestSandbox, mock_split, mock_split_meta};
 
@@ -62,43 +58,31 @@ pub use self::source::check_source_connectivity;
 
 #[derive(utoipa::OpenApi)]
 #[openapi(components(schemas(IndexingStatistics, PipelineMetrics, CpuCapacity)))]
-/// Schema used for the OpenAPI generation which are apart of this crate.
+/// Schema used for OpenAPI generation.
 pub struct IndexingApiSchemas;
 
-#[allow(clippy::too_many_arguments)]
 pub async fn start_indexing_service(
     universe: &Universe,
     config: &NodeConfig,
-    num_blocking_threads: usize,
-    cluster: Cluster,
     metastore: MetastoreServiceClient,
-    ingester_pool: IngesterPool,
     storage_resolver: StorageResolver,
-    event_broker: EventBroker,
-    merge_scheduler_mailbox_opt: Option<Mailbox<MergeSchedulerService>>,
     indexing_split_cache: Arc<IndexingSplitCache>,
+    ingest_router: IngestRouterClient,
 ) -> anyhow::Result<Mailbox<IndexingService>> {
     anyhow::ensure!(
         !config.ingest_api_config.enable_ingesthree || config.enable_standalone_compactors,
         "ingesthree indexers require enable_standalone_compactors: true"
     );
     info!("starting indexer service");
-    let ingest_api_service_mailbox = universe.get_one::<IngestApiService>();
-    let clustering_config = config.docs_clustering_config.clone();
     let mut indexing_service = IndexingService::new(
         config.node_id.clone(),
         config.data_dir_path.to_path_buf(),
         config.indexer_config.clone(),
-        num_blocking_threads,
-        cluster,
-        metastore.clone(),
-        ingest_api_service_mailbox,
-        merge_scheduler_mailbox_opt,
-        ingester_pool,
+        metastore,
         storage_resolver,
-        event_broker,
         indexing_split_cache,
-        clustering_config,
+        config.docs_clustering_config.clone(),
+        Some(ingest_router),
     )
     .await?;
     if config.ingest_api_config.enable_ingesthree {

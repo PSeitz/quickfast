@@ -15,7 +15,6 @@
 #![allow(rustdoc::invalid_html_tags)]
 
 mod indexed_split;
-mod indexing_service_message;
 mod indexing_statistics;
 mod merge_planner_message;
 mod merge_scratch;
@@ -24,32 +23,21 @@ mod packaged_split;
 mod processed_doc;
 mod publish_lock;
 mod publisher_message;
-mod raw_doc_batch;
-mod shard_positions;
 mod split_attrs;
 
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
-pub use indexed_split::{
-    CommitTrigger, EmptySplit, IndexedSplit, IndexedSplitBatch, IndexedSplitBatchBuilder,
-    IndexedSplitBuilder,
-};
-pub use indexing_service_message::{
-    DetachIndexingPipeline, DetachMergePipeline, ObservePipeline, SpawnPipeline,
-};
+pub use indexed_split::{IndexedSplit, IndexedSplitBatch, IndexedSplitBuilder};
 pub use indexing_statistics::IndexingStatistics;
 pub use merge_planner_message::NewSplits;
 pub use merge_scratch::MergeScratch;
 pub use merge_statistics::MergeStatistics;
 pub use packaged_split::{PackagedSplit, PackagedSplitBatch};
-pub use processed_doc::{ProcessedDoc, ProcessedDocBatch};
+pub use processed_doc::ProcessedDoc;
 pub use publish_lock::{NewPublishLock, PublishLock};
 pub use publisher_message::SplitsUpdate;
 use quickwit_proto::types::PublishToken;
-pub use raw_doc_batch::RawDocBatch;
-pub(crate) use shard_positions::LocalShardPositionsUpdate;
-pub use shard_positions::ShardPositionsService;
 pub use split_attrs::{SplitAttrs, create_split_metadata};
 
 /// Shared, live publish token owned by an indexing pipeline. The source writes it on reset and

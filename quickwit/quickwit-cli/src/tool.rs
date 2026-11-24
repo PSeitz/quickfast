@@ -12,40 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
-use std::io::{IsTerminal, Stdout, Write, stdout};
+use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::{env, fmt, io};
+use std::{env, io};
 
 use anyhow::{Context, bail};
 use clap::{ArgMatches, Command, arg};
-use colored::{ColoredString, Colorize};
+use colored::Colorize;
 use humantime::format_duration;
-use quickwit_actors::{ActorExitStatus, ActorHandle, Mailbox, Universe};
-use quickwit_cluster::{ChitchatTransport, Cluster, ClusterMember, FailureDetectorConfig};
+use quickwit_actors::{ActorExitStatus, Mailbox, Universe};
+use quickwit_common::Progress;
+use quickwit_common::io::IoControls;
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::runtimes::RuntimesConfig;
 use quickwit_common::uri::Uri;
 use quickwit_config::service::QuickwitService;
 use quickwit_config::{
-    CLI_SOURCE_ID, IndexerConfig, NodeConfig, SourceConfig, SourceInputFormat, SourceParams,
-    TransformConfig, VecSourceParams,
+    CLI_SOURCE_ID, SourceConfig, SourceInputFormat, SourceParams, TransformConfig, build_doc_mapper,
 };
 use quickwit_index_management::{IndexService, clear_cache_directory};
-use quickwit_indexing::actors::{IndexingService, MergePipeline, MergeSchedulerService};
-use quickwit_indexing::models::{
-    DetachIndexingPipeline, DetachMergePipeline, IndexingStatistics, SpawnPipeline,
+use quickwit_indexing::actors::{
+    DocumentConverter, MergePipeline, MergePipelineParams, MergeSchedulerService,
+    create_packaged_split, prepare_split_for_upload,
 };
-use quickwit_indexing::{IndexingPipeline, IndexingSplitCache};
-use quickwit_ingest::IngesterPool;
-use quickwit_metastore::IndexMetadataResponseExt;
-use quickwit_proto::indexing::CpuCapacity;
-use quickwit_proto::ingest::ingester::IngesterStatus;
-use quickwit_proto::metastore::{IndexMetadataRequest, MetastoreService, MetastoreServiceClient};
+use quickwit_indexing::merge_policy::merge_policy_from_settings;
+use quickwit_indexing::models::IndexedSplitBuilder;
+use quickwit_indexing::source::BATCH_NUM_BYTES_LIMIT;
+use quickwit_indexing::source::doc_file_reader::DocFileReader;
+use quickwit_indexing::{IndexingSplitCache, IndexingSplitStore};
+use quickwit_metastore::{IndexMetadataResponseExt, StageSplitsRequestExt};
+use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
+use quickwit_proto::metastore::{
+    IndexMetadataRequest, LastDeleteOpstampRequest, MetastoreService, MetastoreServiceClient,
+    PublishSplitsRequest, StageSplitsRequest,
+};
 use quickwit_proto::search::{CountHits, SearchResponse};
 use quickwit_proto::types::{IndexId, PipelineUid, SourceId, SplitId};
 use quickwit_search::{SearchResponseRest, single_node_search};
@@ -53,14 +58,13 @@ use quickwit_serve::{
     BodyFormat, SearchRequestQueryString, SortBy, search_request_from_api_request,
 };
 use quickwit_storage::{BundleStorage, Storage};
-use quickwit_transport::ChannelFactory;
 use thousands::Separable;
 use tracing::debug;
 
 use crate::checklist::{GREEN_COLOR, RED_COLOR};
 use crate::{
-    THROUGHPUT_WINDOW_SIZE, config_cli_arg, get_resolvers, info, load_node_config,
-    run_index_checklist, start_actor_runtimes,
+    config_cli_arg, get_resolvers, info, load_node_config, run_index_checklist,
+    start_actor_runtimes,
 };
 
 pub fn build_tool_command() -> Command {
@@ -435,56 +439,17 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
         let mut index_service = IndexService::new(metastore.clone(), storage_resolver.clone());
         index_service.clear_index(&args.index_id).await?;
     }
-    // The indexing service needs to update its cluster chitchat state so that the control plane is
-    // aware of the running tasks. We thus create a fake cluster to instantiate the indexing service
-    // and avoid impacting potential control plane running on the cluster.
-    let cluster = create_empty_cluster(&config).await?;
-    let indexer_config = IndexerConfig {
-        ..Default::default()
-    };
-    let runtimes_config = RuntimesConfig::get();
-    start_actor_runtimes(
-        runtimes_config,
-        &HashSet::from_iter([QuickwitService::Indexer]),
-    )?;
-    let universe = Universe::new();
-    let merge_scheduler_service_mailbox = universe.get_or_spawn_one();
-    let split_cache =
-        Arc::new(IndexingSplitCache::from_config(&indexer_config, &config.data_dir_path).await?);
-    let clustering_config = config.docs_clustering_config.clone();
-    let indexing_server = IndexingService::new(
-        config.node_id.clone(),
-        config.data_dir_path.clone(),
-        indexer_config,
-        runtimes_config.num_threads_blocking,
-        cluster,
-        metastore,
-        None,
-        Some(merge_scheduler_service_mailbox),
-        IngesterPool::default(),
-        storage_resolver,
-        EventBroker::default(),
-        split_cache,
-        clustering_config,
-    )
-    .await?;
-    let (indexing_server_mailbox, indexing_server_handle) =
-        universe.spawn_builder().spawn(indexing_server);
-    let pipeline_id = indexing_server_mailbox
-        .ask_for_res(SpawnPipeline {
-            index_id: args.index_id.clone(),
-            source_config,
-            pipeline_uid: PipelineUid::random(),
-        })
-        .await?;
-    let merge_pipeline_handle = indexing_server_mailbox
-        .ask_for_res(DetachMergePipeline {
-            pipeline_id: pipeline_id.merge_pipeline_id(),
-        })
-        .await?;
-    let indexing_pipeline_handle = indexing_server_mailbox
-        .ask_for_res(DetachIndexingPipeline { pipeline_id })
-        .await?;
+
+    let index_metadata = metastore
+        .index_metadata(IndexMetadataRequest::for_index_id(args.index_id.clone()))
+        .await?
+        .deserialize_index_metadata()?;
+    let index_uid = index_metadata.index_uid.clone();
+    let index_config = index_metadata.index_config;
+    let doc_mapper = build_doc_mapper(&index_config.doc_mapping, &index_config.search_settings)?;
+    let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
+    let storage = storage_resolver.resolve(&index_config.index_uri).await?;
+    let split_store = IndexingSplitStore::new(storage, Arc::new(IndexingSplitCache::no_caching()));
 
     if args.input_path_opt.is_none() && io::stdin().is_terminal() {
         let eof_shortcut = match env::consts::OS {
@@ -496,25 +461,123 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
              {eof_shortcut}."
         );
     }
-    let statistics =
-        start_statistics_reporting_loop(indexing_pipeline_handle, args.input_path_opt.is_none())
+
+    let start_time = Instant::now();
+    let mut reader = if let Some(uri) = args.input_path_opt.as_ref() {
+        DocFileReader::from_uri(&storage_resolver, uri).await?
+    } else {
+        DocFileReader::from_reader(Box::new(tokio::io::stdin()))
+    };
+    let mut converter = DocumentConverter::try_new(
+        index_uid.index_id.clone(),
+        CLI_SOURCE_ID.to_string(),
+        doc_mapper.clone(),
+        source_config.transform_config,
+        source_config.input_format,
+    )?;
+    let delete_opstamp = metastore
+        .last_delete_opstamp(LastDeleteOpstampRequest {
+            index_uid: Some(index_uid.clone()),
+        })
+        .await?
+        .last_delete_opstamp;
+    let pipeline_id = IndexingPipelineId {
+        node_id: config.node_id.clone(),
+        index_uid: index_uid.clone(),
+        source_id: CLI_SOURCE_ID.to_string(),
+        pipeline_uid: PipelineUid::random(),
+    };
+    let scratch_root = tempfile::tempdir()?;
+    let mut builders: HashMap<u64, IndexedSplitBuilder> = HashMap::new();
+    let mut processed_docs = Vec::new();
+    loop {
+        let batch = reader.read_batch(BATCH_NUM_BYTES_LIMIT).await?;
+        if batch.is_empty() {
+            break;
+        }
+        processed_docs.clear();
+        for doc in batch {
+            converter.process_raw_doc(doc, &mut processed_docs);
+        }
+        for doc in processed_docs.drain(..) {
+            let partition_id = doc.partition;
+            let builder = match builders.entry(partition_id) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let scratch_dir = quickwit_common::temp_dir::Builder::default()
+                        .join("local-ingest")
+                        .tempdir_in(scratch_root.path())?;
+                    entry.insert(IndexedSplitBuilder::from_doc_mapper(
+                        pipeline_id.clone(),
+                        partition_id,
+                        delete_opstamp,
+                        &doc_mapper,
+                        &index_config.indexing_settings,
+                        scratch_dir,
+                        IoControls::default(),
+                        config.docs_clustering_config.as_ref(),
+                    )?)
+                }
+            };
+            builder.add_document(doc)?;
+        }
+    }
+
+    let tag_fields = doc_mapper.tag_named_fields()?;
+    let progress = Progress::default();
+    let mut staged_split_ids = Vec::with_capacity(builders.len());
+    for (_, builder) in builders {
+        let indexed_split = builder.finalize()?;
+        let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+        let (split_metadata, split_payload) = prepare_split_for_upload(
+            &packaged_split,
+            &merge_policy,
+            index_config.retention_policy_opt.as_ref(),
+        )?;
+        metastore
+            .stage_splits(StageSplitsRequest::try_from_split_metadata(
+                index_uid.clone(),
+                &split_metadata,
+            )?)
             .await?;
+        split_store
+            .store_split(
+                &split_metadata,
+                packaged_split.split_scratch_directory.path(),
+                Box::new(split_payload),
+            )
+            .await?;
+        staged_split_ids.push(split_metadata.split_id.to_string());
+    }
+    let num_published_splits = staged_split_ids.len();
+    if !staged_split_ids.is_empty() {
+        metastore
+            .publish_splits(PublishSplitsRequest {
+                index_uid: Some(index_uid.clone()),
+                staged_split_ids,
+                replaced_split_ids: Vec::new(),
+                index_checkpoint_delta_json_opt: None,
+                publish_token_opt: None,
+            })
+            .await?;
+    }
 
-    merge_pipeline_handle
-        .mailbox()
-        .ask(quickwit_indexing::FinishPendingMergesAndShutdownPipeline)
-        .await?;
-    merge_pipeline_handle.join().await;
-
-    // Shutdown the indexing server.
-    universe
-        .send_exit_with_success(&indexing_server_mailbox)
-        .await?;
-    indexing_server_handle.join().await;
-    universe.quit().await;
-    if statistics.num_published_splits > 0 {
+    let counters = converter.counters();
+    let num_docs = counters.num_processed_docs();
+    let num_invalid_docs = counters.num_invalid_docs();
+    if num_docs > 0 {
+        let secs = Duration::from_secs(start_time.elapsed().as_secs());
         println!(
-            "Now, you can query the index with the following command:\nquickwit index search \
+            "Indexed {} documents ({} invalid) into {} split(s) in {}.",
+            num_docs.separate_with_commas(),
+            num_invalid_docs.separate_with_commas(),
+            num_published_splits,
+            format_duration(secs)
+        );
+    }
+    if num_published_splits > 0 {
+        println!(
+            "Now, you can query the index with the following command:\nquickfast index search \
              --index {} --config ./config/quickwit.yaml --query \"my query\"",
             args.index_id
         );
@@ -526,7 +589,7 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
         println!("{} Local cache directory cleared.", "✔".color(GREEN_COLOR));
     }
 
-    match statistics.num_invalid_docs {
+    match num_invalid_docs {
         0 => {
             println!("{} Documents successfully indexed.", "✔".color(GREEN_COLOR));
             Ok(())
@@ -581,56 +644,49 @@ pub async fn merge_cli(args: MergeArgs) -> anyhow::Result<()> {
         get_resolvers(&config.storage_configs, &config.metastore_configs);
     let mut metastore = metastore_resolver.resolve(&config.metastore_uri).await?;
     run_index_checklist(&mut metastore, &storage_resolver, &args.index_id, None).await?;
-    // The indexing service needs to update its cluster chitchat state so that the control plane is
-    // aware of the running tasks. We thus create a fake cluster to instantiate the indexing service
-    // and avoid impacting potential control plane running on the cluster.
-    let cluster = create_empty_cluster(&config).await?;
     let runtimes_config = RuntimesConfig::get();
     start_actor_runtimes(
         runtimes_config,
         &HashSet::from_iter([QuickwitService::Indexer]),
     )?;
-    let indexer_config = IndexerConfig::default();
+    let index_metadata = metastore
+        .index_metadata(IndexMetadataRequest::for_index_id(args.index_id.clone()))
+        .await?
+        .deserialize_index_metadata()?;
+    let index_config = index_metadata.index_config;
+    let doc_mapper = build_doc_mapper(&index_config.doc_mapping, &index_config.search_settings)?;
+    let storage = storage_resolver.resolve(&index_config.index_uri).await?;
+    let split_store = IndexingSplitStore::new(storage, Arc::new(IndexingSplitCache::no_caching()));
+    let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
+    let scratch_root = tempfile::tempdir()?;
+    let indexing_directory = quickwit_common::temp_dir::Builder::default()
+        .join("merge")
+        .tempdir_in(scratch_root.path())?;
+
     let universe = Universe::new();
     let merge_scheduler_service: Mailbox<MergeSchedulerService> = universe.get_or_spawn_one();
-    let clustering_config = config.docs_clustering_config.clone();
-    let indexing_server = IndexingService::new(
-        config.node_id,
-        config.data_dir_path,
-        indexer_config,
-        runtimes_config.num_threads_blocking,
-        cluster,
-        metastore,
-        None,
-        Some(merge_scheduler_service),
-        IngesterPool::default(),
-        storage_resolver,
-        EventBroker::default(),
-        Arc::new(IndexingSplitCache::no_caching()),
-        clustering_config,
-    )
-    .await?;
-    let (indexing_service_mailbox, indexing_service_handle) =
-        universe.spawn_builder().spawn(indexing_server);
-    let pipeline_id = indexing_service_mailbox
-        .ask_for_res(SpawnPipeline {
-            index_id: args.index_id,
-            source_config: SourceConfig {
+    let merge_pipeline = MergePipeline::new(
+        MergePipelineParams {
+            pipeline_id: MergePipelineId {
+                node_id: config.node_id,
+                index_uid: index_metadata.index_uid,
                 source_id: args.source_id,
-                num_pipelines: NonZeroUsize::MIN,
-                enabled: true,
-                source_params: SourceParams::Vec(VecSourceParams::default()),
-                transform_config: None,
-                input_format: SourceInputFormat::Json,
             },
-            pipeline_uid: PipelineUid::random(),
-        })
-        .await?;
-    let pipeline_handle: ActorHandle<MergePipeline> = indexing_service_mailbox
-        .ask_for_res(DetachMergePipeline {
-            pipeline_id: pipeline_id.merge_pipeline_id(),
-        })
-        .await?;
+            doc_mapper,
+            indexing_directory,
+            metastore,
+            merge_scheduler_service,
+            split_store,
+            merge_policy,
+            retention_policy: index_config.retention_policy_opt,
+            max_concurrent_split_uploads: config.indexer_config.max_concurrent_split_uploads,
+            merge_io_throughput_limiter_opt: None,
+            event_broker: EventBroker::default(),
+        },
+        None,
+        universe.spawn_ctx(),
+    );
+    let (_pipeline_mailbox, pipeline_handle) = universe.spawn_builder().spawn(merge_pipeline);
 
     let mut check_interval = tokio::time::interval(Duration::from_secs(1));
     loop {
@@ -651,7 +707,7 @@ pub async fn merge_cli(args: MergeArgs) -> anyhow::Result<()> {
     }
 
     let (pipeline_exit_status, _pipeline_statistics) = pipeline_handle.quit().await;
-    indexing_service_handle.quit().await;
+    universe.quit().await;
     if !matches!(
         pipeline_exit_status,
         ActorExitStatus::Success | ActorExitStatus::Quit
@@ -760,217 +816,4 @@ async fn extract_split_cli(args: ExtractSplitArgs) -> anyhow::Result<()> {
 
     println!("{} Split successfully extracted.", "✔".color(GREEN_COLOR));
     Ok(())
-}
-
-/// Starts a tokio task that displays the indexing statistics
-/// every once in awhile.
-pub async fn start_statistics_reporting_loop(
-    pipeline_handle: ActorHandle<IndexingPipeline>,
-    is_stdin: bool,
-) -> anyhow::Result<IndexingStatistics> {
-    let mut stdout_handle = stdout();
-    let start_time = Instant::now();
-    let mut throughput_calculator = ThroughputCalculator::new(start_time);
-    let mut report_interval = tokio::time::interval(Duration::from_secs(1));
-
-    loop {
-        // TODO fixme. The way we wait today is a bit lame: if the indexing pipeline exits, we will
-        // still wait up to an entire heartbeat...  Ideally we should  select between two
-        // futures.
-        report_interval.tick().await;
-        // Try to receive with a timeout of 1 second.
-        // 1 second is also the frequency at which we update statistic in the console
-        pipeline_handle.refresh_observe();
-
-        let observation = pipeline_handle.last_observation();
-
-        // Let's not display live statistics to allow screen to scroll.
-        if observation.num_docs > 0 {
-            display_statistics(&mut stdout_handle, &mut throughput_calculator, &observation)?;
-        }
-
-        if pipeline_handle.state().is_exit() {
-            break;
-        }
-    }
-    let (pipeline_exit_status, pipeline_statistics) = pipeline_handle.join().await;
-    if !pipeline_exit_status.is_success() {
-        bail!(pipeline_exit_status);
-    }
-    // If we have received zero docs at this point,
-    // there is no point in displaying report.
-    if pipeline_statistics.num_docs == 0 {
-        return Ok(pipeline_statistics);
-    }
-
-    if is_stdin {
-        display_statistics(
-            &mut stdout_handle,
-            &mut throughput_calculator,
-            &pipeline_statistics,
-        )?;
-    }
-    // display end of task report
-    println!();
-    let secs = Duration::from_secs(start_time.elapsed().as_secs());
-    if pipeline_statistics.num_invalid_docs == 0 {
-        println!(
-            "Indexed {} documents in {}.",
-            pipeline_statistics.num_docs.separate_with_commas(),
-            format_duration(secs)
-        );
-    } else {
-        let num_indexed_docs = (pipeline_statistics.num_docs
-            - pipeline_statistics.num_invalid_docs)
-            .separate_with_commas();
-
-        let error_rate = (pipeline_statistics.num_invalid_docs as f64
-            / pipeline_statistics.num_docs as f64)
-            * 100.0;
-
-        println!(
-            "Indexed {} out of {} documents in {}. Failed to index {} document(s). {}\n",
-            num_indexed_docs,
-            pipeline_statistics.num_docs.separate_with_commas(),
-            format_duration(secs),
-            pipeline_statistics.num_invalid_docs.separate_with_commas(),
-            colorize_error_rate(error_rate),
-        );
-    }
-
-    Ok(pipeline_statistics)
-}
-
-fn colorize_error_rate(error_rate: f64) -> ColoredString {
-    let error_rate_message = format!("({error_rate:.1}% error rate)");
-    if error_rate < 1.0 {
-        error_rate_message.yellow()
-    } else if error_rate < 5.0 {
-        error_rate_message.truecolor(255, 181, 46) //< Orange
-    } else {
-        error_rate_message.red()
-    }
-}
-
-/// A struct to print data on the standard output.
-struct Printer<'a> {
-    pub stdout: &'a mut Stdout,
-}
-
-impl Printer<'_> {
-    pub fn print_header(&mut self, header: &str) -> io::Result<()> {
-        write!(&mut self.stdout, " {}", header.bright_blue())?;
-        Ok(())
-    }
-
-    pub fn print_value(&mut self, fmt_args: fmt::Arguments) -> io::Result<()> {
-        write!(&mut self.stdout, " {fmt_args}")
-    }
-
-    pub fn flush(&mut self) -> io::Result<()> {
-        self.stdout.flush()
-    }
-}
-
-fn display_statistics(
-    stdout: &mut Stdout,
-    throughput_calculator: &mut ThroughputCalculator,
-    statistics: &IndexingStatistics,
-) -> anyhow::Result<()> {
-    let elapsed_duration = time::Duration::try_from(throughput_calculator.elapsed_time())?;
-    let elapsed_time = format!(
-        "{:02}:{:02}:{:02}",
-        elapsed_duration.whole_hours(),
-        elapsed_duration.whole_minutes() % 60,
-        elapsed_duration.whole_seconds() % 60
-    );
-    let throughput_mb_s = throughput_calculator.calculate(statistics.total_bytes_processed);
-    let mut printer = Printer { stdout };
-    printer.print_header("Num docs")?;
-    printer.print_value(format_args!("{:>7}", statistics.num_docs))?;
-    printer.print_header("Parse errs")?;
-    printer.print_value(format_args!("{:>5}", statistics.num_invalid_docs))?;
-    printer.print_header("PublSplits")?;
-    printer.print_value(format_args!("{:>3}", statistics.num_published_splits))?;
-    printer.print_header("Input size")?;
-    printer.print_value(format_args!(
-        "{:>5}MB",
-        statistics.total_bytes_processed / 1_000_000
-    ))?;
-    printer.print_header("Thrghput")?;
-    printer.print_value(format_args!("{throughput_mb_s:>5.2}MB/s"))?;
-    printer.print_header("Time")?;
-    printer.print_value(format_args!("{elapsed_time}\n"))?;
-    printer.flush()?;
-    Ok(())
-}
-
-/// ThroughputCalculator is used to calculate throughput.
-struct ThroughputCalculator {
-    /// Stores the time series of processed bytes value.
-    processed_bytes_values: VecDeque<(Instant, u64)>,
-    /// Store the time this calculator started
-    start_time: Instant,
-}
-
-impl ThroughputCalculator {
-    /// Creates new instance.
-    pub fn new(start_time: Instant) -> Self {
-        let processed_bytes_values: VecDeque<(Instant, u64)> = (0..THROUGHPUT_WINDOW_SIZE)
-            .map(|_| (start_time, 0u64))
-            .collect();
-        Self {
-            processed_bytes_values,
-            start_time,
-        }
-    }
-
-    /// Calculates the throughput.
-    pub fn calculate(&mut self, current_processed_bytes: u64) -> f64 {
-        self.processed_bytes_values.pop_front();
-        let current_instant = Instant::now();
-        let (first_instant, first_processed_bytes) = *self.processed_bytes_values.front().unwrap();
-        let elapsed_time = (current_instant - first_instant).as_millis() as f64 / 1_000f64;
-        self.processed_bytes_values
-            .push_back((current_instant, current_processed_bytes));
-        (current_processed_bytes - first_processed_bytes) as f64
-            / 1_000_000f64
-            / elapsed_time.max(1f64)
-    }
-
-    pub fn elapsed_time(&self) -> Duration {
-        self.start_time.elapsed()
-    }
-}
-
-async fn create_empty_cluster(config: &NodeConfig) -> anyhow::Result<Cluster> {
-    let self_node = ClusterMember {
-        node_id: config.node_id.clone(),
-        generation_id: quickwit_cluster::GenerationId::now(),
-        is_ready: false,
-        enabled_services: HashSet::new(),
-        gossip_advertise_addr: config.gossip_advertise_addr,
-        grpc_advertise_addr: config.grpc_advertise_addr,
-        indexing_tasks: Vec::new(),
-        indexing_cpu_capacity: CpuCapacity::zero(),
-        ingester_status: IngesterStatus::default(),
-        availability_zone: None,
-        enable_standalone_compactors: false,
-    };
-    let channel_factory = ChannelFactory::for_grpc(&config.grpc_config)?;
-    let cluster = Cluster::join(
-        config.cluster_id.clone(),
-        config.extra_cluster_ids.iter().cloned().collect(),
-        self_node,
-        config.gossip_advertise_addr,
-        Vec::new(),
-        config.gossip_interval,
-        config.gossip_protocol_version,
-        FailureDetectorConfig::default(),
-        &ChitchatTransport::default(),
-        channel_factory,
-    )
-    .await?;
-
-    Ok(cluster)
 }

@@ -166,7 +166,6 @@ impl DeleteTaskPipeline {
             quickwit_indexing::PublisherType::MergePublisher,
             self.metastore.clone(),
             None,
-            None,
             SharedPublishToken::default(),
         );
         let (publisher_mailbox, publisher_supervisor_handler) =

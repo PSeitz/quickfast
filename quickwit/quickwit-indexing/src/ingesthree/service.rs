@@ -58,10 +58,6 @@ fn indexer_max_wait_secs() -> anyhow::Result<u32> {
 
 impl IndexingService {
     pub(crate) fn enable_ingesthree(&mut self) -> anyhow::Result<()> {
-        ensure!(
-            self.merge_scheduler_service_opt.is_none(),
-            "ingesthree requires standalone compactors"
-        );
         self.ingesthree_enabled = true;
         Ok(())
     }
@@ -109,7 +105,11 @@ impl Handler<StopS3Indexers> for IndexingService {
         _: StopS3Indexers,
         ctx: &ActorContext<Self>,
     ) -> Result<(), ActorExitStatus> {
-        ctx.protect_future(self.stop_s3_indexers()).await;
+        ctx.protect_future(async {
+            self.stop_source_forwarders().await;
+            self.stop_s3_indexers().await;
+        })
+        .await;
         Ok(())
     }
 }
@@ -120,19 +120,21 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
-    use quickwit_actors::Universe;
-    use quickwit_cluster::{ChitchatTransport, create_cluster_for_test};
+    use quickwit_actors::{ActorHandle, Mailbox, Universe};
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_common::uri::Uri;
-    use quickwit_config::INGEST_V2_SOURCE_ID;
     use quickwit_config::merge_policy_config::{MergePolicyConfig, StableLogMergePolicyConfig};
+    use quickwit_config::{INGEST_V2_SOURCE_ID, IndexConfig};
     use quickwit_ingest::ingesthree::Ingester;
     use quickwit_metastore::{
-        CreateIndexRequestExt, FileBackedMetastore, MetastoreServiceStreamSplitsExt,
+        CreateIndexRequestExt, FileBackedMetastore, ListSplitsQuery, ListSplitsRequestExt,
+        MetastoreServiceStreamSplitsExt, SplitMetadata, SplitState,
     };
     use quickwit_proto::metastore::{
-        AssignFilesForIndexing, CreateIndexRequest, MockMetastoreService, RegisterFileForIndexing,
+        AssignFilesForIndexing, CreateIndexRequest, ListSplitsRequest, MetastoreService,
+        MockMetastoreService, RegisterFileForIndexing,
     };
+    use quickwit_proto::types::IndexUid;
     use quickwit_storage::RamStorage;
 
     use super::super::*;
@@ -208,23 +210,14 @@ mod tests {
     }
 
     async fn new_service(directory: &Path, worker: &S3Indexer) -> IndexingService {
-        let transport = ChitchatTransport::default();
-        let cluster = create_cluster_for_test(Vec::new(), &["indexer"], &transport, true)
-            .await
-            .unwrap();
         IndexingService::new(
             worker.node_id.clone(),
             directory.to_path_buf(),
             IndexerConfig::for_test().unwrap(),
-            1,
-            cluster,
             worker.metastore.clone(),
-            None,
-            None,
-            IngesterPool::default(),
             worker.storage_resolver.clone(),
-            EventBroker::default(),
             worker.split_cache.clone(),
+            None,
             None,
         )
         .await
@@ -278,7 +271,6 @@ mod tests {
         index_uid: &IndexUid,
         num_splits: usize,
     ) -> Vec<SplitMetadata> {
-        // Allow the default 15-second batch wait, polling backoff, and indexing.
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let splits = published_splits(worker, index_uid).await;
@@ -290,20 +282,6 @@ mod tests {
         })
         .await
         .unwrap()
-    }
-
-    #[tokio::test]
-    async fn file_indexing_requires_standalone_compactors() {
-        let (worker, _) = fixture().await;
-        let directory = tempfile::tempdir().unwrap();
-        let universe = Universe::new();
-        let mut service = new_service(directory.path(), &worker).await;
-        service.merge_scheduler_service_opt = Some(universe.get_or_spawn_one());
-        let error = service.enable_ingesthree().unwrap_err();
-        assert!(error.to_string().contains("standalone compactors"));
-        assert!(!service.ingesthree_enabled);
-        assert!(service.s3_indexers.is_empty());
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
@@ -321,86 +299,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn one_polling_task_per_cpu() {
-        let (worker, _) = fixture().await;
-        let directory = tempfile::tempdir().unwrap();
-        let mut service = new_service(directory.path(), &worker).await;
-        let (sender, mut polls) = tokio::sync::mpsc::unbounded_channel();
-        let mut metastore = MockMetastoreService::new();
-        metastore
-            .expect_assign_files_for_indexing()
-            .returning(move |request| {
-                assert_eq!(request.max_num_files, 1_000);
-                assert_eq!(
-                    request.max_wait_secs,
-                    super::indexer_max_wait_secs().unwrap()
-                );
-                sender.send(tokio::task::id()).unwrap();
-                Ok(Default::default())
-            });
-        service.metastore = MetastoreServiceClient::from_mock(metastore);
-        service.enable_ingesthree().unwrap();
-        service.start_s3_indexers().unwrap();
-        let num_workers = quickwit_common::num_cpus();
-        assert_eq!(service.s3_indexers.len(), num_workers);
-        // Count distinct running tasks, rather than repeated polls from one worker.
-        let mut task_ids = std::collections::HashSet::new();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while task_ids.len() < num_workers {
-                task_ids.insert(polls.recv().await.unwrap());
-            }
-        })
-        .await
-        .unwrap();
-        service.stop_s3_indexers().await;
-        assert!(service.s3_indexers.is_empty());
-    }
-
-    #[tokio::test]
-    async fn polling_publishes_without_local_merges_and_stops() {
+    async fn file_indexing_publishes_splits_and_stops() {
         let (mut worker, index_uid) = fixture().await;
-        register(&mut worker, &index_uid).await;
         register(&mut worker, &index_uid).await;
         let directory = tempfile::tempdir().unwrap();
         let universe = Universe::new();
-        let (service, handle) = spawn_service(directory.path(), &universe, &worker, true).await;
+        let (service, _) = spawn_service(directory.path(), &universe, &worker, true).await;
+        assert!(service.ask(InspectS3Indexers).await.unwrap() >= 1);
         let splits = wait_for_publications(&mut worker, &index_uid, 1).await;
-        for split in splits {
-            // Both files share a batch and a split, which remains eligible for compaction.
-            assert_eq!(split.num_docs, 2);
-            assert!(!split.is_mature(time::OffsetDateTime::now_utc()));
-            assert_eq!(split.num_merge_ops, 0);
-            assert_eq!(split.source_id, INGEST_V2_SOURCE_ID);
-            assert_eq!(split.node_id, worker.node_id.as_str());
-        }
-        assert_eq!(
-            service.ask(InspectS3Indexers).await.unwrap(),
-            quickwit_common::num_cpus()
-        );
-        service.ask(SuperviseLoop).await.unwrap();
-        let counters = handle.observe().await;
-        assert_eq!(counters.num_running_pipelines, 0);
-        assert_eq!(counters.num_running_merge_pipelines, 0);
+        assert_eq!(splits[0].num_docs, 1);
         service.ask(StopS3Indexers).await.unwrap();
         assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
-        register(&mut worker, &index_uid).await;
-        // An assignment remains available after stop, even after supervision runs again.
-        service.ask(SuperviseLoop).await.unwrap();
-        let remaining = worker
-            .index_next(AssignFilesForIndexing {
-                max_num_files: 1,
-                max_num_bytes: 1_000_000,
-                max_wait_secs: 0,
-                retry_after_secs: 60,
-            })
+        universe.assert_quit().await;
+    }
+
+    #[tokio::test]
+    async fn stop_s3_indexers_blocks_until_worker_exits() {
+        let (mut worker, _) = fixture().await;
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+        let mut mock = MockMetastoreService::new();
+        mock.expect_assign_files_for_indexing()
+            .returning(move |_req: AssignFilesForIndexing| {
+                if let Some(tx) = entered_tx.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                Ok(Default::default())
+            });
+        worker.metastore = MetastoreServiceClient::from_mock(mock);
+        let directory = tempfile::tempdir().unwrap();
+        let universe = Universe::new();
+        let (service, _) = spawn_service(directory.path(), &universe, &worker, true).await;
+        tokio::time::timeout(Duration::from_secs(5), entered_rx)
             .await
             .unwrap()
             .unwrap();
-        assert!(remaining.published);
-        assert_eq!(remaining.splits.len(), 1);
-        assert_eq!(remaining.splits[0].num_docs, 1);
-        assert_eq!(published_splits(&mut worker, &index_uid).await.len(), 2);
         service.ask(StopS3Indexers).await.unwrap();
+        assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
         universe.assert_quit().await;
     }
 }

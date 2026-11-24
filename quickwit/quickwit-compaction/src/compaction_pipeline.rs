@@ -289,7 +289,6 @@ impl CompactionPipeline {
             quickwit_indexing::PublisherType::MergePublisher,
             self.metastore.clone(),
             None,
-            None,
             SharedPublishToken::default(),
         );
         let (merge_publisher_mailbox, merge_publisher_handle) = spawn_ctx

@@ -43,9 +43,7 @@ const MAX_VALUES_PER_TAG_FIELD: usize = if cfg!(any(test, feature = "testsuite")
 };
 
 use crate::actors::Uploader;
-use crate::models::{
-    EmptySplit, IndexedSplit, IndexedSplitBatch, PackagedSplit, PackagedSplitBatch,
-};
+use crate::models::{IndexedSplit, IndexedSplitBatch, PackagedSplit, PackagedSplitBatch};
 
 /// The role of the packager is to get an index writer and
 /// produce a split file.
@@ -151,7 +149,6 @@ impl Handler<IndexedSplitBatch> for Packager {
             &self.uploader_mailbox,
             PackagedSplitBatch::new(
                 packaged_splits,
-                batch.checkpoint_delta_opt,
                 batch.publish_lock,
                 batch.merge_task_opt,
                 batch.batch_parent_span,
@@ -159,26 +156,6 @@ impl Handler<IndexedSplitBatch> for Packager {
         )
         .await?;
         fail_point!("packager:after");
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<EmptySplit> for Packager {
-    type Reply = ();
-
-    #[instrument(
-        name="package_empty_batch"
-        parent=empty_split.batch_parent_span.id(),
-        skip_all,
-    )]
-    async fn handle(
-        &mut self,
-        empty_split: EmptySplit,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        ctx.send_message(&self.uploader_mailbox, empty_split)
-            .await?;
         Ok(())
     }
 }
@@ -264,7 +241,7 @@ fn try_extract_terms(
 }
 
 /// Packages a finalized split, which must contain exactly one segment.
-pub(crate) fn create_packaged_split(
+pub fn create_packaged_split(
     split: IndexedSplit,
     tag_fields: &[NamedField],
     progress: &Progress,
@@ -404,7 +381,6 @@ mod tests {
 
     use quickwit_actors::{ObservationType, Universe};
     use quickwit_common::io::IoControls;
-    use quickwit_metastore::checkpoint::IndexCheckpointDelta;
     use quickwit_proto::search::{ListFieldsEntry, ListFieldsMetadata};
     use quickwit_proto::types::{DocMappingUid, IndexUid, NodeId};
     use tantivy::directory::MmapDirectory;
@@ -624,7 +600,6 @@ mod tests {
         packager_mailbox
             .send_message(IndexedSplitBatch {
                 splits: vec![indexed_split],
-                checkpoint_delta_opt: IndexCheckpointDelta::for_test("source_id", 10..20).into(),
                 publish_lock: PublishLock::default(),
                 merge_task_opt: None,
                 batch_parent_span: Span::none(),

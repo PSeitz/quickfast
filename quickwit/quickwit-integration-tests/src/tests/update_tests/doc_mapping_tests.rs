@@ -45,7 +45,7 @@ async fn validate_search_across_doc_mapping_updates(
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     // Create index
@@ -608,7 +608,7 @@ async fn test_update_doc_validation() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     // Create index

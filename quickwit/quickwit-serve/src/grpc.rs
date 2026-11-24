@@ -21,7 +21,6 @@ use quickwit_common::tower::BoxFutureInfaillible;
 use quickwit_config::GrpcConfig;
 use quickwit_config::service::QuickwitService;
 use quickwit_proto::developer::DeveloperServiceClient;
-use quickwit_proto::indexing::IndexingServiceClient;
 use quickwit_proto::jaeger::storage::v1::span_reader_plugin_server::SpanReaderPluginServer;
 use quickwit_proto::jaeger::storage::v2::trace_reader_server::TraceReaderServer;
 use quickwit_proto::opentelemetry::proto::collector::logs::v1::logs_service_server::LogsServiceServer;
@@ -38,9 +37,9 @@ use tonic_reflection::pb::v1::FILE_DESCRIPTOR_SET as REFLECTION_FILE_DESCRIPTOR_
 use tonic_reflection::server::v1::{ServerReflection, ServerReflectionServer};
 use tracing::*;
 
+use crate::QuickwitServices;
 use crate::developer_api::DeveloperApiServer;
 use crate::search_api::GrpcSearchAdapter;
-use crate::{INDEXING_GRPC_SERVER_METRICS_LAYER, QuickwitServices};
 
 /// Starts and binds gRPC services to `grpc_listen_addr`.
 pub(crate) async fn start_grpc_server(
@@ -76,25 +75,6 @@ pub(crate) async fn start_grpc_server(
         file_descriptor_sets.push(quickwit_proto::metastore::METASTORE_FILE_DESCRIPTOR_SET);
 
         Some(metastore_server.as_grpc_service(grpc_config.max_message_size))
-    } else {
-        None
-    };
-    // Mount gRPC indexing service if `QuickwitService::Indexer` is enabled on node.
-    let indexing_grpc_service = if services
-        .node_config
-        .is_service_enabled(QuickwitService::Indexer)
-    {
-        if let Some(indexing_service) = services.indexing_service_opt.clone() {
-            enabled_grpc_services.insert("indexing");
-            file_descriptor_sets.push(quickwit_proto::indexing::INDEXING_FILE_DESCRIPTOR_SET);
-
-            let indexing_service = IndexingServiceClient::tower()
-                .stack_layer(INDEXING_GRPC_SERVER_METRICS_LAYER.clone())
-                .build_from_mailbox(indexing_service);
-            Some(indexing_service.as_grpc_service(grpc_config.max_message_size))
-        } else {
-            None
-        }
     } else {
         None
     };
@@ -236,7 +216,6 @@ pub(crate) async fn start_grpc_server(
         .add_service(health_service)
         .add_service(reflection_service)
         .add_optional_service(compaction_grpc_service)
-        .add_optional_service(indexing_grpc_service)
         .add_optional_service(ingest_api_grpc_service)
         .add_optional_service(ingest_router_grpc_service)
         .add_optional_service(ingesthree_grpc_service)

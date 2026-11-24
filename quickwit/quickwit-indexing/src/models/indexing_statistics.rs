@@ -13,15 +13,12 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::Ordering;
 
 use quickwit_proto::indexing::PipelineMetrics;
 use quickwit_proto::types::ShardId;
 use serde::Serialize;
 
-use crate::actors::{DocProcessorCounters, IndexerCounters, PublisherCounters, UploaderCounters};
-
-/// A Struct that holds all statistical data about indexing
+/// A struct that holds statistical data about indexing.
 #[derive(Clone, Debug, Default, Serialize, utoipa::ToSchema)]
 pub struct IndexingStatistics {
     /// Number of document processed (valid or not)
@@ -52,38 +49,4 @@ pub struct IndexingStatistics {
     #[schema(value_type = Vec<u64>)]
     pub shard_ids: BTreeSet<ShardId>,
     pub params_fingerprint: u64,
-}
-
-impl IndexingStatistics {
-    pub fn add_actor_counters(
-        mut self,
-        doc_processor_counters: &DocProcessorCounters,
-        indexer_counters: &IndexerCounters,
-        uploader_counters: &UploaderCounters,
-        publisher_counters: &PublisherCounters,
-    ) -> Self {
-        self.num_docs += doc_processor_counters.num_processed_docs();
-        self.num_invalid_docs += doc_processor_counters.num_invalid_docs();
-        self.num_local_splits += indexer_counters.num_splits_emitted;
-        self.total_bytes_processed += doc_processor_counters
-            .num_bytes_total
-            .load(Ordering::Relaxed);
-        self.num_staged_splits += uploader_counters.num_staged_splits.load(Ordering::Relaxed);
-        self.num_uploaded_splits += uploader_counters
-            .num_uploaded_splits
-            .load(Ordering::Relaxed);
-        self.num_published_splits += publisher_counters.num_published_splits;
-        self.num_empty_splits += publisher_counters.num_empty_splits;
-        self
-    }
-
-    pub fn set_num_spawn_attempts(mut self, num_spawn_attempts: usize) -> Self {
-        self.num_spawn_attempts = num_spawn_attempts;
-        self
-    }
-
-    pub fn set_generation(mut self, generation: usize) -> Self {
-        self.generation = generation;
-        self
-    }
 }

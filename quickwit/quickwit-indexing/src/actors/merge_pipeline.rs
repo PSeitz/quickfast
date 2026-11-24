@@ -41,8 +41,16 @@ use tracing::{debug, error, info, instrument};
 
 use super::merge_planner::RunFinalizeMergePolicyAndQuit;
 use super::{MergeExecutor, MergePlanner, MergeSplitDownloader, Packager};
-use crate::actors::indexing_pipeline::wait_duration_before_retry;
 use crate::actors::publisher::DisconnectMergePlanner;
+
+fn wait_duration_before_retry(retry_count: usize) -> Duration {
+    const BASE_RETRY_DELAY_SECS: u64 = 1;
+    const MAX_RETRY_DELAY_SECS: u64 = 60;
+    let delay_secs = BASE_RETRY_DELAY_SECS
+        .saturating_mul(1u64 << retry_count.min(6))
+        .min(MAX_RETRY_DELAY_SECS);
+    Duration::from_secs(delay_secs)
+}
 use crate::actors::{MergeSchedulerService, Publisher, Uploader, UploaderType};
 use crate::merge_policy::MergePolicy;
 use crate::metrics::{ACTOR_NAME, BACKPRESSURE_MICROS, ONGOING_MERGE_OPERATIONS};
@@ -268,7 +276,6 @@ impl MergePipeline {
             super::PublisherType::MergePublisher,
             self.params.metastore.clone(),
             Some(self.merge_planner_mailbox.clone()),
-            None,
             SharedPublishToken::default(),
         );
         let (merge_publisher_mailbox, merge_publisher_handle) = ctx

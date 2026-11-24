@@ -26,7 +26,6 @@ use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, Qu
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::spawn_named_task;
 use quickwit_config::RetentionPolicy;
-use quickwit_metastore::checkpoint::IndexCheckpointDelta;
 use quickwit_metastore::{SplitMaturity, SplitMetadata, StageSplitsRequestExt};
 use quickwit_metrics::{gauge, label_values};
 use quickwit_proto::metastore::{
@@ -45,7 +44,7 @@ use crate::actors::sequencer::{Sequencer, SequencerCommand};
 use crate::merge_policy::{MergePolicy, MergeTask};
 use crate::metrics::{AVAILABLE_CONCURRENT_UPLOAD_PERMITS, COMPONENT};
 use crate::models::{
-    EmptySplit, PackagedSplit, PackagedSplitBatch, PublishLock, SplitsUpdate, create_split_metadata,
+    PackagedSplit, PackagedSplitBatch, PublishLock, SplitsUpdate, create_split_metadata,
 };
 use crate::split_store::IndexingSplitStore;
 
@@ -414,7 +413,6 @@ impl Handler<PackagedSplitBatch> for Uploader {
                 let splits_update = make_publish_operation(
                     index_uid,
                     packaged_splits_and_metadata,
-                    batch.checkpoint_delta_opt,
                     batch.publish_lock,
                     batch.merge_task_opt,
                     batch.batch_parent_span,
@@ -484,7 +482,7 @@ fn create_split_recovery_metadata(
 
 /// Builds metadata and an upload payload referencing the packaged split's files.
 /// Keep its scratch directory alive and unchanged until the upload finishes.
-pub(crate) fn prepare_split_for_upload(
+pub fn prepare_split_for_upload(
     packaged_split: &PackagedSplit,
     merge_policy: &Arc<dyn MergePolicy>,
     retention_policy: Option<&RetentionPolicy>,
@@ -517,43 +515,9 @@ pub(crate) fn prepare_split_for_upload(
     Ok((split_metadata, split_payload))
 }
 
-#[async_trait]
-impl Handler<EmptySplit> for Uploader {
-    type Reply = ();
-
-    #[instrument(
-        name="upload_empty_split",
-        parent=empty_split.batch_parent_span.id(),
-        skip_all,
-    )]
-    async fn handle(
-        &mut self,
-        empty_split: EmptySplit,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        let split_update_sender = self
-            .split_update_mailbox
-            .get_split_update_sender(ctx)
-            .await?;
-        let splits_update = SplitsUpdate {
-            index_uid: empty_split.index_uid,
-            new_splits: Vec::new(),
-            replaced_split_ids: Vec::new(),
-            checkpoint_delta_opt: Some(empty_split.checkpoint_delta),
-            publish_lock: empty_split.publish_lock,
-            merge_task: None,
-            parent_span: empty_split.batch_parent_span,
-        };
-
-        split_update_sender.send(splits_update, ctx).await?;
-        Ok(())
-    }
-}
-
 fn make_publish_operation(
     index_uid: IndexUid,
     packaged_splits_and_metadatas: Vec<(PackagedSplit, SplitMetadata)>,
-    checkpoint_delta_opt: Option<IndexCheckpointDelta>,
     publish_lock: PublishLock,
     merge_task: Option<MergeTask>,
     parent_span: Span,
@@ -570,7 +534,6 @@ fn make_publish_operation(
             .map(|split_and_meta| split_and_meta.1)
             .collect_vec(),
         replaced_split_ids: Vec::from_iter(replaced_split_ids),
-        checkpoint_delta_opt,
         publish_lock,
         merge_task,
         parent_span,
@@ -609,7 +572,6 @@ mod tests {
     use quickwit_actors::{ObservationType, Universe};
     use quickwit_common::pubsub::EventSubscriber;
     use quickwit_common::temp_dir::TempDirectory;
-    use quickwit_metastore::checkpoint::{IndexCheckpointDelta, SourceCheckpointDelta};
     use quickwit_proto::metastore::{EmptyResponse, MockMetastoreService};
     use quickwit_proto::types::{DocMappingUid, NodeId, SplitId};
     use quickwit_storage::RamStorage;
@@ -617,7 +579,7 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
-    use crate::merge_policy::{NopMergePolicy, default_merge_policy};
+    use crate::merge_policy::NopMergePolicy;
     use crate::models::{SplitAttrs, SplitsUpdate};
 
     #[test]
@@ -685,10 +647,6 @@ mod tests {
         );
         let (uploader_mailbox, uploader_handle) = universe.spawn_builder().spawn(uploader);
         let split_scratch_directory = TempDirectory::for_test();
-        let checkpoint_delta_opt: Option<IndexCheckpointDelta> = Some(IndexCheckpointDelta {
-            source_id: "test-source".to_string(),
-            source_delta: SourceCheckpointDelta::from_range(3..15),
-        });
         uploader_mailbox
             .send_message(PackagedSplitBatch::new(
                 vec![PackagedSplit {
@@ -715,7 +673,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                checkpoint_delta_opt,
                 PublishLock::default(),
                 None,
                 Span::none(),
@@ -739,7 +696,6 @@ mod tests {
         let SplitsUpdate {
             index_uid,
             new_splits,
-            checkpoint_delta_opt,
             replaced_split_ids,
             ..
         } = publisher_message;
@@ -747,12 +703,6 @@ mod tests {
         assert_eq!(index_uid.index_id, "test-index");
         assert_eq!(new_splits.len(), 1);
         assert_eq!(new_splits[0].split_id(), "test-split");
-        let checkpoint_delta = checkpoint_delta_opt.unwrap();
-        assert_eq!(checkpoint_delta.source_id, "test-source");
-        assert_eq!(
-            checkpoint_delta.source_delta,
-            SourceCheckpointDelta::from_range(3..15)
-        );
         assert!(replaced_split_ids.is_empty());
         let mut files = ram_storage.list_files().await;
         files.sort();
@@ -858,7 +808,6 @@ mod tests {
         uploader_mailbox
             .send_message(PackagedSplitBatch::new(
                 vec![packaged_split_1, package_split_2],
-                None,
                 PublishLock::default(),
                 None,
                 Span::none(),
@@ -883,7 +832,6 @@ mod tests {
             index_uid,
             new_splits,
             mut replaced_split_ids,
-            checkpoint_delta_opt,
             ..
         } = publisher_message;
         assert_eq!(index_uid.index_id, "test-index");
@@ -899,7 +847,6 @@ mod tests {
                 SplitId::from("replaced-split-2"),
             ]
         );
-        assert!(checkpoint_delta_opt.is_none());
 
         let mut files = ram_storage.list_files().await;
         files.sort();
@@ -947,10 +894,6 @@ mod tests {
         );
         let (uploader_mailbox, uploader_handle) = universe.spawn_builder().spawn(uploader);
         let split_scratch_directory = TempDirectory::for_test();
-        let checkpoint_delta_opt: Option<IndexCheckpointDelta> = Some(IndexCheckpointDelta {
-            source_id: "test-source".to_string(),
-            source_delta: SourceCheckpointDelta::from_range(3..15),
-        });
         uploader_mailbox
             .send_message(PackagedSplitBatch::new(
                 vec![PackagedSplit {
@@ -974,7 +917,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                checkpoint_delta_opt,
                 PublishLock::default(),
                 None,
                 Span::none(),
@@ -994,77 +936,6 @@ mod tests {
         assert_eq!(index_uid.index_id, "test-index");
         assert_eq!(new_splits.len(), 1);
         assert!(replaced_split_ids.is_empty());
-        universe.assert_quit().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_uploader_with_empty_splits() -> anyhow::Result<()> {
-        let universe = Universe::new();
-        let (sequencer_mailbox, sequencer_inbox) =
-            universe.create_test_mailbox::<Sequencer<Publisher>>();
-        let mut mock_metastore = MockMetastoreService::new();
-        mock_metastore.expect_stage_splits().never();
-        let ram_storage = RamStorage::default();
-        let split_store =
-            IndexingSplitStore::create_without_local_store_for_test(Arc::new(ram_storage.clone()));
-        let uploader = Uploader::new(
-            UploaderType::IndexUploader,
-            MetastoreServiceClient::from_mock(mock_metastore),
-            default_merge_policy(),
-            None,
-            split_store,
-            SplitsUpdateMailbox::Sequencer(sequencer_mailbox),
-            4,
-            EventBroker::default(),
-        );
-        let (uploader_mailbox, uploader_handle) = universe.spawn_builder().spawn(uploader);
-        let checkpoint_delta = IndexCheckpointDelta {
-            source_id: "test-source".to_string(),
-            source_delta: SourceCheckpointDelta::from_range(3..15),
-        };
-        uploader_mailbox
-            .send_message(EmptySplit {
-                index_uid: IndexUid::new_with_random_ulid("test-index"),
-                checkpoint_delta,
-                publish_lock: PublishLock::default(),
-                batch_parent_span: Span::none(),
-            })
-            .await?;
-        assert_eq!(
-            uploader_handle.process_pending_and_observe().await.obs_type,
-            ObservationType::Alive
-        );
-        let mut publish_futures: Vec<oneshot::Receiver<SequencerCommand<SplitsUpdate>>> =
-            sequencer_inbox.drain_for_test_typed();
-        assert_eq!(publish_futures.len(), 1);
-
-        let publisher_message = match publish_futures.pop().unwrap().await? {
-            SequencerCommand::Discard => panic!(
-                "Expected `SequencerCommand::Proceed(SplitUpdate)`, got \
-                 `SequencerCommand::Discard`."
-            ),
-            SequencerCommand::Proceed(publisher_message) => publisher_message,
-        };
-        let SplitsUpdate {
-            index_uid,
-            new_splits,
-            checkpoint_delta_opt,
-            replaced_split_ids,
-            ..
-        } = publisher_message;
-
-        assert_eq!(index_uid.index_id, "test-index");
-        assert_eq!(new_splits.len(), 0);
-        let checkpoint_delta = checkpoint_delta_opt.unwrap();
-        assert_eq!(checkpoint_delta.source_id, "test-source");
-        assert_eq!(
-            checkpoint_delta.source_delta,
-            SourceCheckpointDelta::from_range(3..15)
-        );
-        assert!(replaced_split_ids.is_empty());
-        let files = ram_storage.list_files().await;
-        assert!(files.is_empty());
         universe.assert_quit().await;
         Ok(())
     }
@@ -1124,10 +995,6 @@ mod tests {
         );
         let (uploader_mailbox, uploader_handle) = universe.spawn_builder().spawn(uploader);
         let split_scratch_directory = TempDirectory::for_test();
-        let checkpoint_delta_opt: Option<IndexCheckpointDelta> = Some(IndexCheckpointDelta {
-            source_id: "test-source".to_string(),
-            source_delta: SourceCheckpointDelta::from_range(3..15),
-        });
         uploader_mailbox
             .send_message(PackagedSplitBatch::new(
                 vec![PackagedSplit {
@@ -1154,7 +1021,6 @@ mod tests {
                     hotcache_bytes: Vec::new(),
                     split_files: Vec::new(),
                 }],
-                checkpoint_delta_opt,
                 PublishLock::default(),
                 None,
                 Span::none(),

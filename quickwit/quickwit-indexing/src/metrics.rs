@@ -99,12 +99,6 @@ pub(crate) fn record_published_split(index_id: &str, split: &SplitMetadata) {
         .observe(split_size_bytes as f64);
 }
 
-pub(crate) static INDEXING_PIPELINES: LazyGauge = lazy_gauge!(
-        name: "indexing_pipelines",
-        description: "Number of running indexing pipelines",
-        subsystem: "indexing",
-);
-
 pub(crate) static BACKPRESSURE_MICROS: LazyCounter = lazy_counter!(
         name: "backpressure_micros",
         description: "Amount of time spent in backpressure (in micros). This time only includes the amount of time spent waiting for a place in the queue of another actor.",
@@ -114,12 +108,6 @@ pub(crate) static BACKPRESSURE_MICROS: LazyCounter = lazy_counter!(
 pub(crate) static AVAILABLE_CONCURRENT_UPLOAD_PERMITS: LazyGauge = lazy_gauge!(
         name: "concurrent_upload_available_permits_num",
         description: "Number of available concurrent upload permits by component in [merger, indexer]",
-        subsystem: "indexing",
-);
-
-pub(crate) static SPLIT_BUILDERS: LazyGauge = lazy_gauge!(
-        name: "split_builders",
-        description: "Number of existing index writer instances.",
         subsystem: "indexing",
 );
 
@@ -138,13 +126,5 @@ pub(crate) static PENDING_MERGE_OPERATIONS: LazyGauge = lazy_gauge!(
 pub(crate) static PENDING_MERGE_BYTES: LazyGauge = lazy_gauge!(
         name: "pending_merge_bytes",
         description: "Number of pending merge bytes",
-        subsystem: "indexing",
-);
-
-// We use a lazy counter, as most users do not use Kafka.
-#[cfg_attr(not(feature = "kafka"), allow(dead_code))]
-pub(crate) static KAFKA_REBALANCE_TOTAL: LazyCounter = lazy_counter!(
-        name: "kafka_rebalance_total",
-        description: "Number of kafka rebalances",
         subsystem: "indexing",
 );

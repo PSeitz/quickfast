@@ -12,861 +12,602 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! # Sources
+//! Thin source-to-ingest forwarders.
 //!
-//! Quickwit gets its data from so-called `Sources`.
-//!
-//! The role of a source is to push message to an indexer mailbox.
-//! Implementers need to focus on the implementation of the [`Source`] trait
-//! and in particular its emit_batches method.
-//! In addition, they need to implement a source factory.
-//!
-//! The source trait will executed in an actor.
-//!
-//! # Checkpoints and exactly-once semantics
-//!
-//! Quickwit is designed to offer exactly-once semantics whenever possible using the following
-//! strategy, using checkpoints.
-//!
-//! Messages are split into partitions, and within a partition messages are totally ordered: they
-//! are marked by a unique position within this partition.
-//!
-//! Sources are required to emit messages in a way that respects this partial order.
-//! If two message belong 2 different partitions, they can be emitted in any order.
-//! If two message belong to the same partition, they  are required to be emitted in the order of
-//! their position.
-//!
-//! The set of documents processed by a source can then be expressed entirely as Checkpoint, that is
-//! simply a mapping `(PartitionId -> Position)`.
-//!
-//! This checkpoint is used in Quickwit to implement exactly-once semantics.
-//! When a new split is published, it is atomically published with an update of the last indexed
-//! checkpoint.
-//!
-//! If the indexing pipeline is restarted, the source will simply be recreated with that checkpoint.
-//!
-//! # Example sources
-//!
-//! Right now two sources are implemented in quickwit.
-//! - the file source: there partition here is a filepath, and the position is a byte-offset within
-//!   that file.
-//! - the kafka source: the partition id is a kafka topic partition id, and the position is a kafka
-//!   offset.
-mod doc_file_reader;
-mod file_source;
-#[cfg(feature = "gcp-pubsub")]
-mod gcp_pubsub_source;
-mod ingest;
-mod ingest_api_source;
+//! Supported pull sources (Kafka, SQS, GCP Pub/Sub) rely on native broker coordination
+//! (consumer groups, competing consumers / visibility timeouts, subscriptions) and forward
+//! document batches directly to the ingest API (`IngestRouterService`), committing offsets or
+//! acknowledging messages only after `ingesthree` accepts each batch.
+
+pub mod doc_file_reader;
 #[cfg(feature = "kafka")]
-mod kafka_source;
-#[cfg(feature = "kinesis")]
-mod kinesis;
-#[cfg(feature = "pulsar")]
-mod pulsar_source;
-#[cfg(feature = "queue-sources")]
-mod queue_sources;
-mod source_factory;
-mod stdin_source;
-mod vec_source;
-mod void_source;
+mod kafka;
+#[cfg(feature = "gcp-pubsub")]
+mod pubsub;
+#[cfg(feature = "sqs")]
+mod sqs;
 
-use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::sync::LazyLock;
-use std::time::{Duration, Instant};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
 
+use anyhow::{Context, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
-use bytesize::ByteSize;
-pub use file_source::{FileSource, FileSourceFactory};
-#[cfg(feature = "gcp-pubsub")]
-pub use gcp_pubsub_source::{GcpPubSubSource, GcpPubSubSourceFactory};
-#[cfg(feature = "kafka")]
-pub use kafka_source::{KafkaSource, KafkaSourceFactory};
-#[cfg(feature = "kinesis")]
-pub use kinesis::kinesis_source::{KinesisSource, KinesisSourceFactory};
-#[cfg(feature = "pulsar")]
-pub use pulsar_source::{PulsarSource, PulsarSourceFactory};
-#[cfg(feature = "sqs")]
-pub use queue_sources::sqs_queue;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox};
-use quickwit_common::metrics::{
-    IN_FLIGHT_FILE_SOURCE, IN_FLIGHT_INGEST_SOURCE, IN_FLIGHT_KAFKA_SOURCE,
-    IN_FLIGHT_KINESIS_SOURCE, IN_FLIGHT_OTHER_SOURCE, IN_FLIGHT_PUBSUB_SOURCE,
-    IN_FLIGHT_PULSAR_SOURCE,
-};
-use quickwit_common::pretty::PrettyDisplay;
-use quickwit_common::pubsub::EventBroker;
 use quickwit_common::rate_limited_warn;
-use quickwit_common::runtimes::RuntimeType;
 use quickwit_config::{
-    FileSourceNotification, FileSourceParams, IndexingSettings, SourceConfig, SourceParams,
+    FileSourceNotification, FileSourceParams, INGEST_V2_SOURCE_ID, SourceConfig, SourceParams,
 };
-use quickwit_ingest::IngesterPool;
-use quickwit_metastore::IndexMetadataResponseExt;
-use quickwit_metastore::checkpoint::{SourceCheckpoint, SourceCheckpointDelta};
-use quickwit_metrics::GaugeGuard;
-use quickwit_proto::indexing::IndexingPipelineId;
+use quickwit_ingest::IngestServiceError;
+use quickwit_ingest::router_client::{IngestFailure, IngestRouterClient, IngestRouterError};
+use quickwit_metastore::ListIndexesMetadataResponseExt;
+use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2, IngestV2Error};
 use quickwit_proto::metastore::{
-    IndexMetadataRequest, MetastoreError, MetastoreResult, MetastoreService,
-    MetastoreServiceClient, SourceType,
+    ListIndexesMetadataRequest, MetastoreService, MetastoreServiceClient,
 };
-use quickwit_proto::types::{IndexUid, NodeIdRef, PipelineUid, ShardId};
+use quickwit_proto::types::{DocUidGenerator, IndexUid, SourceId};
 use quickwit_storage::StorageResolver;
-use serde_json::Value as JsonValue;
-pub use source_factory::{SourceFactory, SourceLoader, TypedSourceFactory};
-use tokio::runtime::Handle;
-use tracing::error;
-pub use vec_source::{VecSource, VecSourceFactory};
-pub use void_source::{VoidSource, VoidSourceFactory};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio::time;
+use tracing::{info, warn};
 
-use self::doc_file_reader::dir_and_filename;
-use self::stdin_source::StdinSourceFactory;
-use crate::actors::DocProcessor;
-use crate::models::{RawDocBatch, SharedPublishToken};
-use crate::source::ingest::IngestSourceFactory;
-use crate::source::ingest_api_source::IngestApiSourceFactory;
+/// Maximum payload bytes per forwarded batch.
+pub const BATCH_NUM_BYTES_LIMIT: usize = 4 * 1024 * 1024;
+/// Maximum wait before flushing a partial batch.
+pub const BATCH_MAX_WAIT: Duration = Duration::from_millis(500);
 
-/// Number of bytes after which we cut a new batch.
-///
-/// We try to emit chewable batches for the indexer.
-/// One batch = one message to the indexer actor.
-///
-/// If batches are too large:
-/// - we might not be able to observe the state of the indexer for 5 seconds.
-/// - we will be needlessly occupying resident memory in the mailbox.
-/// - we will not have a precise control of the timeout before commit.
-///
-/// 5MB seems like a good one size fits all value.
-const BATCH_NUM_BYTES_LIMIT: u64 = ByteSize::mib(5).as_u64();
+const DEFAULT_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
+const INITIAL_RETRY_BACKOFF: Duration = Duration::from_millis(200);
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
+const SUPERVISOR_RESTART_BACKOFF: Duration = Duration::from_secs(2);
 
-static EMIT_BATCHES_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
-    if cfg!(any(test, feature = "testsuite")) {
-        let timeout = Duration::from_millis(100);
-        assert!(timeout < *quickwit_actors::HEARTBEAT);
-        timeout
-    } else {
-        let timeout = Duration::from_millis(1_000);
-        if *quickwit_actors::HEARTBEAT < timeout {
-            error!("QW_ACTOR_HEARTBEAT_SECS smaller than batch timeout");
+/// Target sink receiving batches forwarded by pull sources.
+#[async_trait]
+pub trait IngestSink: Send + Sync + 'static {
+    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error>;
+
+    /// Retries transient ingest errors until accepted or `shutdown` fires.
+    async fn ingest_with_retry(
+        &self,
+        index_id: &str,
+        docs: Vec<Bytes>,
+        shutdown: &mut watch::Receiver<bool>,
+    ) -> anyhow::Result<()> {
+        let mut backoff = INITIAL_RETRY_BACKOFF;
+        loop {
+            match self.ingest(index_id, docs.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if matches!(
+                        error,
+                        IngestV2Error::Unavailable(_)
+                            | IngestV2Error::TooManyRequests(_)
+                            | IngestV2Error::Timeout(_)
+                    ) =>
+                {
+                    rate_limited_warn!(
+                        limit_per_min = 6,
+                        index_id = %index_id,
+                        error = %error,
+                        "transient ingest error while forwarding source batch; retrying"
+                    );
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.changed() => {
+                            if *shutdown.borrow() {
+                                bail!("source forwarder shutting down while retrying ingest");
+                            }
+                        }
+                        _ = time::sleep(backoff) => {}
+                    }
+                    backoff = (backoff * 2).min(MAX_RETRY_BACKOFF);
+                }
+                Err(error) => {
+                    return Err(anyhow::Error::from(error))
+                        .with_context(|| format!("ingest rejected batch for index `{index_id}`"));
+                }
+            }
         }
-        timeout
     }
-});
+}
 
-/// Runtime configuration used during execution of a source actor.
+/// Forwards batches directly to [`IngestRouterClient`] (`ingesthree`).
 #[derive(Clone)]
-pub struct SourceRuntime {
-    pub pipeline_id: IndexingPipelineId,
-    pub source_config: SourceConfig,
-    pub metastore: MetastoreServiceClient,
-    pub ingester_pool: IngesterPool,
-    // Ingest API queues directory path.
-    pub queues_dir_path: PathBuf,
-    pub storage_resolver: StorageResolver,
-    pub event_broker: EventBroker,
-    pub indexing_setting: IndexingSettings,
-    pub publish_token: SharedPublishToken,
+pub struct IngestRouterSink {
+    router: IngestRouterClient,
 }
 
-impl SourceRuntime {
-    pub fn node_id(&self) -> &NodeIdRef {
-        &self.pipeline_id.node_id
+impl IngestRouterSink {
+    pub fn new(router: IngestRouterClient) -> Self {
+        Self { router }
     }
+}
 
-    pub fn index_uid(&self) -> &IndexUid {
-        &self.pipeline_id.index_uid
+fn router_error_to_ingest_error(error: IngestRouterError) -> IngestV2Error {
+    match error {
+        IngestRouterError::V2(err) => err,
+        IngestRouterError::Ingesthree(err) => ingesthree_error_to_ingest_error(err),
     }
+}
 
-    pub fn index_id(&self) -> &str {
-        &self.pipeline_id.index_uid.index_id
+fn ingesthree_error_to_ingest_error(error: IngestServiceError) -> IngestV2Error {
+    match error {
+        IngestServiceError::Unavailable(msg) => IngestV2Error::Unavailable(msg),
+        IngestServiceError::RateLimited(cause) => IngestV2Error::TooManyRequests(cause),
+        other => IngestV2Error::Internal(other.to_string()),
     }
+}
 
-    pub fn source_id(&self) -> &str {
-        &self.pipeline_id.source_id
-    }
-
-    pub fn pipeline_uid(&self) -> PipelineUid {
-        self.pipeline_id.pipeline_uid
-    }
-
-    pub async fn fetch_checkpoint(&self) -> MetastoreResult<SourceCheckpoint> {
-        let index_uid = self.index_uid().clone();
-        let request = IndexMetadataRequest::for_index_uid(index_uid);
-        let response = self.metastore.clone().index_metadata(request).await?;
-        let index_metadata = response.deserialize_index_metadata()?;
-
-        if let Some(checkpoint) = index_metadata
-            .checkpoint
-            .source_checkpoint(self.source_id())
-            .cloned()
-        {
-            return Ok(checkpoint);
+#[async_trait]
+impl IngestSink for IngestRouterSink {
+    async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error> {
+        let mut doc_uid_generator = DocUidGenerator::default();
+        let mut doc_uids = Vec::with_capacity(docs.len());
+        let mut doc_lengths = Vec::with_capacity(docs.len());
+        let total_len: usize = docs.iter().map(Bytes::len).sum();
+        let mut doc_buffer = Vec::with_capacity(total_len);
+        for doc in docs {
+            doc_uids.push(doc_uid_generator.next_doc_uid());
+            doc_lengths.push(doc.len() as u32);
+            doc_buffer.extend_from_slice(&doc);
         }
-        Err(MetastoreError::Internal {
-            message: format!(
-                "could not find checkpoint for index `{}` and source `{}`",
-                self.index_uid(),
-                self.source_id()
-            ),
-            cause: "".to_string(),
-        })
-    }
-}
-
-pub type SourceContext = ActorContext<SourceActor>;
-
-/// A Source is a trait that is mounted in a light wrapping Actor called `SourceActor`.
-///
-/// For this reason, its methods mimics those of Actor.
-/// One key difference is the absence of messages.
-///
-/// The `SourceActor` implements a loop until emit_batches returns an
-/// ActorExitStatus.
-///
-/// Conceptually, a source execution works as if it was a simple loop
-/// as follow:
-///
-/// ```ignore
-/// fn whatever() -> anyhow::Result<()> {
-///     source.initialize(ctx)?;
-///     let exit_status = loop {
-///         if let Err(exit_status) = source.emit_batches()? {
-///             break exit_status;
-///         }
-///     };
-///     source.finalize(exit_status)?;
-///     Ok(())
-/// }
-/// ```
-#[async_trait]
-pub trait Source: Send + 'static {
-    /// This method will be called before any calls to `emit_batches`.
-    async fn initialize(
-        &mut self,
-        _doc_processor_mailbox: &Mailbox<DocProcessor>,
-        _ctx: &SourceContext,
-    ) -> Result<(), ActorExitStatus> {
-        Ok(())
-    }
-
-    /// Main part of the source implementation, `emit_batches` can emit 0..n batches.
-    ///
-    /// The `doc_processor_mailbox` is a mailbox that has a bounded capacity.
-    /// In that case, `doc_processor_mailbox` will block.
-    ///
-    /// It returns an optional duration specifying how long the batch requester
-    /// should wait before polling again.
-    async fn emit_batches(
-        &mut self,
-        doc_processor_mailbox: &Mailbox<DocProcessor>,
-        ctx: &SourceContext,
-    ) -> Result<Duration, ActorExitStatus>;
-
-    /// Assign shards is called when the source is assigned a new set of shards by the control
-    /// plane.
-    async fn assign_shards(
-        &mut self,
-        _assignment: Assignment,
-        _doc_processor_mailbox: &Mailbox<DocProcessor>,
-        _ctx: &SourceContext,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// After publication of a split, `suggest_truncate` is called.
-    /// This makes it possible for the implementation of a source to
-    /// release some resources associated to the data that was just published.
-    ///
-    /// This method is for instance useful for the ingest API, as it is possible
-    /// to delete all message anterior to the checkpoint in the ingest API queue.
-    ///
-    /// It is perfectly fine for implementation to ignore this function.
-    /// For instance, message queue like kafka are meant to be shared by different
-    /// client, and rely on a retention strategy to delete messages.
-    ///
-    /// Returning an error has no effect on the source actor itself or the
-    /// indexing pipeline, as truncation is just "a suggestion".
-    /// The error will however be logged.
-    async fn suggest_truncate(
-        &mut self,
-        _checkpoint: SourceCheckpoint,
-        _ctx: &SourceContext,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// Finalize is called once after the actor terminates.
-    async fn finalize(
-        &mut self,
-        _exit_status: &ActorExitStatus,
-        _ctx: &SourceContext,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    /// A name identifying the type of source.
-    fn name(&self) -> String;
-
-    /// Value of the `task` label on the Tokio task metrics of the source actor running this
-    /// source. See [`Actor::task_metrics_label`] for the contract.
-    fn task_metrics_label(&self) -> &'static str {
-        quickwit_actors::to_task_metrics_label(std::any::type_name::<Self>())
-    }
-
-    /// Returns an observable_state for the actor.
-    ///
-    /// This object is simply a json object, and its content may vary depending on the
-    /// source.
-    fn observable_state(&self) -> JsonValue;
-}
-
-/// The SourceActor acts as a thin wrapper over a source trait object to execute.
-///
-/// It mostly takes care of running a loop calling `emit_batches(...)`.
-pub struct SourceActor {
-    source: Box<dyn Source>,
-    doc_processor_mailbox: Mailbox<DocProcessor>,
-}
-
-impl SourceActor {
-    pub fn new(source: Box<dyn Source>, doc_processor_mailbox: Mailbox<DocProcessor>) -> Self {
-        SourceActor {
-            source,
-            doc_processor_mailbox,
+        let doc_batch = DocBatchV2 {
+            doc_uids,
+            doc_buffer: Bytes::from(doc_buffer),
+            doc_lengths,
+        };
+        let request = IngestRequestV2 {
+            commit_type: CommitTypeV2::Auto as i32,
+            subrequests: vec![IngestSubrequest {
+                subrequest_id: 0,
+                index_id: index_id.to_string(),
+                source_id: INGEST_V2_SOURCE_ID.to_string(),
+                doc_batch: Some(doc_batch),
+            }],
+        };
+        let response = self
+            .router
+            .ingest(request)
+            .await
+            .map_err(router_error_to_ingest_error)?;
+        if let Some(failure) = response.failures.into_iter().next() {
+            return Err(match failure {
+                IngestFailure::Ingesthree { error, .. } => ingesthree_error_to_ingest_error(error),
+                IngestFailure::V2(failure) => IngestV2Error::Internal(format!(
+                    "ingest subrequest failed for index `{}`: {:?}",
+                    failure.index_id,
+                    failure.reason()
+                )),
+            });
         }
-    }
-}
-
-#[derive(Debug)]
-struct Loop;
-
-#[derive(Debug)]
-pub struct Assignment {
-    pub shard_ids: BTreeSet<ShardId>,
-    /// ULID of the originating indexing plan, used as the publish token when (re)acquiring shards.
-    pub indexing_plan_id: String,
-}
-
-#[derive(Debug)]
-pub struct AssignShards(pub Assignment);
-
-#[async_trait]
-impl Actor for SourceActor {
-    type ObservableState = JsonValue;
-
-    fn name(&self) -> String {
-        self.source.name()
-    }
-
-    fn task_metrics_label(&self) -> &'static str {
-        self.source.task_metrics_label()
-    }
-
-    fn observable_state(&self) -> Self::ObservableState {
-        self.source.observable_state()
-    }
-
-    fn runtime_handle(&self) -> Handle {
-        RuntimeType::NonBlocking.get_runtime_handle()
-    }
-
-    fn yield_after_each_message(&self) -> bool {
-        false
-    }
-
-    async fn initialize(&mut self, ctx: &SourceContext) -> Result<(), ActorExitStatus> {
-        self.source
-            .initialize(&self.doc_processor_mailbox, ctx)
-            .await?;
-        self.handle(Loop, ctx).await?;
-        Ok(())
-    }
-
-    async fn finalize(
-        &mut self,
-        exit_status: &ActorExitStatus,
-        ctx: &SourceContext,
-    ) -> anyhow::Result<()> {
-        self.source.finalize(exit_status, ctx).await?;
         Ok(())
     }
 }
 
-#[async_trait]
-impl Handler<Loop> for SourceActor {
-    type Reply = ();
-
-    async fn handle(&mut self, _message: Loop, ctx: &SourceContext) -> Result<(), ActorExitStatus> {
-        let wait_for = self
-            .source
-            .emit_batches(&self.doc_processor_mailbox, ctx)
-            .await?;
-        if wait_for.is_zero() {
-            ctx.send_self_message(Loop).await?;
-            return Ok(());
-        }
-        ctx.schedule_self_msg(wait_for, Loop);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<AssignShards> for SourceActor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        assign_shards_message: AssignShards,
-        ctx: &SourceContext,
-    ) -> Result<(), ActorExitStatus> {
-        let AssignShards(assignment) = assign_shards_message;
-        self.source
-            .assign_shards(assignment, &self.doc_processor_mailbox, ctx)
-            .await?;
-        Ok(())
-    }
-}
-
-// TODO: Use `SourceType` instead of `&str``.
-pub fn quickwit_supported_sources() -> &'static SourceLoader {
-    static SOURCE_LOADER: LazyLock<SourceLoader> = LazyLock::new(|| {
-        let mut source_factory = SourceLoader::default();
-        source_factory.add_source(SourceType::File, FileSourceFactory);
-        #[cfg(feature = "gcp-pubsub")]
-        source_factory.add_source(SourceType::PubSub, GcpPubSubSourceFactory);
-        source_factory.add_source(SourceType::IngestV1, IngestApiSourceFactory);
-        source_factory.add_source(SourceType::IngestV2, IngestSourceFactory);
-        #[cfg(feature = "kafka")]
-        source_factory.add_source(SourceType::Kafka, KafkaSourceFactory);
-        #[cfg(feature = "kinesis")]
-        source_factory.add_source(SourceType::Kinesis, KinesisSourceFactory);
-        #[cfg(feature = "pulsar")]
-        source_factory.add_source(SourceType::Pulsar, PulsarSourceFactory);
-        source_factory.add_source(SourceType::Stdin, StdinSourceFactory);
-        source_factory.add_source(SourceType::Vec, VecSourceFactory);
-        source_factory.add_source(SourceType::Void, VoidSourceFactory);
-        source_factory
-    });
-    &SOURCE_LOADER
-}
-
+/// Validates connectivity for a `SourceConfig`.
 pub async fn check_source_connectivity(
     storage_resolver: &StorageResolver,
     source_config: &SourceConfig,
 ) -> anyhow::Result<()> {
     match &source_config.source_params {
-        SourceParams::File(FileSourceParams::Filepath(file_uri)) => {
-            let (dir_uri, file_name) = dir_and_filename(file_uri)?;
+        SourceParams::File(FileSourceParams::Filepath(uri)) => {
+            let (dir_uri, file_name) = doc_file_reader::dir_and_filename(uri)?;
             let storage = storage_resolver.resolve(&dir_uri).await?;
-            storage.file_num_bytes(file_name).await?;
+            if !storage.exists(file_name).await? {
+                bail!("file `{uri}` does not exist");
+            }
             Ok(())
         }
-        #[allow(unused_variables)]
         SourceParams::File(FileSourceParams::Notifications(FileSourceNotification::Sqs(
-            sqs_config,
+            sqs_params,
         ))) => {
-            #[cfg(not(feature = "sqs"))]
-            anyhow::bail!("Quickwit was compiled without the `sqs` feature");
-
             #[cfg(feature = "sqs")]
             {
-                queue_sources::sqs_queue::check_connectivity(&sqs_config.queue_url).await?;
-                Ok(())
+                sqs::check_sqs_connectivity(&sqs_params.queue_url).await
+            }
+            #[cfg(not(feature = "sqs"))]
+            {
+                let _ = sqs_params;
+                bail!("SQS source requires the `sqs` cargo feature")
             }
         }
-        #[allow(unused_variables)]
-        SourceParams::Kafka(params) => {
-            #[cfg(not(feature = "kafka"))]
-            anyhow::bail!("Quickwit was compiled without the `kafka` feature");
-
+        SourceParams::Kafka(kafka_params) => {
             #[cfg(feature = "kafka")]
             {
-                kafka_source::check_connectivity(params.clone()).await?;
-                Ok(())
+                kafka::check_kafka_connectivity(kafka_params).await
+            }
+            #[cfg(not(feature = "kafka"))]
+            {
+                let _ = kafka_params;
+                bail!("Kafka source requires the `kafka` cargo feature")
             }
         }
-        #[allow(unused_variables)]
-        SourceParams::Kinesis(params) => {
-            #[cfg(not(feature = "kinesis"))]
-            anyhow::bail!("Quickwit was compiled without the `kinesis` feature");
-
-            #[cfg(feature = "kinesis")]
+        SourceParams::PubSub(pubsub_params) => {
+            #[cfg(feature = "gcp-pubsub")]
             {
-                kinesis::check_connectivity(params.clone()).await?;
-                Ok(())
+                pubsub::check_pubsub_connectivity(pubsub_params).await
+            }
+            #[cfg(not(feature = "gcp-pubsub"))]
+            {
+                let _ = pubsub_params;
+                bail!("GCP PubSub source requires the `gcp-pubsub` cargo feature")
             }
         }
-        #[allow(unused_variables)]
-        SourceParams::Pulsar(params) => {
-            #[cfg(not(feature = "pulsar"))]
-            anyhow::bail!("Quickwit was compiled without the `pulsar` feature");
+        SourceParams::Ingest
+        | SourceParams::IngestApi
+        | SourceParams::IngestCli
+        | SourceParams::Stdin
+        | SourceParams::Vec(_)
+        | SourceParams::Void(_) => Ok(()),
+        SourceParams::Kinesis(_) | SourceParams::Pulsar(_) => {
+            bail!(
+                "source type `{}` is not supported; use Kafka, SQS, GCP PubSub, or push directly \
+                 to the ingest API",
+                source_config.source_type().as_str_name()
+            )
+        }
+    }
+}
 
-            #[cfg(feature = "pulsar")]
+fn is_forwardable_source(source_config: &SourceConfig) -> bool {
+    source_config.enabled
+        && matches!(
+            source_config.source_params,
+            SourceParams::Kafka(_)
+                | SourceParams::PubSub(_)
+                | SourceParams::File(FileSourceParams::Notifications(
+                    FileSourceNotification::Sqs(_)
+                ))
+        )
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct ForwarderKey {
+    index_uid: IndexUid,
+    source_id: SourceId,
+}
+
+struct RunningForwarder {
+    config: SourceConfig,
+    shutdown_tx: watch::Sender<bool>,
+    handle: JoinHandle<()>,
+}
+
+/// Polls index metadata from the metastore and runs one supervised forwarder task per enabled
+/// pull source (Kafka, SQS, GCP Pub/Sub).
+pub struct SourceForwarderManager {
+    shutdown_tx: watch::Sender<bool>,
+    reconciler_handle: JoinHandle<()>,
+}
+
+impl SourceForwarderManager {
+    pub fn spawn(
+        metastore: MetastoreServiceClient,
+        storage_resolver: StorageResolver,
+        sink: Arc<dyn IngestSink>,
+    ) -> Self {
+        Self::spawn_with_interval(
+            metastore,
+            storage_resolver,
+            sink,
+            DEFAULT_RECONCILE_INTERVAL,
+        )
+    }
+
+    pub fn spawn_with_interval(
+        metastore: MetastoreServiceClient,
+        storage_resolver: StorageResolver,
+        sink: Arc<dyn IngestSink>,
+        reconcile_interval: Duration,
+    ) -> Self {
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let reconciler_handle = tokio::spawn(async move {
+            let mut running: HashMap<ForwarderKey, RunningForwarder> = HashMap::new();
+            let mut interval = time::interval(reconcile_interval);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            break;
+                        }
+                    }
+                    _ = interval.tick() => {
+                        reconcile_forwarders(
+                            &metastore,
+                            &storage_resolver,
+                            &sink,
+                            &mut running,
+                        )
+                        .await;
+                    }
+                }
+            }
+            for (_, worker) in running.drain() {
+                let _ = worker.shutdown_tx.send(true);
+                let _ = worker.handle.await;
+            }
+        });
+        Self {
+            shutdown_tx,
+            reconciler_handle,
+        }
+    }
+
+    /// Stops all active source forwarders and waits for them to flush and commit.
+    pub async fn stop(self) {
+        let _ = self.shutdown_tx.send(true);
+        let _ = self.reconciler_handle.await;
+    }
+}
+
+async fn reconcile_forwarders(
+    metastore: &MetastoreServiceClient,
+    storage_resolver: &StorageResolver,
+    sink: &Arc<dyn IngestSink>,
+    running: &mut HashMap<ForwarderKey, RunningForwarder>,
+) {
+    let response = match metastore
+        .list_indexes_metadata(ListIndexesMetadataRequest::all())
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            rate_limited_warn!(
+                limit_per_min = 6,
+                error = %error,
+                "failed to list indexes while reconciling source forwarders"
+            );
+            return;
+        }
+    };
+    let indexes = match response.deserialize_indexes_metadata().await {
+        Ok(indexes) => indexes,
+        Err(error) => {
+            rate_limited_warn!(
+                limit_per_min = 6,
+                error = %error,
+                "failed to deserialize indexes while reconciling source forwarders"
+            );
+            return;
+        }
+    };
+
+    let mut desired: HashMap<ForwarderKey, SourceConfig> = HashMap::new();
+    for index in indexes {
+        for source_config in index.sources.into_values() {
+            if is_forwardable_source(&source_config) {
+                desired.insert(
+                    ForwarderKey {
+                        index_uid: index.index_uid.clone(),
+                        source_id: source_config.source_id.clone(),
+                    },
+                    source_config,
+                );
+            }
+        }
+    }
+
+    let keys_to_stop: Vec<ForwarderKey> = running
+        .iter()
+        .filter(|(key, worker)| desired.get(key) != Some(&worker.config))
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in keys_to_stop {
+        if let Some(worker) = running.remove(&key) {
+            info!(
+                index_id = %key.index_uid.index_id,
+                source_id = %key.source_id,
+                "stopping source forwarder"
+            );
+            let _ = worker.shutdown_tx.send(true);
+            let _ = worker.handle.await;
+        }
+    }
+
+    let existing_keys: HashSet<ForwarderKey> = running.keys().cloned().collect();
+    for (key, config) in desired {
+        if existing_keys.contains(&key) {
+            continue;
+        }
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let handle = spawn_supervised_forwarder(
+            key.index_uid.index_id.clone(),
+            config.clone(),
+            storage_resolver.clone(),
+            sink.clone(),
+            shutdown_rx,
+        );
+        running.insert(
+            key,
+            RunningForwarder {
+                config,
+                shutdown_tx,
+                handle,
+            },
+        );
+    }
+}
+
+fn spawn_supervised_forwarder(
+    index_id: String,
+    source_config: SourceConfig,
+    storage_resolver: StorageResolver,
+    sink: Arc<dyn IngestSink>,
+    mut shutdown: watch::Receiver<bool>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let source_id = source_config.source_id.clone();
+        loop {
+            if *shutdown.borrow() {
+                break;
+            }
+            let result = run_source_once(
+                &index_id,
+                &source_config,
+                &storage_resolver,
+                &sink,
+                shutdown.clone(),
+            )
+            .await;
+            if *shutdown.borrow() {
+                break;
+            }
+            match result {
+                Ok(()) => break,
+                Err(error) => {
+                    warn!(
+                        index_id = %index_id,
+                        source_id = %source_id,
+                        error = %error,
+                        "source forwarder failed; restarting after backoff"
+                    );
+                    tokio::select! {
+                        biased;
+                        _ = shutdown.changed() => {
+                            if *shutdown.borrow() {
+                                break;
+                            }
+                        }
+                        _ = time::sleep(SUPERVISOR_RESTART_BACKOFF) => {}
+                    }
+                }
+            }
+        }
+    })
+}
+
+#[cfg_attr(
+    not(any(feature = "kafka", feature = "sqs", feature = "gcp-pubsub")),
+    allow(unused_variables)
+)]
+async fn run_source_once(
+    index_id: &str,
+    source_config: &SourceConfig,
+    storage_resolver: &StorageResolver,
+    sink: &Arc<dyn IngestSink>,
+    shutdown: watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    let source_id = source_config.source_id.clone();
+    match &source_config.source_params {
+        SourceParams::Kafka(params) => {
+            #[cfg(feature = "kafka")]
             {
-                pulsar_source::check_connectivity(params).await?;
-                Ok(())
+                kafka::run_kafka_forwarder(
+                    index_id.to_string(),
+                    source_id,
+                    params.clone(),
+                    sink.clone(),
+                    shutdown,
+                )
+                .await
+            }
+            #[cfg(not(feature = "kafka"))]
+            {
+                let _ = (params, storage_resolver, sink, shutdown);
+                bail!("Kafka source requires the `kafka` cargo feature")
+            }
+        }
+        SourceParams::File(FileSourceParams::Notifications(FileSourceNotification::Sqs(
+            params,
+        ))) => {
+            #[cfg(feature = "sqs")]
+            {
+                sqs::run_sqs_forwarder(
+                    index_id.to_string(),
+                    source_id,
+                    params.clone(),
+                    storage_resolver.clone(),
+                    sink.clone(),
+                    shutdown,
+                )
+                .await
+            }
+            #[cfg(not(feature = "sqs"))]
+            {
+                let _ = (params, storage_resolver, sink, shutdown);
+                bail!("SQS source requires the `sqs` cargo feature")
+            }
+        }
+        SourceParams::PubSub(params) => {
+            #[cfg(feature = "gcp-pubsub")]
+            {
+                pubsub::run_pubsub_forwarder(
+                    index_id.to_string(),
+                    source_id,
+                    params.clone(),
+                    sink.clone(),
+                    shutdown,
+                )
+                .await
+            }
+            #[cfg(not(feature = "gcp-pubsub"))]
+            {
+                let _ = (params, storage_resolver, sink, shutdown);
+                bail!("GCP PubSub source requires the `gcp-pubsub` cargo feature")
             }
         }
         _ => Ok(()),
     }
 }
 
-/// Suggest truncate messages processed later than this threshold trigger a warning.
-const SUGGEST_TRUNCATE_DELAY_WARN_THRESHOLD: Duration = Duration::from_millis(100);
-
-#[derive(Debug)]
-pub struct SuggestTruncate {
-    pub checkpoint: SourceCheckpoint,
-    pub created_at: Instant,
-}
-
-impl SuggestTruncate {
-    pub fn new(checkpoint: SourceCheckpoint) -> Self {
-        Self {
-            checkpoint,
-            created_at: Instant::now(),
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<SuggestTruncate> for SourceActor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        suggest_truncate: SuggestTruncate,
-        ctx: &SourceContext,
-    ) -> Result<(), ActorExitStatus> {
-        let SuggestTruncate {
-            checkpoint,
-            created_at,
-        } = suggest_truncate;
-        let delay = created_at.elapsed();
-
-        if delay > SUGGEST_TRUNCATE_DELAY_WARN_THRESHOLD {
-            rate_limited_warn!(
-                limit_per_min = 6,
-                source = self.source.name(),
-                delay_ms = delay.as_millis() as u64,
-                "suggest truncate message processed with delay of {}",
-                delay.pretty_display()
-            );
-        }
-
-        if let Err(error) = self.source.suggest_truncate(checkpoint, ctx).await {
-            // Failing to process suggest truncate does not
-            // kill the source nor the indexing pipeline, but we log the error.
-            error!(%error, "failed to process suggest truncate");
-        }
-        Ok(())
-    }
-}
-
-pub(super) struct BatchBuilder {
-    // Do not directly append documents to this vector; otherwise, in-flight metrics will be
-    // incorrect. Use `add_doc` instead.
-    docs: Vec<Bytes>,
-    num_bytes: u64,
-    checkpoint_delta: SourceCheckpointDelta,
-    force_commit: bool,
-    gauge_guard: GaugeGuard,
-}
-
-impl BatchBuilder {
-    pub fn new(source_type: SourceType) -> Self {
-        Self::with_capacity(0, source_type)
-    }
-
-    pub fn with_capacity(capacity: usize, source_type: SourceType) -> Self {
-        let gauge = match source_type {
-            SourceType::File => &IN_FLIGHT_FILE_SOURCE,
-            SourceType::IngestV2 => &IN_FLIGHT_INGEST_SOURCE,
-            SourceType::Kafka => &IN_FLIGHT_KAFKA_SOURCE,
-            SourceType::Kinesis => &IN_FLIGHT_KINESIS_SOURCE,
-            SourceType::PubSub => &IN_FLIGHT_PUBSUB_SOURCE,
-            SourceType::Pulsar => &IN_FLIGHT_PULSAR_SOURCE,
-            _ => &IN_FLIGHT_OTHER_SOURCE,
-        };
-        let gauge_guard = GaugeGuard::new(gauge, 0.0);
-
-        Self {
-            docs: Vec::with_capacity(capacity),
-            num_bytes: 0,
-            checkpoint_delta: SourceCheckpointDelta::default(),
-            force_commit: false,
-            gauge_guard,
-        }
-    }
-
-    pub fn add_doc(&mut self, doc: Bytes) {
-        let num_bytes = doc.len();
-        self.docs.push(doc);
-        self.num_bytes += num_bytes as u64;
-        self.gauge_guard.increment(num_bytes as f64);
-    }
-
-    pub fn force_commit(&mut self) {
-        self.force_commit = true;
-    }
-
-    pub fn build(self) -> RawDocBatch {
-        RawDocBatch::new(self.docs, self.checkpoint_delta, self.force_commit)
-    }
-
-    #[cfg(feature = "kafka")]
-    pub fn clear(&mut self) {
-        self.docs.clear();
-        self.checkpoint_delta = SourceCheckpointDelta::default();
-        self.gauge_guard.decrement(self.num_bytes as f64);
-        self.num_bytes = 0;
-    }
-}
-
 #[cfg(test)]
-mod tests {
-
-    use std::num::NonZeroUsize;
-
-    use quickwit_config::{SourceInputFormat, VecSourceParams};
-    use quickwit_metastore::IndexMetadata;
-    use quickwit_metastore::checkpoint::IndexCheckpointDelta;
-    use quickwit_proto::metastore::{IndexMetadataResponse, MockMetastoreService};
-    use quickwit_proto::types::NodeId;
+pub(crate) mod tests {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
 
-    pub struct SourceRuntimeBuilder {
-        index_uid: IndexUid,
-        source_config: SourceConfig,
-        metastore_opt: Option<MetastoreServiceClient>,
-        queues_dir_path_opt: Option<PathBuf>,
+    #[derive(Default)]
+    pub struct RecordingSink {
+        batches: Mutex<Vec<(String, Vec<Bytes>)>>,
+        transient_failures_left: AtomicUsize,
     }
 
-    impl SourceRuntimeBuilder {
-        pub fn new(index_uid: IndexUid, source_config: SourceConfig) -> Self {
-            SourceRuntimeBuilder {
-                index_uid,
-                source_config,
-                metastore_opt: None,
-                queues_dir_path_opt: None,
+    impl RecordingSink {
+        pub fn with_transient_failures(count: usize) -> Self {
+            Self {
+                batches: Mutex::new(Vec::new()),
+                transient_failures_left: AtomicUsize::new(count),
             }
         }
 
-        pub fn build(mut self) -> SourceRuntime {
-            let metastore = self
-                .metastore_opt
-                .take()
-                .unwrap_or_else(|| self.setup_mock_metastore(None));
+        pub fn batches(&self) -> Vec<(String, Vec<Bytes>)> {
+            self.batches.lock().unwrap().clone()
+        }
+    }
 
-            let queues_dir_path = self
-                .queues_dir_path_opt
-                .unwrap_or_else(|| PathBuf::from("./queues"));
-
-            SourceRuntime {
-                pipeline_id: IndexingPipelineId {
-                    node_id: NodeId::from_str("test-node"),
-                    index_uid: self.index_uid,
-                    source_id: self.source_config.source_id.clone(),
-                    pipeline_uid: PipelineUid::for_test(0u128),
-                },
-                metastore,
-                ingester_pool: IngesterPool::default(),
-                queues_dir_path,
-                source_config: self.source_config,
-                storage_resolver: StorageResolver::for_test(),
-                event_broker: EventBroker::default(),
-                indexing_setting: IndexingSettings::default(),
-                publish_token: SharedPublishToken::default(),
+    #[async_trait]
+    impl IngestSink for RecordingSink {
+        async fn ingest(&self, index_id: &str, docs: Vec<Bytes>) -> Result<(), IngestV2Error> {
+            let remaining = self.transient_failures_left.load(Ordering::SeqCst);
+            if remaining > 0
+                && self
+                    .transient_failures_left
+                    .compare_exchange(remaining, remaining - 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            {
+                return Err(IngestV2Error::Unavailable("try again".to_string()));
             }
-        }
-
-        #[cfg(all(
-            test,
-            any(feature = "kafka-broker-tests", feature = "sqs-localstack-tests")
-        ))]
-        pub fn with_metastore(mut self, metastore: MetastoreServiceClient) -> Self {
-            self.metastore_opt = Some(metastore);
-            self
-        }
-
-        pub fn with_mock_metastore(
-            mut self,
-            source_checkpoint_delta_opt: Option<SourceCheckpointDelta>,
-        ) -> Self {
-            self.metastore_opt = Some(self.setup_mock_metastore(source_checkpoint_delta_opt));
-            self
-        }
-
-        pub fn with_queues_dir(mut self, queues_dir_path: impl Into<PathBuf>) -> Self {
-            self.queues_dir_path_opt = Some(queues_dir_path.into());
-            self
-        }
-
-        fn setup_mock_metastore(
-            &self,
-            source_checkpoint_delta_opt: Option<SourceCheckpointDelta>,
-        ) -> MetastoreServiceClient {
-            let index_uid = self.index_uid.clone();
-            let source_config = self.source_config.clone();
-
-            let mut mock_metastore = MockMetastoreService::new();
-            mock_metastore
-                .expect_index_metadata()
-                .returning(move |_request| {
-                    let index_uri = format!("ram:///indexes/{}", index_uid.index_id);
-                    let mut index_metadata =
-                        IndexMetadata::for_test(&index_uid.index_id, &index_uri);
-                    index_metadata.index_uid = index_uid.clone();
-
-                    let source_id = source_config.source_id.clone();
-                    index_metadata.add_source(source_config.clone()).unwrap();
-
-                    if let Some(source_delta) = source_checkpoint_delta_opt.clone() {
-                        let delta = IndexCheckpointDelta {
-                            source_id,
-                            source_delta,
-                        };
-                        index_metadata.checkpoint.try_apply_delta(delta).unwrap();
-                    }
-                    let response =
-                        IndexMetadataResponse::try_from_index_metadata(&index_metadata).unwrap();
-                    Ok(response)
-                });
-            MetastoreServiceClient::from_mock(mock_metastore)
+            self.batches
+                .lock()
+                .unwrap()
+                .push((index_id.to_string(), docs));
+            Ok(())
         }
     }
 
     #[tokio::test]
-    async fn test_check_source_connectivity() -> anyhow::Result<()> {
-        {
-            let source_config = SourceConfig {
-                source_id: "void".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
-                enabled: true,
-                source_params: SourceParams::void(),
-                transform_config: None,
-                input_format: SourceInputFormat::Json,
-            };
-            check_source_connectivity(&StorageResolver::for_test(), &source_config).await?;
-        }
-        {
-            let source_config = SourceConfig {
-                source_id: "vec".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
-                enabled: true,
-                source_params: SourceParams::Vec(VecSourceParams::default()),
-                transform_config: None,
-                input_format: SourceInputFormat::Json,
-            };
-            check_source_connectivity(&StorageResolver::for_test(), &source_config).await?;
-        }
-        {
-            let source_config = SourceConfig {
-                source_id: "file".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
-                enabled: true,
-                source_params: SourceParams::file_from_str("file-does-not-exist.json").unwrap(),
-                transform_config: None,
-                input_format: SourceInputFormat::Json,
-            };
-            assert!(
-                check_source_connectivity(&StorageResolver::for_test(), &source_config)
-                    .await
-                    .is_err()
-            );
-        }
-        {
-            let source_config = SourceConfig {
-                source_id: "file".to_string(),
-                num_pipelines: NonZeroUsize::MIN,
-                enabled: true,
-                source_params: SourceParams::file_from_str("data/test_corpus.json").unwrap(),
-                transform_config: None,
-                input_format: SourceInputFormat::Json,
-            };
-            assert!(
-                check_source_connectivity(&StorageResolver::for_test(), &source_config)
-                    .await
-                    .is_ok()
-            );
-        }
-        Ok(())
-    }
-}
-
-#[cfg(all(
-    test,
-    any(
-        feature = "sqs-localstack-tests",
-        feature = "kafka-broker-tests",
-        feature = "pulsar-broker-tests"
-    )
-))]
-mod test_setup_helper {
-
-    use quickwit_config::IndexConfig;
-    use quickwit_metastore::checkpoint::{IndexCheckpointDelta, PartitionId};
-    use quickwit_metastore::{CreateIndexRequestExt, SplitMetadata, StageSplitsRequestExt};
-    use quickwit_proto::metastore::{CreateIndexRequest, PublishSplitsRequest, StageSplitsRequest};
-    use quickwit_proto::types::{Position, SplitId};
-
-    use super::*;
-
-    pub async fn setup_index(
-        metastore: MetastoreServiceClient,
-        index_id: &str,
-        source_config: &SourceConfig,
-        partition_deltas: &[(PartitionId, Position, Position)],
-    ) -> IndexUid {
-        let index_uri = format!("ram:///indexes/{index_id}");
-        let index_config = IndexConfig::for_test(index_id, &index_uri);
-        let create_index_request = CreateIndexRequest::try_from_index_and_source_configs(
-            &index_config,
-            std::slice::from_ref(source_config),
-        )
-        .unwrap();
-        let index_uid: IndexUid = metastore
-            .create_index(create_index_request)
-            .await
-            .unwrap()
-            .index_uid()
-            .clone();
-
-        if partition_deltas.is_empty() {
-            return index_uid;
-        }
-        let split_id = SplitId::new();
-        let split_metadata = SplitMetadata::for_test(split_id.clone());
-        let stage_splits_request =
-            StageSplitsRequest::try_from_split_metadata(index_uid.clone(), &split_metadata)
-                .unwrap();
-        metastore.stage_splits(stage_splits_request).await.unwrap();
-
-        let mut source_delta = SourceCheckpointDelta::default();
-        for (partition_id, from_position, to_position) in partition_deltas.iter().cloned() {
-            source_delta
-                .record_partition_delta(partition_id, from_position, to_position)
-                .unwrap();
-        }
-        let checkpoint_delta = IndexCheckpointDelta {
-            source_id: source_config.source_id.to_string(),
-            source_delta,
-        };
-        let checkpoint_delta_json = serde_json::to_string(&checkpoint_delta).unwrap();
-        let publish_splits_request = PublishSplitsRequest {
-            index_uid: Some(index_uid.clone()),
-            index_checkpoint_delta_json_opt: Some(checkpoint_delta_json),
-            staged_split_ids: vec![split_id.to_string()],
-            replaced_split_ids: Vec::new(),
-            publish_token_opt: None,
-        };
-        metastore
-            .publish_splits(publish_splits_request)
+    async fn test_ingest_sink_retries_transient_errors() {
+        let sink = RecordingSink::with_transient_failures(2);
+        let (_tx, mut rx) = watch::channel(false);
+        sink.ingest_with_retry("logs", vec![Bytes::from_static(br#"{"a":1}"#)], &mut rx)
             .await
             .unwrap();
-        index_uid
+        let batches = sink.batches();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0, "logs");
     }
 }

@@ -14,6 +14,7 @@
 
 mod index_resource;
 mod rest_handler;
+mod source_resource;
 mod split_resource;
 
 pub use self::index_resource::get_index_metadata_handler;

@@ -2,50 +2,15 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use quickwit_actors::{ActorHandle, Mailbox, Universe};
 use quickwit_config::{SourceInputFormat, TransformConfig};
 use quickwit_doc_mapper::DocMapper;
-use quickwit_indexing::actors::DocProcessor;
-use quickwit_indexing::models::RawDocBatch;
-use quickwit_metastore::checkpoint::SourceCheckpointDelta;
+use quickwit_indexing::actors::DocumentConverter;
 
 const JSON_NORMAL: &str = include_str!("data/bench_data.json");
 const JSON_LIGHT_TRANSFORM: &str = include_str!("data/bench_data_light_transform.json");
 const JSON_HEAVY_TRANSFORM: &str = include_str!("data/bench_data_heavy_transform.json");
 
-macro_rules! bench_func {
-    ($input:expr, $group:expr, $name:expr, $param:expr, $func:expr) => {{
-        let lines: Vec<&str> = $input.lines().map(|line| line.trim()).collect();
-        $group.throughput(criterion::Throughput::Bytes($input.len() as u64));
-
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let checkpoint_delta = SourceCheckpointDelta::from_range(0..$input.len() as u64);
-
-        $group.bench_function(BenchmarkId::new($name, $param), |b| {
-            b.to_async(&runtime).iter_batched(
-                || {
-                    lines
-                        .iter()
-                        .map(|line| Bytes::from(*line))
-                        .collect::<Vec<_>>()
-                },
-                |docs| async {
-                    let (mailbox, handle, universe) = $func;
-                    mailbox
-                        .send_message(RawDocBatch::new(docs, checkpoint_delta.clone(), false))
-                        .await
-                        .unwrap();
-
-                    universe.send_exit_with_success(&mailbox).await.unwrap();
-                    handle.join().await;
-                },
-                criterion::BatchSize::SmallInput,
-            )
-        });
-    }};
-}
-
-pub fn default_doc_mapper_for_bench() -> DocMapper {
+fn default_doc_mapper_for_bench() -> DocMapper {
     const JSON_CONFIG_VALUE: &str = r#"
         {
             "store_source": true,
@@ -60,139 +25,68 @@ pub fn default_doc_mapper_for_bench() -> DocMapper {
                     "fast": true,
                     "input_formats": ["iso8601"]
                 },
-                {
-                    "name": "first_name",
-                    "type": "text",
-                    "stored": true
-                },
-                {
-                    "name": "last_name",
-                    "type": "text",
-                    "stored": true
-                },
-                {
-                    "name": "id",
-                    "type": "u64",
-                    "stored": true
-                },
-                {
-                    "name": "email",
-                    "type": "text",
-                    "stored": true
-                },
-                {
-                    "name": "job",
-                    "type": "text",
-                    "stored": true
-                }
+                { "name": "first_name", "type": "text", "stored": true },
+                { "name": "last_name", "type": "text", "stored": true },
+                { "name": "id", "type": "u64", "stored": true },
+                { "name": "email", "type": "text", "stored": true },
+                { "name": "job", "type": "text", "stored": true }
             ]
         }"#;
     serde_json::from_str::<DocMapper>(JSON_CONFIG_VALUE).unwrap()
 }
 
-fn doc_processor_no_transform() -> (Mailbox<DocProcessor>, ActorHandle<DocProcessor>, Universe) {
-    create_doc_processor(None)
-}
-
-fn doc_processor_light_transform() -> (Mailbox<DocProcessor>, ActorHandle<DocProcessor>, Universe) {
-    let vrl_script = r#"
-        .last_name = "Doe"
-        .job = upcase(string!(.job))
-    "#;
-    let transform_config = TransformConfig::for_test(vrl_script);
-    create_doc_processor(Some(transform_config))
-}
-
-fn doc_processor_heavy_transform() -> (Mailbox<DocProcessor>, ActorHandle<DocProcessor>, Universe) {
-    let vrl_script = r#"
-        . = parse_json!(.body)
-        .last_name = "Doe"
-        .job = upcase(string!(.job))
-        .timestamp = to_string(to_timestamp(now()))
-    "#;
-    let transform_config = TransformConfig::for_test(vrl_script);
-    create_doc_processor(Some(transform_config))
-}
-
-fn create_doc_processor(
-    transform_config_opt: Option<TransformConfig>,
-) -> (Mailbox<DocProcessor>, ActorHandle<DocProcessor>, Universe) {
-    let index_id = "my-index".to_string();
-    let source_id = "my-source".to_string();
+fn bench_converter(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    name: &str,
+    input: &str,
+    transform: Option<TransformConfig>,
+) {
+    let lines: Vec<Bytes> = input
+        .lines()
+        .map(|line| Bytes::copy_from_slice(line.trim().as_bytes()))
+        .collect();
+    group.throughput(criterion::Throughput::Bytes(input.len() as u64));
     let doc_mapper = Arc::new(default_doc_mapper_for_bench());
-    let universe = Universe::new();
-    let (indexer_mailbox, _) = universe.create_test_mailbox();
-    let doc_processor = DocProcessor::try_new(
-        index_id,
-        source_id,
-        doc_mapper,
-        indexer_mailbox,
-        transform_config_opt,
-        SourceInputFormat::Json,
-    )
-    .unwrap();
-    let (mailbox, handle) = universe.spawn_builder().spawn(doc_processor);
-    (mailbox, handle, universe)
+    group.bench_function(BenchmarkId::new(name, "converter"), |b| {
+        let mut converter = DocumentConverter::try_new(
+            "bench-index".to_string(),
+            "bench-source".to_string(),
+            doc_mapper.clone(),
+            transform.clone(),
+            SourceInputFormat::Json,
+        )
+        .unwrap();
+        b.iter(|| {
+            let mut processed = Vec::with_capacity(lines.len());
+            for doc in &lines {
+                converter.process_raw_doc(doc.clone(), &mut processed);
+            }
+            processed
+        })
+    });
 }
 
-fn bench_simple_json(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Simple Json");
-    bench_func!(
-        JSON_NORMAL,
-        group,
-        "No VRL",
-        "Simple JSON",
-        doc_processor_no_transform()
-    );
-    bench_func!(
-        JSON_NORMAL,
-        group,
-        "Light VRL",
-        "Simple JSON",
-        doc_processor_light_transform()
-    );
-}
-
-fn bench_light_json(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Simple/Light Json");
-    bench_func!(
-        JSON_NORMAL,
-        group,
-        "No VRL",
-        "Simple JSON",
-        doc_processor_no_transform()
-    );
-    bench_func!(
+fn bench_doc_process(c: &mut Criterion) {
+    let mut group = c.benchmark_group("doc_process");
+    bench_converter(&mut group, "no_transform", JSON_NORMAL, None);
+    bench_converter(
+        &mut group,
+        "light_transform",
         JSON_LIGHT_TRANSFORM,
-        group,
-        "Light VRL",
-        "Light JSON",
-        doc_processor_light_transform()
+        Some(TransformConfig::for_test(
+            ".first_name = upcase!(string!(.first_name))",
+        )),
     );
-}
-
-fn bench_heavy_json(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Simple/Light Json");
-    bench_func!(
-        JSON_NORMAL,
-        group,
-        "No VRL",
-        "Simple JSON",
-        doc_processor_no_transform()
-    );
-    bench_func!(
+    bench_converter(
+        &mut group,
+        "heavy_transform",
         JSON_HEAVY_TRANSFORM,
-        group,
-        "Heavy VRL",
-        "Heavy JSON",
-        doc_processor_heavy_transform()
+        Some(TransformConfig::for_test(
+            ".email = downcase!(string!(.email))",
+        )),
     );
+    group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_simple_json,
-    bench_light_json,
-    bench_heavy_json
-);
+criterion_group!(benches, bench_doc_process);
 criterion_main!(benches);

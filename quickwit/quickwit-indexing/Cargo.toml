@@ -15,7 +15,6 @@ anyhow = { workspace = true }
 arc-swap = { workspace = true }
 async-compression = { workspace = true }
 async-trait = { workspace = true }
-aws-sdk-kinesis = { workspace = true, optional = true }
 aws-sdk-sqs = { workspace = true, optional = true }
 bytes = { workspace = true }
 bytesize = { workspace = true }
@@ -31,7 +30,6 @@ libz-sys = { workspace = true, optional = true }
 oneshot = { workspace = true }
 openssl = { workspace = true, optional = true }
 percent-encoding = { workspace = true }
-pulsar = { workspace = true, optional = true }
 quickwit-query = { workspace = true }
 regex = { workspace = true }
 rdkafka = { workspace = true, optional = true }
@@ -46,7 +44,6 @@ tracing = { workspace = true }
 ulid = { workspace = true }
 utoipa = { workspace = true }
 vrl = { workspace = true, optional = true }
-warp = { workspace = true, optional = true }
 
 
 quickwit-actors = { workspace = true }
@@ -69,24 +66,11 @@ gcp-pubsub = [
   "dep:google-cloud-googleapis",
   "dep:google-cloud-pubsub",
 ]
-gcp-pubsub-emulator-tests = []
 kafka = ["rdkafka"]
-kafka-broker-tests = []
-kinesis = [
-  "aws-sdk-kinesis",
-  "quickwit-aws/kinesis",
-]
-kinesis-localstack-tests = []
-pulsar = ["dep:pulsar"]
-pulsar-broker-tests = []
-queue-sources = []
 sqs = [
   "aws-sdk-sqs",
-  "queue-sources",
   "quickwit-aws/sqs",
 ]
-sqs-test-helpers = ["warp"]
-sqs-localstack-tests = ["sqs-test-helpers"]
 vendored-kafka = [
   "kafka",
   "libz-sys/static",

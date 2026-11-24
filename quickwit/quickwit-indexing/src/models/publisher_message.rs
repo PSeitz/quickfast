@@ -16,7 +16,6 @@ use std::fmt;
 
 use itertools::Itertools;
 use quickwit_metastore::SplitMetadata;
-use quickwit_metastore::checkpoint::IndexCheckpointDelta;
 use quickwit_proto::types::{IndexUid, SplitId};
 use tracing::Span;
 
@@ -27,12 +26,9 @@ pub struct SplitsUpdate {
     pub index_uid: IndexUid,
     pub new_splits: Vec<SplitMetadata>,
     pub replaced_split_ids: Vec<SplitId>,
-    pub checkpoint_delta_opt: Option<IndexCheckpointDelta>,
     pub publish_lock: PublishLock,
     /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
     /// in the `MergePipeline` or `DeleteTaskPipeline`.
-    /// See planners docs to understand the usage.
-    /// If `None`, the split batch was built in the `IndexingPipeline`.
     pub merge_task: Option<MergeTask>,
     pub parent_span: Span,
 }
@@ -47,7 +43,6 @@ impl fmt::Debug for SplitsUpdate {
         f.debug_struct("SplitsUpdate")
             .field("index_id", &self.index_uid.index_id)
             .field("new_splits", &new_split_ids)
-            .field("checkpoint_delta", &self.checkpoint_delta_opt)
             .finish()
     }
 }

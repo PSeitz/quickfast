@@ -80,11 +80,11 @@ use quickwit_compaction::{
 use quickwit_config::service::QuickwitService;
 use quickwit_config::{NodeConfig, disable_ingest_v1};
 use quickwit_index_management::{IndexService as IndexManager, IndexServiceError};
-use quickwit_indexing::actors::{IndexingService, MergeSchedulerService};
+use quickwit_indexing::actors::IndexingService;
 use quickwit_indexing::{IndexingSplitCache, start_indexing_service};
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_ingest::{
-    GetMemoryCapacity, IngestRequest, IngestServiceClient, IngesterPool, start_ingest_api_service,
+    GetMemoryCapacity, IngestRequest, IngestServiceClient, start_ingest_api_service,
 };
 use quickwit_jaeger::JaegerService;
 use quickwit_janitor::{JanitorService, start_janitor_service};
@@ -131,9 +131,6 @@ const COMPACTION_SERVICE_DISCOVERY_TIMEOUT: Duration = if cfg!(test) {
 };
 
 const DISABLE_DELETE_TASK_SERVICE_ENV_KEY: &str = "QW_DISABLE_DELETE_TASK_SERVICE";
-
-pub(crate) static INDEXING_GRPC_SERVER_METRICS_LAYER: LazyLock<GrpcMetricsLayer> =
-    LazyLock::new(|| GrpcMetricsLayer::new("indexing", "server"));
 
 static COMPACTION_GRPC_CLIENT_METRICS_LAYER: LazyLock<GrpcMetricsLayer> =
     LazyLock::new(|| GrpcMetricsLayer::new("compaction", "client"));
@@ -283,16 +280,6 @@ async fn get_compaction_planner_client_if_needed(
     Ok((Some(planner_client), None))
 }
 
-fn spawn_merge_scheduler_service(
-    universe: &Universe,
-    node_config: &NodeConfig,
-) -> Mailbox<MergeSchedulerService> {
-    let (mailbox, _) = universe.spawn_builder().spawn(MergeSchedulerService::new(
-        node_config.indexer_config.merge_concurrency.get(),
-    ));
-    mailbox
-}
-
 /// The split cache is used when a node both indexes and merges its own splits. Split compactors
 /// never do; indexers only do if split compaction is disabled. The third case is a node running
 /// both services, in which case the two services share it.
@@ -435,7 +422,7 @@ async fn shutdown_signal_handler(
 
 pub async fn serve_quickwit(
     node_config: NodeConfig,
-    runtimes_config: RuntimesConfig,
+    _runtimes_config: RuntimesConfig,
     metastore_resolver: MetastoreResolver,
     storage_resolver: StorageResolver,
     tcp_listener_resolver: impl TcpListenerResolver,
@@ -451,7 +438,6 @@ pub async fn serve_quickwit(
     let event_broker = EventBroker::default();
     let _ingesthree_metadata_subscriptions =
         ingesthree::publish_metadata_changes(&cluster, &event_broker);
-    let ingester_pool = IngesterPool::default();
     let universe = Universe::new();
     let grpc_config = node_config.grpc_config.clone();
 
@@ -491,27 +477,22 @@ pub async fn serve_quickwit(
 
     let indexing_split_cache = indexing_split_cache_for_config(&node_config).await?;
 
-    let indexing_service_opt = if node_config.is_service_enabled(QuickwitService::Indexer) {
-        // if standalone compactors is enabled, indexing pipelines don't perform any merges.
-        // if standalone compactors is disabled, indexing pipelines perform all merges as before.
-        let merge_scheduler_mailbox_opt = if !node_config.enable_standalone_compactors {
-            Some(spawn_merge_scheduler_service(&universe, &node_config))
-        } else {
-            None
-        };
+    let router = quickwit_ingest::ingesthree::IngesthreeRouter::new(
+        cluster.clone(),
+        node_config.availability_zone.clone(),
+        node_config.grpc_config.max_message_size,
+    );
+    let ingest_router_service = IngestRouterClient::from(router);
 
+    let indexing_service_opt = if node_config.is_service_enabled(QuickwitService::Indexer) {
         let split_cache = indexing_split_cache.clone();
         let indexing_service = start_indexing_service(
             &universe,
             &node_config,
-            runtimes_config.num_threads_blocking,
-            cluster.clone(),
             primary_metastore_client.clone(),
-            ingester_pool,
             storage_resolver.clone(),
-            event_broker.clone(),
-            merge_scheduler_mailbox_opt,
             split_cache,
+            ingest_router_service.clone(),
         )
         .await
         .context("failed to start indexing service")?;
@@ -539,12 +520,6 @@ pub async fn serve_quickwit(
         ingesthree_queue_opt = Some(queue);
         cluster.set_self_ingesthree_enabled(true).await;
     }
-    let router = quickwit_ingest::ingesthree::IngesthreeRouter::new(
-        cluster.clone(),
-        node_config.availability_zone.clone(),
-        node_config.grpc_config.max_message_size,
-    );
-    let ingest_router_service = IngestRouterClient::from(router);
 
     // Any node can serve index management requests (create/update/delete index, etc.),
     // so we always instantiate an index manager.

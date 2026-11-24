@@ -61,7 +61,8 @@ async fn test_standalone_server() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(counters.num_running_pipelines, 0);
+        assert!(counters.num_running_s3_indexers > 0);
+        assert!(counters.source_forwarder_running);
     }
 
     {

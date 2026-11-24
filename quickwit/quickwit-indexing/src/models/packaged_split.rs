@@ -18,7 +18,6 @@ use std::path::PathBuf;
 
 use itertools::Itertools;
 use quickwit_common::temp_dir::TempDirectory;
-use quickwit_metastore::checkpoint::IndexCheckpointDelta;
 use quickwit_proto::types::{IndexUid, SplitId};
 use tracing::Span;
 
@@ -58,12 +57,9 @@ impl fmt::Debug for PackagedSplit {
 #[derive(Debug)]
 pub struct PackagedSplitBatch {
     pub splits: Vec<PackagedSplit>,
-    pub checkpoint_delta_opt: Option<IndexCheckpointDelta>,
     pub publish_lock: PublishLock,
     /// A [`MergeTask`] tracked by either the `MergePlanner` or the `DeleteTaskPlanner`
     /// in the `MergePipeline` or `DeleteTaskPipeline`.
-    /// See planners docs to understand the usage.
-    /// If `None`, the split batch was built in the `IndexingPipeline`.
     pub merge_task_opt: Option<MergeTask>,
     pub batch_parent_span: Span,
 }
@@ -75,7 +71,6 @@ impl PackagedSplitBatch {
     /// - all splits must belong to the same `index_uid`.
     pub fn new(
         splits: Vec<PackagedSplit>,
-        checkpoint_delta_opt: Option<IndexCheckpointDelta>,
         publish_lock: PublishLock,
         merge_task_opt: Option<MergeTask>,
         batch_parent_span: Span,
@@ -90,7 +85,6 @@ impl PackagedSplitBatch {
         );
         Self {
             splits,
-            checkpoint_delta_opt,
             publish_lock,
             merge_task_opt,
             batch_parent_span,

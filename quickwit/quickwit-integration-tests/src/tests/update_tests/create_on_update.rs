@@ -44,7 +44,7 @@ async fn test_update_missing_no_create() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     assert!(
@@ -108,7 +108,7 @@ async fn test_update_missing_create() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     assert!(
@@ -169,7 +169,7 @@ async fn test_update_create_existing_doesnt_clear() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     // Create an index

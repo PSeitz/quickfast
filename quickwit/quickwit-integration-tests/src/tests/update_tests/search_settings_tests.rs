@@ -44,7 +44,7 @@ async fn test_update_search_settings_on_multi_nodes_cluster() {
             .indexing()
             .await
             .unwrap();
-        assert_eq!(indexing_service_counters.num_running_pipelines, 0);
+        assert!(indexing_service_counters.num_running_s3_indexers > 0);
     }
 
     // Create an index

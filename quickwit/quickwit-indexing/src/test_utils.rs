@@ -12,51 +12,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use quickwit_actors::{Mailbox, Universe};
-use quickwit_cluster::{ChitchatTransport, create_cluster_for_test};
+use quickwit_common::Progress;
+use quickwit_common::io::IoControls;
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::rand::append_random_suffix;
+use quickwit_common::temp_dir::TempDirectory;
 use quickwit_common::uri::Uri;
 use quickwit_config::{
-    ConfigFormat, INGEST_API_SOURCE_ID, IndexConfig, IndexerConfig, IngestApiConfig,
-    MetastoreConfigs, SourceConfig, SourceInputFormat, SourceParams, VecSourceParams,
-    build_doc_mapper,
+    ConfigFormat, INGEST_V2_SOURCE_ID, IndexConfig, MetastoreConfigs, SourceConfig,
+    SourceInputFormat, build_doc_mapper,
 };
 use quickwit_doc_mapper::DocMapper;
-use quickwit_ingest::{IngesterPool, QUEUES_DIR_NAME, init_ingest_api};
 use quickwit_metastore::{
     CreateIndexRequestExt, MetastoreResolver, Split, SplitMetadata, SplitState,
+    StageSplitsRequestExt,
 };
-use quickwit_proto::metastore::{CreateIndexRequest, MetastoreService, MetastoreServiceClient};
+use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
+use quickwit_proto::metastore::{
+    CreateIndexRequest, LastDeleteOpstampRequest, MetastoreService, MetastoreServiceClient,
+    PublishSplitsRequest, StageSplitsRequest,
+};
 use quickwit_proto::types::{IndexUid, NodeId, PipelineUid, SourceId};
 use quickwit_storage::{Storage, StorageResolver};
 use serde_json::Value as JsonValue;
 
-use crate::actors::IndexingService;
-use crate::models::{DetachIndexingPipeline, IndexingStatistics, SpawnPipeline};
-use crate::split_store::IndexingSplitCache;
+use crate::actors::{
+    DocumentConverter, MergePipeline, MergePipelineParams, MergePlanner, MergeSchedulerService,
+    create_packaged_split, prepare_split_for_upload,
+};
+use crate::merge_policy::{MergePolicy, merge_policy_from_settings};
+use crate::models::{IndexedSplitBuilder, IndexingStatistics, NewSplits};
+use crate::split_store::{IndexingSplitCache, IndexingSplitStore};
 
-/// Creates a Test environment.
-///
-/// It makes it easy to create a test index, perfect for unit testing.
-/// The test index content is entirely in RAM and isolated,
-/// but the construction of the index involves temporary file directory.
+/// Creates a test environment backed by RAM storage and a local scratch directory.
 pub struct TestSandbox {
     node_id: NodeId,
     index_uid: IndexUid,
     source_id: SourceId,
-    indexing_service: Mailbox<IndexingService>,
+    index_config: IndexConfig,
     doc_mapper: Arc<DocMapper>,
+    merge_policy: Arc<dyn MergePolicy>,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
     storage: Arc<dyn Storage>,
-    add_docs_id: AtomicUsize,
+    split_store: IndexingSplitStore,
+    merge_planner_mailbox: Mailbox<MergePlanner>,
     universe: Universe,
     _temp_dir: tempfile::TempDir,
 }
@@ -76,10 +82,6 @@ impl TestSandbox {
         search_fields: &[&str],
     ) -> anyhow::Result<TestSandbox> {
         let node_id = NodeId::from_str(&append_random_suffix("test-node"));
-        let transport = ChitchatTransport::default();
-        let cluster = create_cluster_for_test(Vec::new(), &["indexer"], &transport, true)
-            .await
-            .unwrap();
         let index_uri = index_uri(index_id);
         let mut index_config = IndexConfig::for_test(index_id, index_uri.as_str());
         index_config.doc_mapping = ConfigFormat::Yaml.parse(doc_mapping_yaml.as_bytes())?;
@@ -89,7 +91,7 @@ impl TestSandbox {
             .iter()
             .map(|search_field| search_field.to_string())
             .collect();
-        let source_config = SourceConfig::ingest_api_default();
+        let source_config = SourceConfig::ingest_v2();
         let storage_resolver = StorageResolver::for_test();
         let metastore_resolver =
             MetastoreResolver::configured(storage_resolver.clone(), &MetastoreConfigs::default());
@@ -107,140 +109,208 @@ impl TestSandbox {
             .clone();
         let doc_mapper =
             build_doc_mapper(&index_config.doc_mapping, &index_config.search_settings)?;
+        let merge_policy = merge_policy_from_settings(&index_config.indexing_settings);
         let temp_dir = tempfile::tempdir()?;
-        let indexer_config = IndexerConfig::for_test()?;
-        let num_blocking_threads = 1;
         let storage = storage_resolver.resolve(&index_uri).await?;
+        let split_store =
+            IndexingSplitStore::new(storage.clone(), Arc::new(IndexingSplitCache::no_caching()));
         let universe = Universe::with_accelerated_time();
-        let merge_scheduler_mailbox = universe.get_or_spawn_one();
-        let queues_dir_path = temp_dir.path().join(QUEUES_DIR_NAME);
-        let ingest_api_service =
-            init_ingest_api(&universe, &queues_dir_path, &IngestApiConfig::default()).await?;
-        let indexing_service_actor = IndexingService::new(
-            node_id.clone(),
-            temp_dir.path().to_path_buf(),
-            indexer_config,
-            num_blocking_threads,
-            cluster,
-            metastore.clone(),
-            Some(ingest_api_service),
-            Some(merge_scheduler_mailbox),
-            IngesterPool::default(),
-            storage_resolver.clone(),
-            EventBroker::default(),
-            Arc::new(IndexingSplitCache::no_caching()),
-            None,
-        )
-        .await?;
-        let (indexing_service, _indexing_service_handle) =
-            universe.spawn_builder().spawn(indexing_service_actor);
+        let merge_scheduler_mailbox: Mailbox<MergeSchedulerService> = universe.get_or_spawn_one();
+        let merge_scratch_dir = TempDirectory::for_test();
+        let merge_pipeline = MergePipeline::new(
+            MergePipelineParams {
+                pipeline_id: MergePipelineId {
+                    node_id: node_id.clone(),
+                    index_uid: index_uid.clone(),
+                    source_id: INGEST_V2_SOURCE_ID.to_string(),
+                },
+                doc_mapper: doc_mapper.clone(),
+                indexing_directory: merge_scratch_dir,
+                metastore: metastore.clone(),
+                merge_scheduler_service: merge_scheduler_mailbox,
+                split_store: split_store.clone(),
+                merge_policy: merge_policy.clone(),
+                retention_policy: index_config.retention_policy_opt.clone(),
+                max_concurrent_split_uploads: 4,
+                merge_io_throughput_limiter_opt: None,
+                event_broker: EventBroker::default(),
+            },
+            Some(Vec::new()),
+            universe.spawn_ctx(),
+        );
+        let merge_planner_mailbox = merge_pipeline.merge_planner_mailbox().clone();
+        universe.spawn_builder().spawn(merge_pipeline);
         Ok(TestSandbox {
             node_id,
             index_uid,
-            source_id: INGEST_API_SOURCE_ID.to_string(),
-            indexing_service,
+            source_id: INGEST_V2_SOURCE_ID.to_string(),
+            index_config,
             doc_mapper,
+            merge_policy,
             metastore,
             storage_resolver,
             storage,
-            add_docs_id: AtomicUsize::default(),
+            split_store,
+            merge_planner_mailbox,
             universe,
             _temp_dir: temp_dir,
         })
     }
 
-    /// Adds documents and waits for them to be indexed (creating a separate split).
-    ///
-    /// The documents are expected to be `JsonValue`.
-    /// They can be created using the `serde_json::json!` macro.
+    /// Indexes, uploads, and publishes `json_docs` directly as new split(s).
     pub async fn add_documents<I>(&self, json_docs: I) -> anyhow::Result<IndexingStatistics>
     where
         I: IntoIterator<Item = JsonValue> + 'static,
         I::IntoIter: Send,
     {
-        let docs: Vec<Bytes> = json_docs
-            .into_iter()
-            .map(|json_doc| Bytes::from(json_doc.to_string()))
-            .collect();
-        let add_docs_id = self.add_docs_id.fetch_add(1, Ordering::SeqCst);
-        let source_config = SourceConfig {
-            source_id: INGEST_API_SOURCE_ID.to_string(),
-            num_pipelines: NonZeroUsize::MIN,
-            enabled: true,
-            source_params: SourceParams::Vec(VecSourceParams {
-                docs,
-                batch_num_docs: 10,
-                partition: format!("add-docs-{add_docs_id}"),
-            }),
-            transform_config: None,
-            input_format: SourceInputFormat::Json,
+        let mut converter = DocumentConverter::try_new(
+            self.index_uid.index_id.clone(),
+            self.source_id.clone(),
+            self.doc_mapper.clone(),
+            None,
+            SourceInputFormat::Json,
+        )?;
+        let mut processed_docs = Vec::new();
+        for json_doc in json_docs {
+            converter.process_raw_doc(Bytes::from(json_doc.to_string()), &mut processed_docs);
+        }
+
+        let delete_opstamp = self
+            .metastore
+            .last_delete_opstamp(LastDeleteOpstampRequest {
+                index_uid: Some(self.index_uid.clone()),
+            })
+            .await?
+            .last_delete_opstamp;
+
+        let pipeline_id = IndexingPipelineId {
+            node_id: self.node_id.clone(),
+            index_uid: self.index_uid.clone(),
+            source_id: self.source_id.clone(),
+            pipeline_uid: PipelineUid::for_test(0u128),
         };
-        let pipeline_id = self
-            .indexing_service
-            .ask_for_res(SpawnPipeline {
-                index_id: self.index_uid.index_id.to_string(),
-                source_config,
-                pipeline_uid: PipelineUid::for_test(0u128),
-            })
-            .await?;
-        let pipeline_handle = self
-            .indexing_service
-            .ask_for_res(DetachIndexingPipeline {
-                pipeline_id: pipeline_id.clone(),
-            })
-            .await?;
-        let (_pipeline_exit_status, pipeline_statistics) = pipeline_handle.join().await;
-        Ok(pipeline_statistics)
+        let mut builders: HashMap<u64, IndexedSplitBuilder> = HashMap::new();
+        for doc in processed_docs {
+            let partition_id = doc.partition;
+            let builder = match builders.entry(partition_id) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let scratch_dir = TempDirectory::for_test();
+                    entry.insert(IndexedSplitBuilder::from_doc_mapper(
+                        pipeline_id.clone(),
+                        partition_id,
+                        delete_opstamp,
+                        &self.doc_mapper,
+                        &self.index_config.indexing_settings,
+                        scratch_dir,
+                        IoControls::default(),
+                        None,
+                    )?)
+                }
+            };
+            builder.add_document(doc)?;
+        }
+
+        let tag_fields = self.doc_mapper.tag_named_fields()?;
+        let progress = Progress::default();
+        let mut new_splits = Vec::with_capacity(builders.len());
+        let mut total_size_splits = 0u64;
+        for (_, builder) in builders {
+            let indexed_split = builder.finalize()?;
+            let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+            let (split_metadata, split_payload) = prepare_split_for_upload(
+                &packaged_split,
+                &self.merge_policy,
+                self.index_config.retention_policy_opt.as_ref(),
+            )?;
+            total_size_splits += split_metadata.footer_offsets.end;
+            self.metastore
+                .stage_splits(StageSplitsRequest::try_from_split_metadata(
+                    self.index_uid.clone(),
+                    &split_metadata,
+                )?)
+                .await?;
+            self.split_store
+                .store_split(
+                    &split_metadata,
+                    packaged_split.split_scratch_directory.path(),
+                    Box::new(split_payload),
+                )
+                .await?;
+            new_splits.push(split_metadata);
+        }
+
+        if !new_splits.is_empty() {
+            let staged_split_ids = new_splits
+                .iter()
+                .map(|split| split.split_id.to_string())
+                .collect();
+            self.metastore
+                .publish_splits(PublishSplitsRequest {
+                    index_uid: Some(self.index_uid.clone()),
+                    staged_split_ids,
+                    replaced_split_ids: Vec::new(),
+                    index_checkpoint_delta_json_opt: None,
+                    publish_token_opt: None,
+                })
+                .await?;
+            let _ = self
+                .merge_planner_mailbox
+                .send_message(NewSplits {
+                    new_splits: new_splits.clone(),
+                })
+                .await;
+        }
+
+        let counters = converter.counters();
+        let num_splits = new_splits.len() as u64;
+        Ok(IndexingStatistics {
+            num_docs: counters.num_processed_docs(),
+            num_invalid_docs: counters.num_invalid_docs(),
+            num_local_splits: num_splits,
+            num_staged_splits: num_splits,
+            num_uploaded_splits: num_splits,
+            num_published_splits: num_splits,
+            total_bytes_processed: counters
+                .num_bytes_total
+                .load(std::sync::atomic::Ordering::Relaxed),
+            total_size_splits,
+            ..Default::default()
+        })
     }
 
-    /// Returns the metastore of the TestSandbox.
-    ///
-    /// The metastore is a file-backed metastore.
-    /// Its data can be found via the `storage` in
-    /// the `ram://quickwit-test-indexes` directory.
     pub fn metastore(&self) -> MetastoreServiceClient {
         self.metastore.clone()
     }
 
-    /// Returns the storage of the TestSandbox.
     pub fn storage(&self) -> Arc<dyn Storage> {
         self.storage.clone()
     }
 
-    /// Returns the storage resolver of the TestSandbox.
     pub fn storage_resolver(&self) -> StorageResolver {
         self.storage_resolver.clone()
     }
 
-    /// Returns the doc mapper of the TestSandbox.
     pub fn doc_mapper(&self) -> Arc<DocMapper> {
         self.doc_mapper.clone()
     }
 
-    /// Returns the node ID.
     pub fn node_id(&self) -> NodeId {
         self.node_id.clone()
     }
 
-    /// Returns the index UID.
     pub fn index_uid(&self) -> IndexUid {
         self.index_uid.clone()
     }
 
-    /// Returns the source ID.
     pub fn source_id(&self) -> SourceId {
         self.source_id.clone()
     }
 
-    /// Returns the underlying universe.
     pub fn universe(&self) -> &Universe {
         &self.universe
     }
 
-    /// Gracefully quits all registered actors in the underlying universe and asserts that none of
-    /// them panicked.
-    ///
-    /// This is useful for testing purposes to detect failed asserts in actors
     #[cfg(any(test, feature = "testsuite"))]
     pub async fn assert_quit(self) {
         self.universe.assert_quit().await
@@ -315,10 +385,12 @@ mod tests {
         "#;
         let test_sandbox =
             TestSandbox::create("test_index", doc_mapping_yaml, "{}", &["body"]).await?;
-        let statistics = test_sandbox.add_documents(vec![
-            serde_json::json!({"title": "Hurricane Fay", "body": "...", "url": "http://hurricane-fay"}),
-            serde_json::json!({"title": "Ganimede", "body": "...", "url": "http://ganimede"}),
-        ]).await?;
+        let statistics = test_sandbox
+            .add_documents(vec![
+                serde_json::json!({"title": "Hurricane Fay", "body": "...", "url": "http://hurricane-fay"}),
+                serde_json::json!({"title": "Ganimede", "body": "...", "url": "http://ganimede"}),
+            ])
+            .await?;
         assert_eq!(statistics.num_uploaded_splits, 1);
         let metastore = test_sandbox.metastore();
         {
@@ -330,9 +402,9 @@ mod tests {
                 .collect_splits()
                 .await?;
             assert_eq!(splits.len(), 1);
-            test_sandbox.add_documents(vec![
-            serde_json::json!({"title": "Byzantine-Ottoman wars", "body": "...", "url": "http://biz-ottoman"}),
-        ]).await?;
+            test_sandbox
+                .add_documents(vec![serde_json::json!({"title": "Byzantine-Ottoman wars", "body": "...", "url": "http://biz-ottoman"})])
+                .await?;
         }
         {
             let splits = metastore

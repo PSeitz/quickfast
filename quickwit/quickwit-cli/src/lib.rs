@@ -58,9 +58,6 @@ pub mod split;
 pub mod stats;
 pub mod tool;
 
-/// Throughput calculation window size.
-const THROUGHPUT_WINDOW_SIZE: usize = 5;
-
 fn config_cli_arg() -> Arg {
     Arg::new("config")
         .long("config")

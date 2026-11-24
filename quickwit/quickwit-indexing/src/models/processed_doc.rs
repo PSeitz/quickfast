@@ -14,9 +14,6 @@
 
 use std::fmt;
 
-use quickwit_common::metrics::IN_FLIGHT_INDEXER_MAILBOX;
-use quickwit_metastore::checkpoint::SourceCheckpointDelta;
-use quickwit_metrics::GaugeGuard;
 use tantivy::{DateTime, TantivyDocument};
 
 pub struct ProcessedDoc {
@@ -32,42 +29,6 @@ impl fmt::Debug for ProcessedDoc {
             .field("timestamp_opt", &self.timestamp_opt)
             .field("partition", &self.partition)
             .field("num_bytes", &self.num_bytes)
-            .finish()
-    }
-}
-
-pub struct ProcessedDocBatch {
-    // Do not directly append documents to this vector; otherwise, in-flight metrics will be
-    // incorrect.
-    pub docs: Vec<ProcessedDoc>,
-    pub checkpoint_delta: SourceCheckpointDelta,
-    pub force_commit: bool,
-    _gauge_guard: GaugeGuard,
-}
-
-impl ProcessedDocBatch {
-    pub fn new(
-        docs: Vec<ProcessedDoc>,
-        checkpoint_delta: SourceCheckpointDelta,
-        force_commit: bool,
-    ) -> Self {
-        let delta = docs.iter().map(|doc| doc.num_bytes as i64).sum::<i64>();
-        let gauge_guard = GaugeGuard::new(&IN_FLIGHT_INDEXER_MAILBOX, delta as f64);
-        Self {
-            docs,
-            checkpoint_delta,
-            force_commit,
-            _gauge_guard: gauge_guard,
-        }
-    }
-}
-
-impl fmt::Debug for ProcessedDocBatch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProcessedDocBatch")
-            .field("num_docs", &self.docs.len())
-            .field("checkpoint_delta", &self.checkpoint_delta)
-            .field("force_commit", &self.force_commit)
             .finish()
     }
 }
