@@ -1,35 +1,11 @@
-[![CI](https://github.com/quickwit-oss/quickwit/actions/workflows/ci.yml/badge.svg)](https://github.com/quickwit-oss/quickwit/actions?query=workflow%3ACI+branch%3Amain)
-[![codecov](https://codecov.io/gh/quickwit-oss/quickwit/branch/main/graph/badge.svg?token=06SRGAV5SS)](https://codecov.io/gh/quickwit-oss/quickwit)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/quickwit-oss/quickwit/badge)](https://scorecard.dev/viewer/?uri=github.com/quickwit-oss/quickwit)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.0-4baaaa.svg)](CODE_OF_CONDUCT.md)
+[![CI](https://github.com/PSeitz/quickfast/actions/workflows/ci.yml/badge.svg)](https://github.com/PSeitz/quickfast/actions?query=workflow%3ACI+branch%3Amain)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
-[![Twitter Follow](https://img.shields.io/twitter/follow/Quickwit_Inc?color=%231DA1F2&logo=Twitter&style=plastic)](https://twitter.com/Quickwit_Inc)
-[![Discord](https://img.shields.io/discord/908281611840282624?logo=Discord&logoColor=%23FFFFFF&style=plastic)](https://discord.quickwit.io)
-<br/>
 
-<br/>
-<br/>
-<p align="center">
-  <img src="docs/assets/images/logo_horizontal.svg#gh-light-mode-only" alt="Quickwit Cloud-Native Search Engine" height="40">
-  <img src="docs/assets/images/quickwit-dark-theme-logo.png#gh-dark-mode-only" alt="Quickwit Cloud-Native Search Engine" height="40">
-</p>
+# Quickfast
 
-<h2 align="center">
-Open-source search engine for observability (logs, traces, and soon metrics!).
-</h2>
+**Quickfast** is a fork of [Quickwit](https://github.com/quickwit-oss/quickwit), an open-source search engine for observability (logs and traces).
 
-<h4 align="center">
-  <a href="https://quickwit.io/docs/get-started/quickstart">Quickstart</a> |
-  <a href="https://quickwit.io/docs/">Docs</a> |
-  <a href="https://quickwit.io/tutorials">Tutorials</a> |
-  <a href="https://discord.quickwit.io">Chat</a> |
-  <a href="https://quickwit.io/docs/get-started/installation">Download</a>
-</h4>
-<br/>
-
-<b>We just released Quickwit 0.8! Read the [blog post](https://quickwit.io/blog/quickwit-0.8) to learn about the latest powerful features!</b>
-
-### **Quickwit is the fastest search engine on cloud storage. It's the perfect fit for observability use cases**
+### **Quickfast is a fast search engine on cloud storage for observability use cases**
 
 - [Log management](https://quickwit.io/docs/log-management/overview)
 - [Distributed tracing](https://quickwit.io/docs/distributed-tracing/overview)

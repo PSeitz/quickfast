@@ -46,7 +46,7 @@ version = "0.9.3"
 edition = "2024"
 homepage = "https://quickwit.io/"
 documentation = "https://quickwit.io/docs/"
-repository = "https://github.com/quickwit-oss/quickwit"
+repository = "https://github.com/PSeitz/quickfast"
 authors = ["Quickwit, Inc. <hello@quickwit.io>"]
 license = "Apache-2.0"
 
