@@ -12,412 +12,8 @@ pub struct GetDebugInfoResponse {
     #[prost(bytes = "bytes", tag = "1")]
     pub debug_info_json: ::prost::bytes::Bytes,
 }
-/// BEGIN quickwit-codegen
-#[allow(unused_imports)]
-use std::str::FromStr;
-use tower::{Layer, Service, ServiceExt};
-use quickwit_common::tower::RpcName;
-impl RpcName for GetDebugInfoRequest {
-    fn rpc_name() -> &'static str {
-        "get_debug_info"
-    }
-}
-#[cfg_attr(any(test, feature = "testsuite"), mockall::automock)]
-#[async_trait::async_trait]
-pub trait DeveloperService: std::fmt::Debug + Send + Sync + 'static {
-    async fn get_debug_info(
-        &self,
-        request: GetDebugInfoRequest,
-    ) -> crate::developer::DeveloperResult<GetDebugInfoResponse>;
-}
-#[derive(Debug, Clone)]
-pub struct DeveloperServiceClient {
-    inner: InnerDeveloperServiceClient,
-}
-#[derive(Debug, Clone)]
-struct InnerDeveloperServiceClient(std::sync::Arc<dyn DeveloperService>);
-impl DeveloperServiceClient {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: DeveloperService,
-    {
-        #[cfg(any(test, feature = "testsuite"))]
-        assert!(
-            std::any::TypeId::of:: < T > () != std::any::TypeId::of:: <
-            MockDeveloperService > (),
-            "`MockDeveloperService` must be wrapped in a `MockDeveloperServiceWrapper`: use `DeveloperServiceClient::from_mock(mock)` to instantiate the client"
-        );
-        Self {
-            inner: InnerDeveloperServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-    pub fn as_grpc_service(
-        &self,
-        max_message_size: bytesize::ByteSize,
-    ) -> developer_service_grpc_server::DeveloperServiceGrpcServer<
-        DeveloperServiceGrpcServerAdapter,
-    > {
-        let adapter = DeveloperServiceGrpcServerAdapter::new(self.clone());
-        developer_service_grpc_server::DeveloperServiceGrpcServer::new(adapter)
-            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize)
-    }
-    pub fn from_channel(
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> Self {
-        let (_, connection_keys_watcher) = tokio::sync::watch::channel(
-            std::collections::HashSet::from_iter([addr]),
-        );
-        let mut client = developer_service_grpc_client::DeveloperServiceGrpcClient::new(
-                channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = DeveloperServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn from_balance_channel(
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> DeveloperServiceClient {
-        let connection_keys_watcher = balance_channel.connection_keys_watcher();
-        let mut client = developer_service_grpc_client::DeveloperServiceGrpcClient::new(
-                balance_channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = DeveloperServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn tower() -> DeveloperServiceTowerLayerStack {
-        DeveloperServiceTowerLayerStack::default()
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn from_mock(mock: MockDeveloperService) -> Self {
-        let mock_wrapper = mock_developer_service::MockDeveloperServiceWrapper {
-            inner: tokio::sync::Mutex::new(mock),
-        };
-        Self::new(mock_wrapper)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn mocked() -> Self {
-        Self::from_mock(MockDeveloperService::new())
-    }
-}
-#[async_trait::async_trait]
-impl DeveloperService for DeveloperServiceClient {
-    #[tracing::instrument(skip_all, name = "developer.get_debug_info")]
-    async fn get_debug_info(
-        &self,
-        request: GetDebugInfoRequest,
-    ) -> crate::developer::DeveloperResult<GetDebugInfoResponse> {
-        self.inner.0.get_debug_info(request).await
-    }
-}
-#[cfg(any(test, feature = "testsuite"))]
-pub mod mock_developer_service {
-    use super::*;
-    #[derive(Debug)]
-    pub struct MockDeveloperServiceWrapper {
-        pub(super) inner: tokio::sync::Mutex<MockDeveloperService>,
-    }
-    #[async_trait::async_trait]
-    impl DeveloperService for MockDeveloperServiceWrapper {
-        async fn get_debug_info(
-            &self,
-            request: super::GetDebugInfoRequest,
-        ) -> crate::developer::DeveloperResult<super::GetDebugInfoResponse> {
-            self.inner.lock().await.get_debug_info(request).await
-        }
-    }
-}
-pub type BoxFuture<T, E> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'static>,
->;
-impl tower::Service<GetDebugInfoRequest> for InnerDeveloperServiceClient {
-    type Response = GetDebugInfoResponse;
-    type Error = crate::developer::DeveloperError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: GetDebugInfoRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.get_debug_info(request).await };
-        Box::pin(fut)
-    }
-}
-/// A tower service stack is a set of tower services.
-#[derive(Debug)]
-struct DeveloperServiceTowerServiceStack {
-    #[allow(dead_code)]
-    inner: InnerDeveloperServiceClient,
-    get_debug_info_svc: quickwit_common::tower::BoxService<
-        GetDebugInfoRequest,
-        GetDebugInfoResponse,
-        crate::developer::DeveloperError,
-    >,
-}
-#[async_trait::async_trait]
-impl DeveloperService for DeveloperServiceTowerServiceStack {
-    async fn get_debug_info(
-        &self,
-        request: GetDebugInfoRequest,
-    ) -> crate::developer::DeveloperResult<GetDebugInfoResponse> {
-        self.get_debug_info_svc.clone().ready().await?.call(request).await
-    }
-}
-type GetDebugInfoLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        GetDebugInfoRequest,
-        GetDebugInfoResponse,
-        crate::developer::DeveloperError,
-    >,
-    GetDebugInfoRequest,
-    GetDebugInfoResponse,
-    crate::developer::DeveloperError,
->;
-#[derive(Debug, Default)]
-pub struct DeveloperServiceTowerLayerStack {
-    get_debug_info_layers: Vec<GetDebugInfoLayer>,
-}
-impl DeveloperServiceTowerLayerStack {
-    pub fn stack_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetDebugInfoRequest,
-                    GetDebugInfoResponse,
-                    crate::developer::DeveloperError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetDebugInfoRequest,
-                GetDebugInfoResponse,
-                crate::developer::DeveloperError,
-            >,
-        >>::Service: tower::Service<
-                GetDebugInfoRequest,
-                Response = GetDebugInfoResponse,
-                Error = crate::developer::DeveloperError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetDebugInfoRequest,
-                GetDebugInfoResponse,
-                crate::developer::DeveloperError,
-            >,
-        >>::Service as tower::Service<GetDebugInfoRequest>>::Future: Send + 'static,
-    {
-        self.get_debug_info_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self
-    }
-    pub fn stack_get_debug_info_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetDebugInfoRequest,
-                    GetDebugInfoResponse,
-                    crate::developer::DeveloperError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                GetDebugInfoRequest,
-                Response = GetDebugInfoResponse,
-                Error = crate::developer::DeveloperError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<GetDebugInfoRequest>>::Future: Send + 'static,
-    {
-        self.get_debug_info_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn build<T>(self, instance: T) -> DeveloperServiceClient
-    where
-        T: DeveloperService,
-    {
-        let inner_client = InnerDeveloperServiceClient(std::sync::Arc::new(instance));
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_channel(
-        self,
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> DeveloperServiceClient {
-        let client = DeveloperServiceClient::from_channel(
-            addr,
-            channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_balance_channel(
-        self,
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> DeveloperServiceClient {
-        let client = DeveloperServiceClient::from_balance_channel(
-            balance_channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn build_from_mock(self, mock: MockDeveloperService) -> DeveloperServiceClient {
-        let client = DeveloperServiceClient::from_mock(mock);
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    fn build_from_inner_client(
-        self,
-        inner_client: InnerDeveloperServiceClient,
-    ) -> DeveloperServiceClient {
-        let get_debug_info_svc = self
-            .get_debug_info_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let tower_svc_stack = DeveloperServiceTowerServiceStack {
-            inner: inner_client,
-            get_debug_info_svc,
-        };
-        DeveloperServiceClient::new(tower_svc_stack)
-    }
-}
-#[derive(Debug, Clone)]
-pub struct DeveloperServiceGrpcClientAdapter<T> {
-    inner: T,
-    #[allow(dead_code)]
-    connection_addrs_rx: tokio::sync::watch::Receiver<
-        std::collections::HashSet<std::net::SocketAddr>,
-    >,
-}
-impl<T> DeveloperServiceGrpcClientAdapter<T> {
-    pub fn new(
-        instance: T,
-        connection_addrs_rx: tokio::sync::watch::Receiver<
-            std::collections::HashSet<std::net::SocketAddr>,
-        >,
-    ) -> Self {
-        Self {
-            inner: instance,
-            connection_addrs_rx,
-        }
-    }
-}
-#[async_trait::async_trait]
-impl<T> DeveloperService
-for DeveloperServiceGrpcClientAdapter<
-    developer_service_grpc_client::DeveloperServiceGrpcClient<T>,
->
-where
-    T: tonic::client::GrpcService<tonic::body::Body> + std::fmt::Debug + Clone + Send
-        + Sync + 'static,
-    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
-    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError>
-        + Send,
-    T::Future: Send,
-{
-    async fn get_debug_info(
-        &self,
-        request: GetDebugInfoRequest,
-    ) -> crate::developer::DeveloperResult<GetDebugInfoResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .get_debug_info(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                GetDebugInfoRequest::rpc_name(),
-            ))
-    }
-}
-#[derive(Debug)]
-pub struct DeveloperServiceGrpcServerAdapter {
-    inner: InnerDeveloperServiceClient,
-}
-impl DeveloperServiceGrpcServerAdapter {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: DeveloperService,
-    {
-        Self {
-            inner: InnerDeveloperServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl developer_service_grpc_server::DeveloperServiceGrpc
-for DeveloperServiceGrpcServerAdapter {
-    async fn get_debug_info(
-        &self,
-        tonic_request: tonic::Request<GetDebugInfoRequest>,
-    ) -> Result<tonic::Response<GetDebugInfoResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("developer.get_debug_info");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .get_debug_info(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-}
 /// Generated client implementations.
-pub mod developer_service_grpc_client {
+pub mod developer_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -428,10 +24,10 @@ pub mod developer_service_grpc_client {
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct DeveloperServiceGrpcClient<T> {
+    pub struct DeveloperServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl DeveloperServiceGrpcClient<tonic::transport::Channel> {
+    impl DeveloperServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -442,7 +38,7 @@ pub mod developer_service_grpc_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> DeveloperServiceGrpcClient<T>
+    impl<T> DeveloperServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -460,7 +56,7 @@ pub mod developer_service_grpc_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> DeveloperServiceGrpcClient<InterceptedService<T, F>>
+        ) -> DeveloperServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -474,7 +70,7 @@ pub mod developer_service_grpc_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            DeveloperServiceGrpcClient::new(InterceptedService::new(inner, interceptor))
+            DeveloperServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -539,7 +135,7 @@ pub mod developer_service_grpc_client {
     }
 }
 /// Generated server implementations.
-pub mod developer_service_grpc_server {
+pub mod developer_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -548,9 +144,9 @@ pub mod developer_service_grpc_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with DeveloperServiceGrpcServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with DeveloperServiceServer.
     #[async_trait]
-    pub trait DeveloperServiceGrpc: std::marker::Send + std::marker::Sync + 'static {
+    pub trait DeveloperService: std::marker::Send + std::marker::Sync + 'static {
         async fn get_debug_info(
             &self,
             request: tonic::Request<super::GetDebugInfoRequest>,
@@ -560,14 +156,14 @@ pub mod developer_service_grpc_server {
         >;
     }
     #[derive(Debug)]
-    pub struct DeveloperServiceGrpcServer<T> {
+    pub struct DeveloperServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> DeveloperServiceGrpcServer<T> {
+    impl<T> DeveloperServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -618,10 +214,9 @@ pub mod developer_service_grpc_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>>
-    for DeveloperServiceGrpcServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for DeveloperServiceServer<T>
     where
-        T: DeveloperServiceGrpc,
+        T: DeveloperService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -638,9 +233,9 @@ pub mod developer_service_grpc_server {
             match req.uri().path() {
                 "/quickwit.developer.DeveloperService/GetDebugInfo" => {
                     #[allow(non_camel_case_types)]
-                    struct GetDebugInfoSvc<T: DeveloperServiceGrpc>(pub Arc<T>);
+                    struct GetDebugInfoSvc<T: DeveloperService>(pub Arc<T>);
                     impl<
-                        T: DeveloperServiceGrpc,
+                        T: DeveloperService,
                     > tonic::server::UnaryService<super::GetDebugInfoRequest>
                     for GetDebugInfoSvc<T> {
                         type Response = super::GetDebugInfoResponse;
@@ -654,7 +249,7 @@ pub mod developer_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as DeveloperServiceGrpc>::get_debug_info(&inner, request)
+                                <T as DeveloperService>::get_debug_info(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -704,7 +299,7 @@ pub mod developer_service_grpc_server {
             }
         }
     }
-    impl<T> Clone for DeveloperServiceGrpcServer<T> {
+    impl<T> Clone for DeveloperServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -718,7 +313,7 @@ pub mod developer_service_grpc_server {
     }
     /// Generated gRPC service name
     pub const SERVICE_NAME: &str = "quickwit.developer.DeveloperService";
-    impl<T> tonic::server::NamedService for DeveloperServiceGrpcServer<T> {
+    impl<T> tonic::server::NamedService for DeveloperServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

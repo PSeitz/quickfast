@@ -202,6 +202,31 @@ impl GrpcMetricsLayer {
         }
     }
 
+    /// Wraps an async RPC future to track in-flight count, total count by outcome, and latency.
+    pub fn instrument<F, T, E>(&self, rpc_name: &'static str, inner: F) -> ResponseFuture<F>
+    where
+        F: Future<Output = Result<T, E>>,
+        E: GrpcStatusCode,
+    {
+        let start = Instant::now();
+        gauge!(parent: self.requests_in_flight, "rpc" => rpc_name).inc();
+        ResponseFuture {
+            inner,
+            start,
+            rpc_name,
+            status: "cancelled",
+            code: "cancelled",
+            requests_total: self.requests_total.clone(),
+            requests_in_flight: self.requests_in_flight.clone(),
+            request_duration_seconds: self.request_duration_seconds.clone(),
+        }
+    }
+
+    /// Records a retry attempt for `rpc_name` after an error with gRPC status `code`.
+    pub fn record_retry(&self, rpc_name: &'static str, code: tonic::Code) {
+        self.record_request(rpc_name, "retry", code);
+    }
+
     /// Wraps a retry policy to record failed attempts that it retries.
     pub fn from_retry_policy<P>(&self, inner: P) -> GrpcRetryPolicy<P> {
         GrpcRetryPolicy {

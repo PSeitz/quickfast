@@ -22,50 +22,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // services.
     //
     // Cluster service.
+    println!("cargo:rerun-if-changed=protos/quickwit/cluster.proto");
     let mut prost_config = prost_build::Config::default();
     prost_config.file_descriptor_set_path("src/codegen/quickwit/cluster_descriptor.bin");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/cluster.proto"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::cluster::ClusterResult")
-        .with_error_type_path("crate::cluster::ClusterError")
-        .generate_rpc_name_impls()
-        .run()
-        .unwrap();
+    tonic_prost_build::configure()
+        .type_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
+        )
+        .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
+        .out_dir("src/codegen/quickwit")
+        .compile_with_config(
+            prost_config,
+            &[PathBuf::from("protos/quickwit/cluster.proto")],
+            &[PathBuf::from("protos")],
+        )?;
 
     // Compaction service.
+    println!("cargo:rerun-if-changed=protos/quickwit/compaction.proto");
     let mut prost_config = prost_build::Config::default();
-    prost_config.file_descriptor_set_path("src/codegen/quickwit/compaction_descriptor.bin");
-    prost_config.extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/compaction.proto"])
-        .with_includes(&["protos"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::compaction::CompactionResult")
-        .with_error_type_path("crate::compaction::CompactionError")
-        .generate_rpc_name_impls()
-        .run()
-        .unwrap();
+    prost_config
+        .file_descriptor_set_path("src/codegen/quickwit/compaction_descriptor.bin")
+        .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid");
+    tonic_prost_build::configure()
+        .type_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
+        )
+        .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
+        .out_dir("src/codegen/quickwit")
+        .compile_with_config(
+            prost_config,
+            &[PathBuf::from("protos/quickwit/compaction.proto")],
+            &[PathBuf::from("protos")],
+        )?;
 
     // Developer service.
+    println!("cargo:rerun-if-changed=protos/quickwit/developer.proto");
     let mut prost_config = prost_build::Config::default();
     prost_config
         .bytes(["GetDebugInfoResponse.debug_info_json"])
         .file_descriptor_set_path("src/codegen/quickwit/developer_descriptor.bin");
-
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/developer.proto"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::developer::DeveloperResult")
-        .with_error_type_path("crate::developer::DeveloperError")
-        .generate_rpc_name_impls()
-        .run()
-        .unwrap();
+    tonic_prost_build::configure()
+        .type_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
+        )
+        .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
+        .out_dir("src/codegen/quickwit")
+        .compile_with_config(
+            prost_config,
+            &[PathBuf::from("protos/quickwit/developer.proto")],
+            &[PathBuf::from("protos")],
+        )?;
 
     // Metastore service.
     let mut prost_config = prost_build::Config::default();

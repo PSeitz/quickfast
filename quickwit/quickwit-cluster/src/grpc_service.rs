@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use bytesize::ByteSize;
 use itertools::Itertools;
 use quickwit_common::tower::GrpcMetricsLayer;
-use quickwit_proto::cluster::cluster_service_grpc_server::ClusterServiceGrpcServer;
+use quickwit_proto::cluster::cluster_service_server::ClusterServiceServer;
 use quickwit_proto::cluster::{
     ChitchatId as ProtoChitchatId, ClusterError, ClusterResult, ClusterService,
     ClusterServiceClient, ClusterServiceGrpcServerAdapter, FetchClusterStateRequest,
@@ -42,17 +42,15 @@ pub(crate) async fn cluster_grpc_client(
 ) -> ClusterServiceClient {
     let channel = channel_factory.make_channel(socket_addr).await;
 
-    ClusterServiceClient::tower()
-        .stack_layer(CLUSTER_GRPC_CLIENT_METRICS_LAYER.clone())
-        .build_from_channel(socket_addr, channel, MAX_MESSAGE_SIZE, None)
+    ClusterServiceClient::from_channel(channel, MAX_MESSAGE_SIZE, None)
+        .with_metrics(CLUSTER_GRPC_CLIENT_METRICS_LAYER.clone())
 }
 
 pub fn cluster_grpc_server(
     cluster: Cluster,
-) -> ClusterServiceGrpcServer<ClusterServiceGrpcServerAdapter> {
-    ClusterServiceClient::tower()
-        .stack_layer(CLUSTER_GRPC_SERVER_METRICS_LAYER.clone())
-        .build(cluster)
+) -> ClusterServiceServer<ClusterServiceGrpcServerAdapter> {
+    ClusterServiceClient::new(cluster)
+        .with_metrics(CLUSTER_GRPC_SERVER_METRICS_LAYER.clone())
         .as_grpc_service(MAX_MESSAGE_SIZE)
 }
 

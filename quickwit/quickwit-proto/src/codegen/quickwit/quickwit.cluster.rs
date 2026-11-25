@@ -78,413 +78,8 @@ impl DeletionStatus {
         }
     }
 }
-/// BEGIN quickwit-codegen
-#[allow(unused_imports)]
-use std::str::FromStr;
-use tower::{Layer, Service, ServiceExt};
-use quickwit_common::tower::RpcName;
-impl RpcName for FetchClusterStateRequest {
-    fn rpc_name() -> &'static str {
-        "fetch_cluster_state"
-    }
-}
-#[cfg_attr(any(test, feature = "testsuite"), mockall::automock)]
-#[async_trait::async_trait]
-pub trait ClusterService: std::fmt::Debug + Send + Sync + 'static {
-    async fn fetch_cluster_state(
-        &self,
-        request: FetchClusterStateRequest,
-    ) -> crate::cluster::ClusterResult<FetchClusterStateResponse>;
-}
-#[derive(Debug, Clone)]
-pub struct ClusterServiceClient {
-    inner: InnerClusterServiceClient,
-}
-#[derive(Debug, Clone)]
-struct InnerClusterServiceClient(std::sync::Arc<dyn ClusterService>);
-impl ClusterServiceClient {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: ClusterService,
-    {
-        #[cfg(any(test, feature = "testsuite"))]
-        assert!(
-            std::any::TypeId::of:: < T > () != std::any::TypeId::of:: <
-            MockClusterService > (),
-            "`MockClusterService` must be wrapped in a `MockClusterServiceWrapper`: use `ClusterServiceClient::from_mock(mock)` to instantiate the client"
-        );
-        Self {
-            inner: InnerClusterServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-    pub fn as_grpc_service(
-        &self,
-        max_message_size: bytesize::ByteSize,
-    ) -> cluster_service_grpc_server::ClusterServiceGrpcServer<
-        ClusterServiceGrpcServerAdapter,
-    > {
-        let adapter = ClusterServiceGrpcServerAdapter::new(self.clone());
-        cluster_service_grpc_server::ClusterServiceGrpcServer::new(adapter)
-            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize)
-    }
-    pub fn from_channel(
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> Self {
-        let (_, connection_keys_watcher) = tokio::sync::watch::channel(
-            std::collections::HashSet::from_iter([addr]),
-        );
-        let mut client = cluster_service_grpc_client::ClusterServiceGrpcClient::new(
-                channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = ClusterServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn from_balance_channel(
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> ClusterServiceClient {
-        let connection_keys_watcher = balance_channel.connection_keys_watcher();
-        let mut client = cluster_service_grpc_client::ClusterServiceGrpcClient::new(
-                balance_channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = ClusterServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn tower() -> ClusterServiceTowerLayerStack {
-        ClusterServiceTowerLayerStack::default()
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn from_mock(mock: MockClusterService) -> Self {
-        let mock_wrapper = mock_cluster_service::MockClusterServiceWrapper {
-            inner: tokio::sync::Mutex::new(mock),
-        };
-        Self::new(mock_wrapper)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn mocked() -> Self {
-        Self::from_mock(MockClusterService::new())
-    }
-}
-#[async_trait::async_trait]
-impl ClusterService for ClusterServiceClient {
-    #[tracing::instrument(skip_all, name = "cluster.fetch_cluster_state")]
-    async fn fetch_cluster_state(
-        &self,
-        request: FetchClusterStateRequest,
-    ) -> crate::cluster::ClusterResult<FetchClusterStateResponse> {
-        self.inner.0.fetch_cluster_state(request).await
-    }
-}
-#[cfg(any(test, feature = "testsuite"))]
-pub mod mock_cluster_service {
-    use super::*;
-    #[derive(Debug)]
-    pub struct MockClusterServiceWrapper {
-        pub(super) inner: tokio::sync::Mutex<MockClusterService>,
-    }
-    #[async_trait::async_trait]
-    impl ClusterService for MockClusterServiceWrapper {
-        async fn fetch_cluster_state(
-            &self,
-            request: super::FetchClusterStateRequest,
-        ) -> crate::cluster::ClusterResult<super::FetchClusterStateResponse> {
-            self.inner.lock().await.fetch_cluster_state(request).await
-        }
-    }
-}
-pub type BoxFuture<T, E> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'static>,
->;
-impl tower::Service<FetchClusterStateRequest> for InnerClusterServiceClient {
-    type Response = FetchClusterStateResponse;
-    type Error = crate::cluster::ClusterError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: FetchClusterStateRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.fetch_cluster_state(request).await };
-        Box::pin(fut)
-    }
-}
-/// A tower service stack is a set of tower services.
-#[derive(Debug)]
-struct ClusterServiceTowerServiceStack {
-    #[allow(dead_code)]
-    inner: InnerClusterServiceClient,
-    fetch_cluster_state_svc: quickwit_common::tower::BoxService<
-        FetchClusterStateRequest,
-        FetchClusterStateResponse,
-        crate::cluster::ClusterError,
-    >,
-}
-#[async_trait::async_trait]
-impl ClusterService for ClusterServiceTowerServiceStack {
-    async fn fetch_cluster_state(
-        &self,
-        request: FetchClusterStateRequest,
-    ) -> crate::cluster::ClusterResult<FetchClusterStateResponse> {
-        self.fetch_cluster_state_svc.clone().ready().await?.call(request).await
-    }
-}
-type FetchClusterStateLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        FetchClusterStateRequest,
-        FetchClusterStateResponse,
-        crate::cluster::ClusterError,
-    >,
-    FetchClusterStateRequest,
-    FetchClusterStateResponse,
-    crate::cluster::ClusterError,
->;
-#[derive(Debug, Default)]
-pub struct ClusterServiceTowerLayerStack {
-    fetch_cluster_state_layers: Vec<FetchClusterStateLayer>,
-}
-impl ClusterServiceTowerLayerStack {
-    pub fn stack_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    FetchClusterStateRequest,
-                    FetchClusterStateResponse,
-                    crate::cluster::ClusterError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                FetchClusterStateRequest,
-                FetchClusterStateResponse,
-                crate::cluster::ClusterError,
-            >,
-        >>::Service: tower::Service<
-                FetchClusterStateRequest,
-                Response = FetchClusterStateResponse,
-                Error = crate::cluster::ClusterError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                FetchClusterStateRequest,
-                FetchClusterStateResponse,
-                crate::cluster::ClusterError,
-            >,
-        >>::Service as tower::Service<FetchClusterStateRequest>>::Future: Send + 'static,
-    {
-        self.fetch_cluster_state_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self
-    }
-    pub fn stack_fetch_cluster_state_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    FetchClusterStateRequest,
-                    FetchClusterStateResponse,
-                    crate::cluster::ClusterError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                FetchClusterStateRequest,
-                Response = FetchClusterStateResponse,
-                Error = crate::cluster::ClusterError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<FetchClusterStateRequest>>::Future: Send + 'static,
-    {
-        self.fetch_cluster_state_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn build<T>(self, instance: T) -> ClusterServiceClient
-    where
-        T: ClusterService,
-    {
-        let inner_client = InnerClusterServiceClient(std::sync::Arc::new(instance));
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_channel(
-        self,
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> ClusterServiceClient {
-        let client = ClusterServiceClient::from_channel(
-            addr,
-            channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_balance_channel(
-        self,
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> ClusterServiceClient {
-        let client = ClusterServiceClient::from_balance_channel(
-            balance_channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn build_from_mock(self, mock: MockClusterService) -> ClusterServiceClient {
-        let client = ClusterServiceClient::from_mock(mock);
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    fn build_from_inner_client(
-        self,
-        inner_client: InnerClusterServiceClient,
-    ) -> ClusterServiceClient {
-        let fetch_cluster_state_svc = self
-            .fetch_cluster_state_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let tower_svc_stack = ClusterServiceTowerServiceStack {
-            inner: inner_client,
-            fetch_cluster_state_svc,
-        };
-        ClusterServiceClient::new(tower_svc_stack)
-    }
-}
-#[derive(Debug, Clone)]
-pub struct ClusterServiceGrpcClientAdapter<T> {
-    inner: T,
-    #[allow(dead_code)]
-    connection_addrs_rx: tokio::sync::watch::Receiver<
-        std::collections::HashSet<std::net::SocketAddr>,
-    >,
-}
-impl<T> ClusterServiceGrpcClientAdapter<T> {
-    pub fn new(
-        instance: T,
-        connection_addrs_rx: tokio::sync::watch::Receiver<
-            std::collections::HashSet<std::net::SocketAddr>,
-        >,
-    ) -> Self {
-        Self {
-            inner: instance,
-            connection_addrs_rx,
-        }
-    }
-}
-#[async_trait::async_trait]
-impl<T> ClusterService
-for ClusterServiceGrpcClientAdapter<
-    cluster_service_grpc_client::ClusterServiceGrpcClient<T>,
->
-where
-    T: tonic::client::GrpcService<tonic::body::Body> + std::fmt::Debug + Clone + Send
-        + Sync + 'static,
-    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
-    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError>
-        + Send,
-    T::Future: Send,
-{
-    async fn fetch_cluster_state(
-        &self,
-        request: FetchClusterStateRequest,
-    ) -> crate::cluster::ClusterResult<FetchClusterStateResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .fetch_cluster_state(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                FetchClusterStateRequest::rpc_name(),
-            ))
-    }
-}
-#[derive(Debug)]
-pub struct ClusterServiceGrpcServerAdapter {
-    inner: InnerClusterServiceClient,
-}
-impl ClusterServiceGrpcServerAdapter {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: ClusterService,
-    {
-        Self {
-            inner: InnerClusterServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl cluster_service_grpc_server::ClusterServiceGrpc
-for ClusterServiceGrpcServerAdapter {
-    async fn fetch_cluster_state(
-        &self,
-        tonic_request: tonic::Request<FetchClusterStateRequest>,
-    ) -> Result<tonic::Response<FetchClusterStateResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("cluster.fetch_cluster_state");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .fetch_cluster_state(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-}
 /// Generated client implementations.
-pub mod cluster_service_grpc_client {
+pub mod cluster_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -495,10 +90,10 @@ pub mod cluster_service_grpc_client {
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct ClusterServiceGrpcClient<T> {
+    pub struct ClusterServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl ClusterServiceGrpcClient<tonic::transport::Channel> {
+    impl ClusterServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -509,7 +104,7 @@ pub mod cluster_service_grpc_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> ClusterServiceGrpcClient<T>
+    impl<T> ClusterServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -527,7 +122,7 @@ pub mod cluster_service_grpc_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> ClusterServiceGrpcClient<InterceptedService<T, F>>
+        ) -> ClusterServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -541,7 +136,7 @@ pub mod cluster_service_grpc_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            ClusterServiceGrpcClient::new(InterceptedService::new(inner, interceptor))
+            ClusterServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -606,7 +201,7 @@ pub mod cluster_service_grpc_client {
     }
 }
 /// Generated server implementations.
-pub mod cluster_service_grpc_server {
+pub mod cluster_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -615,9 +210,9 @@ pub mod cluster_service_grpc_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with ClusterServiceGrpcServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with ClusterServiceServer.
     #[async_trait]
-    pub trait ClusterServiceGrpc: std::marker::Send + std::marker::Sync + 'static {
+    pub trait ClusterService: std::marker::Send + std::marker::Sync + 'static {
         async fn fetch_cluster_state(
             &self,
             request: tonic::Request<super::FetchClusterStateRequest>,
@@ -627,14 +222,14 @@ pub mod cluster_service_grpc_server {
         >;
     }
     #[derive(Debug)]
-    pub struct ClusterServiceGrpcServer<T> {
+    pub struct ClusterServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> ClusterServiceGrpcServer<T> {
+    impl<T> ClusterServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -685,9 +280,9 @@ pub mod cluster_service_grpc_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for ClusterServiceGrpcServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for ClusterServiceServer<T>
     where
-        T: ClusterServiceGrpc,
+        T: ClusterService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -704,9 +299,9 @@ pub mod cluster_service_grpc_server {
             match req.uri().path() {
                 "/quickwit.cluster.ClusterService/FetchClusterState" => {
                     #[allow(non_camel_case_types)]
-                    struct FetchClusterStateSvc<T: ClusterServiceGrpc>(pub Arc<T>);
+                    struct FetchClusterStateSvc<T: ClusterService>(pub Arc<T>);
                     impl<
-                        T: ClusterServiceGrpc,
+                        T: ClusterService,
                     > tonic::server::UnaryService<super::FetchClusterStateRequest>
                     for FetchClusterStateSvc<T> {
                         type Response = super::FetchClusterStateResponse;
@@ -720,10 +315,7 @@ pub mod cluster_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ClusterServiceGrpc>::fetch_cluster_state(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as ClusterService>::fetch_cluster_state(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -773,7 +365,7 @@ pub mod cluster_service_grpc_server {
             }
         }
     }
-    impl<T> Clone for ClusterServiceGrpcServer<T> {
+    impl<T> Clone for ClusterServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -787,7 +379,7 @@ pub mod cluster_service_grpc_server {
     }
     /// Generated gRPC service name
     pub const SERVICE_NAME: &str = "quickwit.cluster.ClusterService";
-    impl<T> tonic::server::NamedService for ClusterServiceGrpcServer<T> {
+    impl<T> tonic::server::NamedService for ClusterServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }

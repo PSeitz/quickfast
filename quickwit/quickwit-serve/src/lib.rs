@@ -63,9 +63,7 @@ use quickwit_cluster::{
 };
 use quickwit_common::pubsub::{EventBroker, EventSubscriptionHandle};
 use quickwit_common::runtimes::RuntimesConfig;
-use quickwit_common::tower::{
-    BalanceChannel, BoxFutureInfaillible, Change, GrpcMetricsLayer, TimeoutLayer,
-};
+use quickwit_common::tower::{BalanceChannel, BoxFutureInfaillible, Change, GrpcMetricsLayer};
 use quickwit_common::{get_bool_from_env, spawn_named_task};
 use quickwit_compaction::planner::{CompactionPlanner, CompactionPlannerHandle};
 use quickwit_compaction::{
@@ -229,10 +227,9 @@ async fn get_compaction_planner_client_if_needed(
     if is_janitor {
         let planner_handle = CompactionPlanner::new(metastore_client.clone()).spawn();
         info!("compaction planner started on janitor node");
-        let planner_client = CompactionPlannerServiceClient::tower()
-            .stack_layer(COMPACTION_GRPC_SERVER_METRICS_LAYER.clone())
-            .stack_layer(TimeoutLayer::new(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT))
-            .build(planner_handle.clone());
+        let planner_client = CompactionPlannerServiceClient::new(planner_handle.clone())
+            .with_metrics(COMPACTION_GRPC_SERVER_METRICS_LAYER.clone())
+            .with_timeout(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT);
         return Ok((Some(planner_client), Some(planner_handle)));
     }
     // Compactor-only node: connect to the planner on a remote janitor.
@@ -246,14 +243,13 @@ async fn get_compaction_planner_client_if_needed(
         bail!("compactor is enabled but no janitor node was found in the cluster")
     }
     info!("remote compaction planner detected on janitor node");
-    let planner_client = CompactionPlannerServiceClient::tower()
-        .stack_layer(COMPACTION_GRPC_CLIENT_METRICS_LAYER.clone())
-        .stack_layer(TimeoutLayer::new(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT))
-        .build_from_balance_channel(
-            balance_channel,
-            node_config.grpc_config.max_message_size,
-            None,
-        );
+    let planner_client = CompactionPlannerServiceClient::from_balance_channel(
+        balance_channel,
+        node_config.grpc_config.max_message_size,
+        None,
+    )
+    .with_metrics(COMPACTION_GRPC_CLIENT_METRICS_LAYER.clone())
+    .with_timeout(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT);
     Ok((Some(planner_client), None))
 }
 
@@ -1231,9 +1227,8 @@ mod tests {
             }
         }
 
-        let planner_client = CompactionPlannerServiceClient::tower()
-            .stack_layer(TimeoutLayer::new(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT))
-            .build(HangingPlanner);
+        let planner_client = CompactionPlannerServiceClient::new(HangingPlanner)
+            .with_timeout(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT);
 
         let request = ReportStatusRequest {
             node_id: "test-node".to_string(),

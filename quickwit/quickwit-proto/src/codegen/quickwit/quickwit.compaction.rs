@@ -69,419 +69,8 @@ pub struct MergeTaskAssignment {
     #[prost(uint64, tag = "10")]
     pub merge_level: u64,
 }
-/// BEGIN quickwit-codegen
-#[allow(unused_imports)]
-use std::str::FromStr;
-use tower::{Layer, Service, ServiceExt};
-use quickwit_common::tower::RpcName;
-impl RpcName for ReportStatusRequest {
-    fn rpc_name() -> &'static str {
-        "report_status"
-    }
-}
-#[cfg_attr(any(test, feature = "testsuite"), mockall::automock)]
-#[async_trait::async_trait]
-pub trait CompactionPlannerService: std::fmt::Debug + Send + Sync + 'static {
-    async fn report_status(
-        &self,
-        request: ReportStatusRequest,
-    ) -> crate::compaction::CompactionResult<ReportStatusResponse>;
-}
-#[derive(Debug, Clone)]
-pub struct CompactionPlannerServiceClient {
-    inner: InnerCompactionPlannerServiceClient,
-}
-#[derive(Debug, Clone)]
-struct InnerCompactionPlannerServiceClient(std::sync::Arc<dyn CompactionPlannerService>);
-impl CompactionPlannerServiceClient {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: CompactionPlannerService,
-    {
-        #[cfg(any(test, feature = "testsuite"))]
-        assert!(
-            std::any::TypeId::of:: < T > () != std::any::TypeId::of:: <
-            MockCompactionPlannerService > (),
-            "`MockCompactionPlannerService` must be wrapped in a `MockCompactionPlannerServiceWrapper`: use `CompactionPlannerServiceClient::from_mock(mock)` to instantiate the client"
-        );
-        Self {
-            inner: InnerCompactionPlannerServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-    pub fn as_grpc_service(
-        &self,
-        max_message_size: bytesize::ByteSize,
-    ) -> compaction_planner_service_grpc_server::CompactionPlannerServiceGrpcServer<
-        CompactionPlannerServiceGrpcServerAdapter,
-    > {
-        let adapter = CompactionPlannerServiceGrpcServerAdapter::new(self.clone());
-        compaction_planner_service_grpc_server::CompactionPlannerServiceGrpcServer::new(
-                adapter,
-            )
-            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize)
-    }
-    pub fn from_channel(
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> Self {
-        let (_, connection_keys_watcher) = tokio::sync::watch::channel(
-            std::collections::HashSet::from_iter([addr]),
-        );
-        let mut client = compaction_planner_service_grpc_client::CompactionPlannerServiceGrpcClient::new(
-                channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = CompactionPlannerServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn from_balance_channel(
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> CompactionPlannerServiceClient {
-        let connection_keys_watcher = balance_channel.connection_keys_watcher();
-        let mut client = compaction_planner_service_grpc_client::CompactionPlannerServiceGrpcClient::new(
-                balance_channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = CompactionPlannerServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn tower() -> CompactionPlannerServiceTowerLayerStack {
-        CompactionPlannerServiceTowerLayerStack::default()
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn from_mock(mock: MockCompactionPlannerService) -> Self {
-        let mock_wrapper = mock_compaction_planner_service::MockCompactionPlannerServiceWrapper {
-            inner: tokio::sync::Mutex::new(mock),
-        };
-        Self::new(mock_wrapper)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn mocked() -> Self {
-        Self::from_mock(MockCompactionPlannerService::new())
-    }
-}
-#[async_trait::async_trait]
-impl CompactionPlannerService for CompactionPlannerServiceClient {
-    #[tracing::instrument(skip_all, name = "compaction.report_status")]
-    async fn report_status(
-        &self,
-        request: ReportStatusRequest,
-    ) -> crate::compaction::CompactionResult<ReportStatusResponse> {
-        self.inner.0.report_status(request).await
-    }
-}
-#[cfg(any(test, feature = "testsuite"))]
-pub mod mock_compaction_planner_service {
-    use super::*;
-    #[derive(Debug)]
-    pub struct MockCompactionPlannerServiceWrapper {
-        pub(super) inner: tokio::sync::Mutex<MockCompactionPlannerService>,
-    }
-    #[async_trait::async_trait]
-    impl CompactionPlannerService for MockCompactionPlannerServiceWrapper {
-        async fn report_status(
-            &self,
-            request: super::ReportStatusRequest,
-        ) -> crate::compaction::CompactionResult<super::ReportStatusResponse> {
-            self.inner.lock().await.report_status(request).await
-        }
-    }
-}
-pub type BoxFuture<T, E> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'static>,
->;
-impl tower::Service<ReportStatusRequest> for InnerCompactionPlannerServiceClient {
-    type Response = ReportStatusResponse;
-    type Error = crate::compaction::CompactionError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ReportStatusRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.report_status(request).await };
-        Box::pin(fut)
-    }
-}
-/// A tower service stack is a set of tower services.
-#[derive(Debug)]
-struct CompactionPlannerServiceTowerServiceStack {
-    #[allow(dead_code)]
-    inner: InnerCompactionPlannerServiceClient,
-    report_status_svc: quickwit_common::tower::BoxService<
-        ReportStatusRequest,
-        ReportStatusResponse,
-        crate::compaction::CompactionError,
-    >,
-}
-#[async_trait::async_trait]
-impl CompactionPlannerService for CompactionPlannerServiceTowerServiceStack {
-    async fn report_status(
-        &self,
-        request: ReportStatusRequest,
-    ) -> crate::compaction::CompactionResult<ReportStatusResponse> {
-        self.report_status_svc.clone().ready().await?.call(request).await
-    }
-}
-type ReportStatusLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ReportStatusRequest,
-        ReportStatusResponse,
-        crate::compaction::CompactionError,
-    >,
-    ReportStatusRequest,
-    ReportStatusResponse,
-    crate::compaction::CompactionError,
->;
-#[derive(Debug, Default)]
-pub struct CompactionPlannerServiceTowerLayerStack {
-    report_status_layers: Vec<ReportStatusLayer>,
-}
-impl CompactionPlannerServiceTowerLayerStack {
-    pub fn stack_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ReportStatusRequest,
-                    ReportStatusResponse,
-                    crate::compaction::CompactionError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ReportStatusRequest,
-                ReportStatusResponse,
-                crate::compaction::CompactionError,
-            >,
-        >>::Service: tower::Service<
-                ReportStatusRequest,
-                Response = ReportStatusResponse,
-                Error = crate::compaction::CompactionError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ReportStatusRequest,
-                ReportStatusResponse,
-                crate::compaction::CompactionError,
-            >,
-        >>::Service as tower::Service<ReportStatusRequest>>::Future: Send + 'static,
-    {
-        self.report_status_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self
-    }
-    pub fn stack_report_status_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ReportStatusRequest,
-                    ReportStatusResponse,
-                    crate::compaction::CompactionError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ReportStatusRequest,
-                Response = ReportStatusResponse,
-                Error = crate::compaction::CompactionError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ReportStatusRequest>>::Future: Send + 'static,
-    {
-        self.report_status_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn build<T>(self, instance: T) -> CompactionPlannerServiceClient
-    where
-        T: CompactionPlannerService,
-    {
-        let inner_client = InnerCompactionPlannerServiceClient(
-            std::sync::Arc::new(instance),
-        );
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_channel(
-        self,
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> CompactionPlannerServiceClient {
-        let client = CompactionPlannerServiceClient::from_channel(
-            addr,
-            channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_balance_channel(
-        self,
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> CompactionPlannerServiceClient {
-        let client = CompactionPlannerServiceClient::from_balance_channel(
-            balance_channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn build_from_mock(
-        self,
-        mock: MockCompactionPlannerService,
-    ) -> CompactionPlannerServiceClient {
-        let client = CompactionPlannerServiceClient::from_mock(mock);
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    fn build_from_inner_client(
-        self,
-        inner_client: InnerCompactionPlannerServiceClient,
-    ) -> CompactionPlannerServiceClient {
-        let report_status_svc = self
-            .report_status_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let tower_svc_stack = CompactionPlannerServiceTowerServiceStack {
-            inner: inner_client,
-            report_status_svc,
-        };
-        CompactionPlannerServiceClient::new(tower_svc_stack)
-    }
-}
-#[derive(Debug, Clone)]
-pub struct CompactionPlannerServiceGrpcClientAdapter<T> {
-    inner: T,
-    #[allow(dead_code)]
-    connection_addrs_rx: tokio::sync::watch::Receiver<
-        std::collections::HashSet<std::net::SocketAddr>,
-    >,
-}
-impl<T> CompactionPlannerServiceGrpcClientAdapter<T> {
-    pub fn new(
-        instance: T,
-        connection_addrs_rx: tokio::sync::watch::Receiver<
-            std::collections::HashSet<std::net::SocketAddr>,
-        >,
-    ) -> Self {
-        Self {
-            inner: instance,
-            connection_addrs_rx,
-        }
-    }
-}
-#[async_trait::async_trait]
-impl<T> CompactionPlannerService
-for CompactionPlannerServiceGrpcClientAdapter<
-    compaction_planner_service_grpc_client::CompactionPlannerServiceGrpcClient<T>,
->
-where
-    T: tonic::client::GrpcService<tonic::body::Body> + std::fmt::Debug + Clone + Send
-        + Sync + 'static,
-    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
-    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError>
-        + Send,
-    T::Future: Send,
-{
-    async fn report_status(
-        &self,
-        request: ReportStatusRequest,
-    ) -> crate::compaction::CompactionResult<ReportStatusResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .report_status(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ReportStatusRequest::rpc_name(),
-            ))
-    }
-}
-#[derive(Debug)]
-pub struct CompactionPlannerServiceGrpcServerAdapter {
-    inner: InnerCompactionPlannerServiceClient,
-}
-impl CompactionPlannerServiceGrpcServerAdapter {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: CompactionPlannerService,
-    {
-        Self {
-            inner: InnerCompactionPlannerServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl compaction_planner_service_grpc_server::CompactionPlannerServiceGrpc
-for CompactionPlannerServiceGrpcServerAdapter {
-    async fn report_status(
-        &self,
-        tonic_request: tonic::Request<ReportStatusRequest>,
-    ) -> Result<tonic::Response<ReportStatusResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("compaction.report_status");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .report_status(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-}
 /// Generated client implementations.
-pub mod compaction_planner_service_grpc_client {
+pub mod compaction_planner_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -492,10 +81,10 @@ pub mod compaction_planner_service_grpc_client {
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct CompactionPlannerServiceGrpcClient<T> {
+    pub struct CompactionPlannerServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl CompactionPlannerServiceGrpcClient<tonic::transport::Channel> {
+    impl CompactionPlannerServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -506,7 +95,7 @@ pub mod compaction_planner_service_grpc_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> CompactionPlannerServiceGrpcClient<T>
+    impl<T> CompactionPlannerServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -524,7 +113,7 @@ pub mod compaction_planner_service_grpc_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> CompactionPlannerServiceGrpcClient<InterceptedService<T, F>>
+        ) -> CompactionPlannerServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -538,7 +127,7 @@ pub mod compaction_planner_service_grpc_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            CompactionPlannerServiceGrpcClient::new(
+            CompactionPlannerServiceClient::new(
                 InterceptedService::new(inner, interceptor),
             )
         }
@@ -605,7 +194,7 @@ pub mod compaction_planner_service_grpc_client {
     }
 }
 /// Generated server implementations.
-pub mod compaction_planner_service_grpc_server {
+pub mod compaction_planner_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -614,9 +203,9 @@ pub mod compaction_planner_service_grpc_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with CompactionPlannerServiceGrpcServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with CompactionPlannerServiceServer.
     #[async_trait]
-    pub trait CompactionPlannerServiceGrpc: std::marker::Send + std::marker::Sync + 'static {
+    pub trait CompactionPlannerService: std::marker::Send + std::marker::Sync + 'static {
         async fn report_status(
             &self,
             request: tonic::Request<super::ReportStatusRequest>,
@@ -626,14 +215,14 @@ pub mod compaction_planner_service_grpc_server {
         >;
     }
     #[derive(Debug)]
-    pub struct CompactionPlannerServiceGrpcServer<T> {
+    pub struct CompactionPlannerServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> CompactionPlannerServiceGrpcServer<T> {
+    impl<T> CompactionPlannerServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -685,9 +274,9 @@ pub mod compaction_planner_service_grpc_server {
         }
     }
     impl<T, B> tonic::codegen::Service<http::Request<B>>
-    for CompactionPlannerServiceGrpcServer<T>
+    for CompactionPlannerServiceServer<T>
     where
-        T: CompactionPlannerServiceGrpc,
+        T: CompactionPlannerService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -704,9 +293,9 @@ pub mod compaction_planner_service_grpc_server {
             match req.uri().path() {
                 "/quickwit.compaction.CompactionPlannerService/ReportStatus" => {
                     #[allow(non_camel_case_types)]
-                    struct ReportStatusSvc<T: CompactionPlannerServiceGrpc>(pub Arc<T>);
+                    struct ReportStatusSvc<T: CompactionPlannerService>(pub Arc<T>);
                     impl<
-                        T: CompactionPlannerServiceGrpc,
+                        T: CompactionPlannerService,
                     > tonic::server::UnaryService<super::ReportStatusRequest>
                     for ReportStatusSvc<T> {
                         type Response = super::ReportStatusResponse;
@@ -720,7 +309,7 @@ pub mod compaction_planner_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as CompactionPlannerServiceGrpc>::report_status(
+                                <T as CompactionPlannerService>::report_status(
                                         &inner,
                                         request,
                                     )
@@ -773,7 +362,7 @@ pub mod compaction_planner_service_grpc_server {
             }
         }
     }
-    impl<T> Clone for CompactionPlannerServiceGrpcServer<T> {
+    impl<T> Clone for CompactionPlannerServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -787,7 +376,7 @@ pub mod compaction_planner_service_grpc_server {
     }
     /// Generated gRPC service name
     pub const SERVICE_NAME: &str = "quickwit.compaction.CompactionPlannerService";
-    impl<T> tonic::server::NamedService for CompactionPlannerServiceGrpcServer<T> {
+    impl<T> tonic::server::NamedService for CompactionPlannerServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }
