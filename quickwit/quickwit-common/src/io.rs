@@ -125,11 +125,6 @@ impl IoControls {
         self
     }
 
-    pub fn set_bytes_counter(mut self, bytes_counter: Counter) -> Self {
-        self.bytes_counter = bytes_counter;
-        self
-    }
-
     pub fn set_kill_switch(mut self, kill_switch: KillSwitch) -> Self {
         self.kill_switch = kill_switch;
         self

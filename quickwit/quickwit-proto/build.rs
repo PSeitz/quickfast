@@ -41,6 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prost_config = prost_build::Config::default();
     prost_config
         .file_descriptor_set_path("src/codegen/quickwit/compaction_descriptor.bin")
+        .extern_path(
+            ".quickwit.common.DocMappingUid",
+            "crate::types::DocMappingUid",
+        )
+        .extern_path(".quickwit.common.DocUid", "crate::types::DocUid")
         .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid");
     tonic_prost_build::configure()
         .type_attribute(
@@ -87,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".quickwit.common.DocMappingUid",
             "crate::types::DocMappingUid",
         )
+        .extern_path(".quickwit.common.DocUid", "crate::types::DocUid")
         .extern_path(".quickwit.common.IndexUid", "crate::types::IndexUid")
         .field_attribute("DeleteQuery.index_uid", "#[schema(value_type = String)]")
         .field_attribute("DeleteQuery.index_uid", "#[serde(alias = \"index_id\")]")

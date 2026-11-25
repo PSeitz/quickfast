@@ -17,7 +17,6 @@ use reqwest_middleware::Error as MiddlewareError;
 use serde::Deserialize;
 use thiserror::Error;
 
-pub static DEFAULT_ADDRESS: &str = "http://127.0.0.1:7280";
 pub static DEFAULT_CONTENT_TYPE: &str = "application/json";
 
 #[derive(Error, Debug)]

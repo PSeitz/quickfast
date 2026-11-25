@@ -240,29 +240,6 @@ pub enum MetastoreError {
     Unavailable(String),
 }
 
-impl MetastoreError {
-    /// Returns `true` if the transaction that emitted this error is "certainly abort".
-    /// Returns `false` if we cannot know whether the transaction was successful or not.
-    pub fn is_transaction_certainly_aborted(&self) -> bool {
-        match self {
-            MetastoreError::AlreadyExists(_)
-            | MetastoreError::FailedPrecondition { .. }
-            | MetastoreError::Forbidden { .. }
-            | MetastoreError::InvalidArgument { .. }
-            | MetastoreError::JsonDeserializeError { .. }
-            | MetastoreError::JsonSerializeError { .. }
-            | MetastoreError::NotFound(_)
-            | MetastoreError::TooManyRequests => true,
-            MetastoreError::Connection { .. }
-            | MetastoreError::Db { .. }
-            | MetastoreError::Internal { .. }
-            | MetastoreError::Io { .. }
-            | MetastoreError::Timeout { .. }
-            | MetastoreError::Unavailable(_) => false,
-        }
-    }
-}
-
 #[cfg(feature = "postgres")]
 impl From<sqlx::Error> for MetastoreError {
     fn from(error: sqlx::Error) -> Self {
@@ -500,13 +477,6 @@ pub mod serde_utils {
 
     pub fn to_json_str<T: Serialize>(value: &T) -> Result<String, MetastoreError> {
         serde_json::to_string(value).map_err(|error| MetastoreError::JsonSerializeError {
-            struct_name: std::any::type_name::<T>().to_string(),
-            message: error.to_string(),
-        })
-    }
-
-    pub fn to_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, MetastoreError> {
-        serde_json::to_vec(value).map_err(|error| MetastoreError::JsonSerializeError {
             struct_name: std::any::type_name::<T>().to_string(),
             message: error.to_string(),
         })

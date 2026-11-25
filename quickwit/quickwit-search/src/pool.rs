@@ -108,16 +108,6 @@ where
             .collect()
     }
 
-    /// Returns all the key-value pairs in the pool.
-    pub fn keys_values(&self) -> Vec<(K, V)> {
-        self.pool
-            .read()
-            .expect("lock should not be poisoned")
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect()
-    }
-
     /// Returns all the values in the pool.
     pub fn values(&self) -> Vec<V> {
         self.pool

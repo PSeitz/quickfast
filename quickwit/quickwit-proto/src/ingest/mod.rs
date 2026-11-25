@@ -65,16 +65,6 @@ impl DocBatchV2 {
         )
     }
 
-    pub fn into_docs(self) -> impl Iterator<Item = (DocUid, Bytes)> {
-        zip(self.doc_uids, self.doc_lengths).scan(
-            self.doc_buffer,
-            |doc_buffer, (doc_uid, doc_len)| {
-                let doc = doc_buffer.split_to(doc_len as usize);
-                Some((doc_uid, doc))
-            },
-        )
-    }
-
     pub fn is_empty(&self) -> bool {
         self.doc_lengths.is_empty()
     }
