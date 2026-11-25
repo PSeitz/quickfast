@@ -15,7 +15,7 @@
 pub(crate) mod serialize;
 
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,7 +32,6 @@ use quickwit_proto::types::IndexId;
 use rand::{RngExt, distr, rng};
 use serde::{Deserialize, Serialize};
 pub use serialize::{load_index_config_from_user_config, load_index_config_update};
-use siphasher::sip::SipHasher;
 use tracing::warn;
 
 use crate::index_config::serialize::VersionedIndexConfig;
@@ -288,28 +287,6 @@ pub struct IndexConfig {
 }
 
 impl IndexConfig {
-    /// Return a fingerprint of parameters relevant for indexers
-    ///
-    /// This should remain private to this crate to avoid confusion with the
-    /// full indexing pipeline fingerprint that also includes the source's
-    /// fingerprint.
-    pub(crate) fn indexing_params_fingerprint(&self) -> u64 {
-        let mut hasher = SipHasher::new();
-        self.doc_mapping.doc_mapping_uid.hash(&mut hasher);
-        self.indexing_settings.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    /// Compares IndexConfig level fingerprints
-    ///
-    /// This method is meant to enable IndexConfig level fingerprint comparison
-    /// without taking the risk of mixing them up with pipeline level
-    /// fingerprints (computed by
-    /// [`crate::indexing_pipeline_params_fingerprint()`]).
-    pub fn equals_fingerprint(&self, other: &Self) -> bool {
-        self.indexing_params_fingerprint() == other.indexing_params_fingerprint()
-    }
-
     #[cfg(any(test, feature = "testsuite"))]
     pub fn for_test(index_id: &str, index_uri: &str) -> Self {
         let index_uri = Uri::from_str(index_uri).unwrap();

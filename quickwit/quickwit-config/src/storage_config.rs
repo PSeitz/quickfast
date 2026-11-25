@@ -151,15 +151,6 @@ impl StorageConfigs {
             })
     }
 
-    pub fn find_ram(&self) -> Option<&RamStorageConfig> {
-        self.0
-            .iter()
-            .find_map(|storage_config| match storage_config {
-                StorageConfig::Ram(ram_storage_config) => Some(ram_storage_config),
-                _ => None,
-            })
-    }
-
     pub fn find_s3(&self) -> Option<&S3StorageConfig> {
         self.0
             .iter()
@@ -197,13 +188,6 @@ impl StorageConfig {
         }
     }
 
-    pub fn as_azure(&self) -> Option<&AzureStorageConfig> {
-        match self {
-            Self::Azure(azure_storage_config) => Some(azure_storage_config),
-            _ => None,
-        }
-    }
-
     pub fn as_file(&self) -> Option<&FileStorageConfig> {
         match self {
             Self::File(file_storage_config) => Some(file_storage_config),
@@ -211,23 +195,9 @@ impl StorageConfig {
         }
     }
 
-    pub fn as_ram(&self) -> Option<&RamStorageConfig> {
-        match self {
-            Self::Ram(ram_storage_config) => Some(ram_storage_config),
-            _ => None,
-        }
-    }
-
     pub fn as_s3(&self) -> Option<&S3StorageConfig> {
         match self {
             Self::S3(s3_storage_config) => Some(s3_storage_config),
-            _ => None,
-        }
-    }
-
-    pub fn as_google(&self) -> Option<&GoogleCloudStorageConfig> {
-        match self {
-            Self::Google(google_cloud_storage_config) => Some(google_cloud_storage_config),
             _ => None,
         }
     }

@@ -235,11 +235,11 @@ mod tests {
         assert!(node_id_patterns.matches(node_id));
 
         let node_id_patterns = NodeIdGlobPatterns::try_from_comma_separated_patterns(
-            "control-plane,,indexer-[1-2],searcher*",
+            "metastore,,indexer-[1-2],searcher*",
         )
         .unwrap();
 
-        let node_id = NodeIdRef::from_str("control-plane");
+        let node_id = NodeIdRef::from_str("metastore");
         assert!(node_id_patterns.matches(node_id));
 
         let node_id = NodeIdRef::from_str("indexer-1");

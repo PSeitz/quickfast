@@ -853,13 +853,6 @@ impl ListSplitsQuery {
     }
 
     /// Sets the field's lower bound to match values that are
-    /// *less than or equal to* the provided value.
-    pub fn with_time_range_end_lte(mut self, v: i64) -> Self {
-        self.time_range.end = Bound::Included(v);
-        self
-    }
-
-    /// Sets the field's lower bound to match values that are
     /// *less than* the provided value.
     pub fn with_time_range_end_lt(mut self, v: i64) -> Self {
         self.time_range.end = Bound::Excluded(v);
@@ -884,13 +877,6 @@ impl ListSplitsQuery {
     /// *less than or equal to* the provided value.
     pub fn with_max_time_range_end(mut self, v: i64) -> Self {
         self.max_time_range_end = Some(v);
-        self
-    }
-
-    /// Sets the field's lower bound to match values that are
-    /// *less than or equal to* the provided value.
-    pub fn with_delete_opstamp_lte(mut self, v: u64) -> Self {
-        self.delete_opstamp.end = Bound::Included(v);
         self
     }
 
@@ -936,13 +922,6 @@ impl ListSplitsQuery {
         self
     }
 
-    /// Sets the field's upper bound to match values that are
-    /// *greater than* the provided value.
-    pub fn with_update_timestamp_gt(mut self, v: i64) -> Self {
-        self.update_timestamp.start = Bound::Excluded(v);
-        self
-    }
-
     /// Sets the field's lower bound to match values that are
     /// *less than or equal to* the provided value.
     pub fn with_create_timestamp_lte(mut self, v: i64) -> Self {
@@ -961,13 +940,6 @@ impl ListSplitsQuery {
     /// *greater than or equal to* the provided value.
     pub fn with_create_timestamp_gte(mut self, v: i64) -> Self {
         self.create_timestamp.start = Bound::Included(v);
-        self
-    }
-
-    /// Sets the field's upper bound to match values that are
-    /// *greater than* the provided value.
-    pub fn with_create_timestamp_gt(mut self, v: i64) -> Self {
-        self.create_timestamp.start = Bound::Excluded(v);
         self
     }
 

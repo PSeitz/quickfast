@@ -380,19 +380,6 @@ impl Cluster {
             .set(key, value);
     }
 
-    /// Sets a key-value pair on the cluster node's state.
-    pub async fn set_self_key_value_delete_after_ttl(
-        &self,
-        key: impl ToString,
-        value: impl ToString,
-    ) {
-        let chitchat = self.chitchat().await;
-        let mut chitchat_lock = chitchat.lock().await;
-        let chitchat_self_node = chitchat_lock.self_node_state();
-        let key = key.to_string();
-        chitchat_self_node.set_with_ttl(key.clone(), value);
-    }
-
     pub async fn get_self_key_value(&self, key: &str) -> Option<String> {
         self.chitchat()
             .await

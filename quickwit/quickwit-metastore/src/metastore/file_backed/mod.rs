@@ -170,13 +170,6 @@ impl FileBackedMetastore {
         }
     }
 
-    /// Sets the polling interval.
-    ///
-    /// Only newly accessed indexes will be affected by the change of this setting.
-    pub fn set_polling_interval(&mut self, polling_interval_opt: Option<Duration>) {
-        self.polling_interval_opt = polling_interval_opt;
-    }
-
     /// Return the underlying storage.
     ///
     /// This is only build in tests to verify the metastore did indeed store what it should.

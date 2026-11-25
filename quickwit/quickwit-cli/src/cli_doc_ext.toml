@@ -174,7 +174,7 @@ long_about = """
 
 ### Indexer service
 
-The indexer service runs indexing pipelines assigned by the control plane.
+The indexer service indexes staged ingest batches and runs configured pull-source forwarders.
 
 ### Searcher service 
 Starts a web server at `rest_listing_address:rest_list_port` that exposes the [Quickwit REST API](rest-api.md)
@@ -185,11 +185,6 @@ This list of node addresses is used to discover the remaining peer nodes in the 
 ### Metastore service
 
 The metastore service exposes Quickwit metastore over the network. This is a core internal service that is needed to operate Quickwit. As such, at least one running instance of this service is required for other services to work.
-
-### Control plane service
-
-The control plane service schedules indexing tasks to indexers. It listens to metastore events such as
-an source create, delete, toggle, or index delete and reacts accordingly to update the indexing plan.
 
 ### Janitor service
 
@@ -211,7 +206,7 @@ name = "Starts an indexer and a metastore services"
 command = "quickwit run --service indexer --service metastore --endpoint=http://127.0.0.1:7280"
 
 [[run.examples]]
-name = "Start a control plane, metastore and janitor services"
+name = "Start metastore and janitor services"
 command = "quickwit run --service metastore --service janitor --config=./config/quickwit.yaml"
 
 [[run.examples]]

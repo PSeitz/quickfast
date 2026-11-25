@@ -15,7 +15,7 @@
 pub(crate) mod serialize;
 
 use std::borrow::Cow;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::str::FromStr;
 
 use anyhow::ensure;
@@ -28,7 +28,6 @@ use serde_json::Value as JsonValue;
 // For backward compatibility.
 use serialize::VersionedSourceConfig;
 pub use serialize::{load_source_config_from_user_config, load_source_config_update};
-use siphasher::sip::SipHasher;
 
 /// Reserved source ID for the `quickwit index ingest` CLI command.
 pub const CLI_SOURCE_ID: &str = "_ingest-cli-source";
@@ -105,19 +104,6 @@ impl SourceConfig {
             transform_config: None,
             input_format: SourceInputFormat::Json,
         }
-    }
-
-    /// Returns a fingerprint of parameters relevant for indexers.
-    ///
-    /// This should remain private to this crate to avoid confusion with the
-    /// full indexing pipeline fingerprint that also includes the index config's
-    /// fingerprint.
-    pub(crate) fn indexing_params_fingerprint(&self) -> u64 {
-        let mut hasher = SipHasher::new();
-        self.input_format.hash(&mut hasher);
-        self.source_params.hash(&mut hasher);
-        self.transform_config.hash(&mut hasher);
-        hasher.finish()
     }
 
     #[cfg(any(test, feature = "testsuite"))]
@@ -341,12 +327,6 @@ impl From<FileSourceParams> for FileSourceParamsForSerde {
                 notifications: vec![notification],
             },
         }
-    }
-}
-
-impl FileSourceParams {
-    pub fn from_filepath<P: AsRef<str>>(filepath: P) -> anyhow::Result<Self> {
-        Uri::from_str(filepath.as_ref()).map(Self::Filepath)
     }
 }
 

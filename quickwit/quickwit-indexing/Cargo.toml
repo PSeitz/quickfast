@@ -87,7 +87,6 @@ criterion = { workspace = true, features = ["async_tokio"] }
 proptest = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 tempfile = { workspace = true }
 
 quickwit-common = { workspace = true, features = ["testsuite"] }

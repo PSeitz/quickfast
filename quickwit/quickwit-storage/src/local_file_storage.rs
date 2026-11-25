@@ -70,22 +70,6 @@ impl LocalFileStorage {
             })
     }
 
-    /// Moves a file from a source to a destination.
-    /// from here is an external path, and to is an internal path.
-    pub async fn move_into(&self, from_external: &Path, to: &Path) -> crate::StorageResult<()> {
-        let to_full_path = self.full_path(to)?;
-        tokio::fs::rename(from_external, to_full_path).await?;
-        Ok(())
-    }
-
-    /// Moves a file from a source to a destination.
-    /// from here is an internal path, and to is an external path.
-    pub async fn move_out(&self, from_internal: &Path, to: &Path) -> crate::StorageResult<()> {
-        let from_full_path = self.full_path(from_internal)?;
-        tokio::fs::rename(from_full_path, to).await?;
-        Ok(())
-    }
-
     async fn delete_single_file(&self, relative_path: &Path) -> StorageResult<()> {
         let full_path = self.full_path(relative_path)?;
         ignore_error_kind!(ErrorKind::NotFound, tokio::fs::remove_file(full_path).await)?;

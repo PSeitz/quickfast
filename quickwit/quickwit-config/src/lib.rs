@@ -14,7 +14,6 @@
 
 #![deny(clippy::disallowed_methods)]
 
-use std::hash::Hasher;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -52,7 +51,6 @@ pub use quickwit_doc_mapper::DocMapping;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
-use siphasher::sip::SipHasher;
 use source_config::FileSourceParamsForSerde;
 pub use source_config::{
     CLI_SOURCE_ID, FileSourceMessageType, FileSourceNotification, FileSourceParams, FileSourceSqs,
@@ -265,18 +263,6 @@ pub trait TestableForRegression: Serialize + DeserializeOwned {
 
     /// Asserts that `self` and `other` are equal. It must panic if they are not.
     fn assert_equality(&self, other: &Self);
-}
-
-/// Returns a fingerprint (a hash) of all the parameters that should force an
-/// indexing pipeline to restart upon index or source config updates.
-pub fn indexing_pipeline_params_fingerprint(
-    index_config: &IndexConfig,
-    source_config: &SourceConfig,
-) -> u64 {
-    let mut hasher = SipHasher::new();
-    hasher.write_u64(index_config.indexing_params_fingerprint());
-    hasher.write_u64(source_config.indexing_params_fingerprint());
-    hasher.finish()
 }
 
 #[cfg(test)]
