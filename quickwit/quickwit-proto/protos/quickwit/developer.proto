@@ -18,8 +18,6 @@ package quickwit.developer;
 
 service DeveloperService {
   rpc GetDebugInfo(GetDebugInfoRequest) returns (GetDebugInfoResponse);
-
-  // rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
 }
 
 message GetDebugInfoRequest {

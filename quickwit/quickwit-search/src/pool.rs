@@ -98,26 +98,6 @@ where
         self.pool.read().expect("lock should not be poisoned").len()
     }
 
-    /// Returns all the keys in the pool.
-    pub fn keys(&self) -> Vec<K> {
-        self.pool
-            .read()
-            .expect("lock should not be poisoned")
-            .keys()
-            .cloned()
-            .collect()
-    }
-
-    /// Returns all the values in the pool.
-    pub fn values(&self) -> Vec<V> {
-        self.pool
-            .read()
-            .expect("lock should not be poisoned")
-            .values()
-            .cloned()
-            .collect()
-    }
-
     /// Returns all the key-value pairs in the pool.
     pub fn pairs(&self) -> Vec<(K, V)> {
         self.pool

@@ -150,8 +150,6 @@ pub struct QuickwitClientBuilder {
     ingest_timeout: Timeout,
     /// Timeout for the ingest operations that require waiting for commit.
     commit_timeout: Timeout,
-    /// Forces use of ingest v1.
-    use_legacy_ingest: bool,
     /// Request detailed parse failures report from the ingest api.
     detailed_response: bool,
     /// Validate against a custom TLS certificate authority
@@ -171,7 +169,6 @@ impl QuickwitClientBuilder {
             search_timeout: DEFAULT_CLIENT_SEARCH_TIMEOUT,
             ingest_timeout: DEFAULT_CLIENT_INGEST_TIMEOUT,
             commit_timeout: DEFAULT_CLIENT_COMMIT_TIMEOUT,
-            use_legacy_ingest: false,
             detailed_response: false,
             ca_cert: None,
             client_identity: None,
@@ -196,12 +193,6 @@ impl QuickwitClientBuilder {
 
     pub fn ingest_timeout(mut self, timeout: Timeout) -> Self {
         self.ingest_timeout = timeout;
-        self
-    }
-
-    // TODO(#5604)
-    pub fn use_legacy_ingest(mut self, use_legacy_ingest: bool) -> Self {
-        self.use_legacy_ingest = use_legacy_ingest;
         self
     }
 
@@ -244,7 +235,6 @@ impl QuickwitClientBuilder {
             search_timeout: self.search_timeout,
             ingest_timeout: self.ingest_timeout,
             commit_timeout: self.commit_timeout,
-            use_legacy_ingest: self.use_legacy_ingest,
             detailed_response: self.detailed_response,
         }
     }
@@ -261,8 +251,6 @@ pub struct QuickwitClient {
     ingest_timeout: Timeout,
     /// Timeout for the ingest operations that require waiting for commit.
     commit_timeout: Timeout,
-    /// Forces use of ingest v1.
-    use_legacy_ingest: bool,
     /// Request detailed parse failures report from the ingest api.
     detailed_response: bool,
 }
@@ -328,10 +316,6 @@ impl QuickwitClient {
     ) -> Result<RestIngestResponse, Error> {
         let ingest_path = format!("{index_id}/ingest");
         let mut query_params = HashMap::new();
-        // TODO(#5604)
-        if self.use_legacy_ingest {
-            query_params.insert("use_legacy_ingest", "true");
-        }
         if self.detailed_response {
             query_params.insert("detailed_response", "true");
         }
