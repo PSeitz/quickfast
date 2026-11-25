@@ -9,6 +9,7 @@ on:
     paths:
       - "quickwit/**"
       - "Dockerfile"
+      - ".github/workflows/publish_docker_images.yml"
     tags:
       - airmail
       - happy-plazza
@@ -19,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY_IMAGE: pseitz/quickfast
+  REGISTRY_IMAGE: pascalius/quickfast
 
 jobs:
   build-lambda:
