@@ -215,7 +215,7 @@ pub mod tests {
     use time::OffsetDateTime;
 
     use super::*;
-    use crate::actors::merge_split_attrs;
+    use crate::merge_split_attrs;
     use crate::models::create_split_metadata;
 
     #[test]

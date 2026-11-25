@@ -218,7 +218,6 @@ sqlx = { version = "0.8", features = [
   "time",
 ] }
 syn = { version = "3.0", features = ["extra-traits", "full", "parsing"] }
-sync_wrapper = "1"
 sysinfo = { version = "0.40", default-features = false, features = ["disk"] }
 tabled = { version = "0.22", features = ["ansi"] }
 tempfile = "3"
@@ -329,7 +328,6 @@ quickwit-aws = { path = "quickwit-aws" }
 quickwit-cli = { path = "quickwit-cli" }
 quickwit-cluster = { path = "quickwit-cluster" }
 quickwit-codegen = { path = "quickwit-codegen" }
-quickwit-codegen-example = { path = "quickwit-codegen/example" }
 quickwit-common = { path = "quickwit-common" }
 quickwit-compaction = { path = "quickwit-compaction" }
 quickwit-config = { path = "quickwit-config" }
@@ -339,7 +337,6 @@ quickwit-doc-mapper = { path = "quickwit-doc-mapper" }
 quickwit-index-management = { path = "quickwit-index-management" }
 quickwit-indexing = { path = "quickwit-indexing" }
 quickwit-ingest = { path = "quickwit-ingest" }
-quickwit-integration-tests = { path = "quickwit-integration-tests" }
 quickwit-jaeger = { path = "quickwit-jaeger" }
 quickwit-janitor = { path = "quickwit-janitor" }
 quickwit-lambda-client = { path = "quickwit-lambda-client" }
@@ -347,7 +344,6 @@ quickwit-lambda-server = { path = "quickwit-lambda-server" }
 quickwit-macros = { path = "quickwit-macros" }
 quickwit-metastore = { path = "quickwit-metastore" }
 quickwit-metrics = { path = "quickwit-metrics" }
-quickwit-metrics-inventory = { path = "quickwit-metrics-inventory" }
 quickwit-opentelemetry = { path = "quickwit-opentelemetry" }
 quickwit-proto = { path = "quickwit-proto" }
 quickwit-query = { path = "quickwit-query" }

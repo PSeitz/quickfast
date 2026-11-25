@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::Context;
-use quickwit_common::Progress;
 use quickwit_common::uri::Uri;
 use quickwit_proto::metastore::{
     ListCompletedFilesRequest, MetastoreService, MetastoreServiceClient,
@@ -25,16 +24,15 @@ use quickwit_storage::StorageResolver;
 pub(crate) async fn cleanup_completed_files(
     metastore: &MetastoreServiceClient,
     storage_resolver: &StorageResolver,
-    progress: &Progress,
 ) -> anyhow::Result<()> {
     let mut after_file_id = String::new();
     let mut result = Ok(());
     loop {
-        let response = progress
-            .protect_future(metastore.list_completed_files(ListCompletedFilesRequest {
+        let response = metastore
+            .list_completed_files(ListCompletedFilesRequest {
                 after_file_id: after_file_id.clone(),
                 max_num_files: 1_000,
-            }))
+            })
             .await?;
         if response.staged_files.is_empty() {
             return result;
@@ -47,10 +45,7 @@ pub(crate) async fn cleanup_completed_files(
                 file.file_id
             );
             after_file_id = file.file_id;
-            if let Err(error) = progress
-                .protect_future(delete_input(storage_resolver, &file.file_uri))
-                .await
-            {
+            if let Err(error) = delete_input(storage_resolver, &file.file_uri).await {
                 tracing::warn!(file_id = %after_file_id, ?error, "failed to delete completed input; retrying next GC pass");
                 result = Err(error);
             }
@@ -113,9 +108,8 @@ mod tests {
             });
         let metastore = MetastoreServiceClient::from_mock(mock);
         let resolver = StorageResolver::for_test();
-        let progress = Progress::default();
         assert!(
-            cleanup_completed_files(&metastore, &resolver, &progress)
+            cleanup_completed_files(&metastore, &resolver)
                 .await
                 .is_err()
         );
@@ -126,7 +120,7 @@ mod tests {
         // Retry and then recreate a completed input, as recovery can do before registration.
         for _ in 0..2 {
             std::fs::write(root.join("a"), b"input").unwrap();
-            cleanup_completed_files(&metastore, &resolver, &progress)
+            cleanup_completed_files(&metastore, &resolver)
                 .await
                 .unwrap();
             assert!(!root.join("a").try_exists().unwrap());
@@ -147,7 +141,7 @@ mod tests {
         });
         let metastore = MetastoreServiceClient::from_mock(mock);
         assert!(
-            cleanup_completed_files(&metastore, &resolver, &progress)
+            cleanup_completed_files(&metastore, &resolver)
                 .await
                 .is_err()
         );

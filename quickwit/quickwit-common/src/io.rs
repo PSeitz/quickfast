@@ -36,7 +36,7 @@ use pin_project::pin_project;
 use quickwit_metrics::{Counter, LazyCounter, counter, lazy_counter};
 use tokio::io::AsyncWrite;
 
-use crate::{KillSwitch, Progress, ProtectedZoneGuard};
+use crate::KillSwitch;
 
 // Max 1MB at a time.
 const MAX_NUM_BYTES_WRITTEN_AT_ONCE: usize = 1 << 20;
@@ -76,7 +76,6 @@ pub fn limiter(throughput: ByteSize) -> Limiter {
 pub struct IoControls {
     throughput_limiter_opt: Option<Limiter>,
     bytes_counter: Counter,
-    progress: Progress,
     kill_switch: KillSwitch,
 }
 
@@ -85,18 +84,12 @@ impl Default for IoControls {
         Self {
             throughput_limiter_opt: None,
             bytes_counter: Counter::local(),
-            progress: Progress::default(),
             kill_switch: KillSwitch::default(),
         }
     }
 }
 
 impl IoControls {
-    #[must_use]
-    pub fn progress(&self) -> &Progress {
-        &self.progress
-    }
-
     pub fn kill(&self) {
         self.kill_switch.kill();
     }
@@ -105,12 +98,11 @@ impl IoControls {
         self.bytes_counter.get()
     }
 
-    pub fn check_if_alive(&self) -> io::Result<ProtectedZoneGuard> {
+    pub fn check_if_alive(&self) -> io::Result<()> {
         if self.kill_switch.is_dead() {
             return Err(io::Error::other("directory kill switch was activated"));
         }
-        let guard = self.progress.protect_zone();
-        Ok(guard)
+        Ok(())
     }
 
     pub fn set_component(mut self, component: &'static str) -> Self {
@@ -138,17 +130,12 @@ impl IoControls {
         self
     }
 
-    pub fn set_progress(mut self, progress: Progress) -> Self {
-        self.progress = progress;
-        self
-    }
-
     pub fn set_kill_switch(mut self, kill_switch: KillSwitch) -> Self {
         self.kill_switch = kill_switch;
         self
     }
     fn consume_blocking(&self, num_bytes: usize) -> io::Result<()> {
-        let _guard = self.check_if_alive()?;
+        self.check_if_alive()?;
         if let Some(throughput_limiter) = &self.throughput_limiter_opt {
             throughput_limiter.blocking_consume(num_bytes);
         }
@@ -182,15 +169,12 @@ impl<A: IoControlsAccess, W: AsyncWrite> ControlledWrite<A, W> {
     ) -> Poll<io::Result<usize>> {
         let this = self.project();
 
-        let _protect_guard = match this
+        if let Err(io_err) = this
             .io_controls_access
             .apply(|io_controls| io_controls.check_if_alive())
         {
-            Ok(protect_guard) => protect_guard,
-            Err(io_err) => {
-                return Poll::Ready(Err(io_err));
-            }
-        };
+            return Poll::Ready(Err(io_err));
+        }
 
         if let Some(waiter) = this.waiter {
             let res = Pin::new(waiter).poll(cx);
@@ -295,11 +279,6 @@ where A: IoControlsAccess
     pub fn underlying_wrt(&mut self) -> &mut W {
         &mut self.underlying_wrt
     }
-
-    fn check_if_alive(&self) -> io::Result<ProtectedZoneGuard> {
-        self.io_controls_access
-            .apply(|io_controls| io_controls.check_if_alive())
-    }
 }
 
 impl<A, W: io::Write> io::Write for ControlledWrite<A, W>
@@ -314,10 +293,8 @@ where A: IoControlsAccess
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        // We voluntarily avoid to check the kill switch on flush.
-        // This is because the `RAMDirectory` currently panics if flush
-        // is not called before `Drop`.
-        let _guard = self.check_if_alive();
+        // We voluntarily avoid checking the kill switch on flush.
+        // This is because `RAMDirectory` panics if flush is not called before `Drop`.
         self.underlying_wrt.flush()
     }
 }

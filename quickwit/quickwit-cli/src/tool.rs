@@ -23,7 +23,6 @@ use anyhow::{Context, bail};
 use clap::{ArgMatches, Command, arg};
 use colored::Colorize;
 use humantime::format_duration;
-use quickwit_common::Progress;
 use quickwit_common::io::IoControls;
 use quickwit_common::runtimes::RuntimesConfig;
 use quickwit_common::uri::Uri;
@@ -32,14 +31,14 @@ use quickwit_config::{
     CLI_SOURCE_ID, SourceConfig, SourceInputFormat, SourceParams, TransformConfig, build_doc_mapper,
 };
 use quickwit_index_management::{IndexService, clear_cache_directory};
-use quickwit_indexing::actors::{
-    DocumentConverter, create_packaged_split, prepare_split_for_upload,
-};
 use quickwit_indexing::merge_policy::merge_policy_from_settings;
 use quickwit_indexing::models::IndexedSplitBuilder;
 use quickwit_indexing::source::BATCH_NUM_BYTES_LIMIT;
 use quickwit_indexing::source::doc_file_reader::DocFileReader;
-use quickwit_indexing::{IndexingSplitStore, run_local_merges};
+use quickwit_indexing::{
+    DocumentConverter, IndexingSplitStore, create_packaged_split, prepare_split_for_upload,
+    run_local_merges,
+};
 use quickwit_metastore::{IndexMetadataResponseExt, StageSplitsRequestExt};
 use quickwit_proto::indexing::{IndexingPipelineId, MergePipelineId};
 use quickwit_proto::metastore::{
@@ -517,11 +516,10 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
     }
 
     let tag_fields = doc_mapper.tag_named_fields()?;
-    let progress = Progress::default();
     let mut staged_split_ids = Vec::with_capacity(builders.len());
     for (_, builder) in builders {
         let indexed_split = builder.finalize()?;
-        let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+        let packaged_split = create_packaged_split(indexed_split, &tag_fields)?;
         let (split_metadata, split_payload) = prepare_split_for_upload(
             &packaged_split,
             &merge_policy,

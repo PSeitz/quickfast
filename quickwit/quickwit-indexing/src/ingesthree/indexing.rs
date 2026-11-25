@@ -34,11 +34,11 @@ use quickwit_storage::{OwnedBytes, SplitPayload};
 
 use super::downloads::DownloadedFile;
 use super::metrics::MEMORY_FLUSHES;
-use crate::actors::{
-    DocumentConverter, OTHER_PARTITION_ID, create_packaged_split, prepare_split_for_upload,
-};
 use crate::merge_policy::MergePolicy;
 use crate::models::{IndexedSplit, IndexedSplitBuilder, ProcessedDoc};
+use crate::{
+    DocumentConverter, OTHER_PARTITION_ID, create_packaged_split, prepare_split_for_upload,
+};
 
 /// Owns the scratch directory so payload files survive until upload and retries finish.
 pub(super) struct PreparedSplit {
@@ -152,7 +152,7 @@ impl SplitBuilders {
     pub fn add_documents(&mut self, documents: Vec<Bytes>) -> anyhow::Result<()> {
         let mut processed = Vec::new();
         for document in documents {
-            let _guard = self.io_controls.check_if_alive()?;
+            self.io_controls.check_if_alive()?;
             self.converter.process_raw_doc(document, &mut processed);
             for document in processed.drain(..) {
                 let partition = document.partition;
@@ -172,7 +172,6 @@ impl SplitBuilders {
                         .add_document(document)?;
                 }
             }
-            self.io_controls.progress().record_progress();
         }
         Ok(())
     }
@@ -188,7 +187,7 @@ impl SplitBuilders {
     ) -> anyhow::Result<Vec<PreparedSplit>> {
         let mut prepared = Vec::new();
         while let Some(file) = files.recv().await {
-            let _guard = self.io_controls.check_if_alive()?;
+            self.io_controls.check_if_alive()?;
             let contents = file?.into_contents();
             let num_bytes = contents.len() as u64;
             let mut reader = DocumentFileReader::new(
@@ -226,14 +225,14 @@ impl SplitBuilders {
         );
         for split in splits {
             let io_controls = self.io_controls.clone().set_component("index_serializer");
-            let _guard = io_controls.check_if_alive()?;
+            io_controls.check_if_alive()?;
             let tags = self.tag_fields()?;
             split
                 .builder
                 .controlled_directory
                 .set_io_controls(io_controls.clone());
-            let packaged = create_packaged_split(split.finalize()?, &tags, io_controls.progress())?;
-            let _guard = io_controls.check_if_alive()?;
+            let packaged = create_packaged_split(split.finalize()?, &tags)?;
+            io_controls.check_if_alive()?;
             let (metadata, payload) = prepare_split_for_upload(&packaged, merge_policy, retention)?;
             prepared.push(PreparedSplit {
                 scratch_directory: packaged.split_scratch_directory,

@@ -50,10 +50,9 @@ use ulid::Ulid;
 
 use self::indexing::{PreparedSplit, SplitBuilders};
 use self::metrics::ACTIVE_ASSIGNMENTS;
-use crate::IndexingSplitStore;
-use crate::actors::acquire_indexing_upload_permit;
 use crate::merge_policy::merge_policy_from_settings;
 use crate::metrics::record_published_split;
+use crate::{IndexingSplitStore, acquire_indexing_upload_permit};
 
 /// Indexes assigned input files from S3 and publishes their output splits.
 /// Other storage backends remain usable through the storage resolver.

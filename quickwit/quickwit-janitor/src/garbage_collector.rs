@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::{StreamExt, stream};
-use quickwit_common::Progress;
 use quickwit_common::shared_consts::split_deletion_grace_period;
 use quickwit_index_management::{GcMetrics, run_garbage_collect};
 use quickwit_metastore::ListIndexesMetadataResponseExt;
@@ -118,12 +117,10 @@ impl GarbageCollector {
     }
 
     pub async fn run_once(&mut self) {
-        let progress = Progress::default();
-        self.handle_inner(&progress).await;
+        self.handle_inner().await;
         if let Err(error) = crate::completed_file_cleanup::cleanup_completed_files(
             &self.metastore,
             &self.storage_resolver,
-            &progress,
         )
         .await
         {
@@ -137,7 +134,7 @@ impl GarbageCollector {
 
     /// Runs one GC pass across all indexes. Errors are logged rather than returned so
     /// the background loop continues running.
-    async fn handle_inner(&mut self, progress: &Progress) {
+    async fn handle_inner(&mut self) {
         debug!("loading indexes from the metastore");
         self.counters.num_passes += 1;
 
@@ -194,7 +191,6 @@ impl GarbageCollector {
             STAGED_GRACE_PERIOD,
             split_deletion_grace_period(),
             false,
-            Some(progress),
             Some(gc_metrics()),
         )
         .await;
@@ -403,7 +399,6 @@ mod tests {
             STAGED_GRACE_PERIOD,
             split_deletion_grace_period(),
             false,
-            None,
             None,
         )
         .await;

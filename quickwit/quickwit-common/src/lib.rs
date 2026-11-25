@@ -30,7 +30,6 @@ pub mod metrics;
 pub mod net;
 mod path_hasher;
 pub mod pretty;
-mod progress;
 pub mod pubsub;
 pub mod rand;
 pub mod rate_limited_tracing;
@@ -62,7 +61,6 @@ pub use env::{
 };
 pub use kill_switch::KillSwitch;
 pub use path_hasher::PathHasher;
-pub use progress::{Progress, ProtectedZoneGuard};
 pub use stream_utils::{BoxStream, ServiceStream};
 
 /// Returns true at compile time. This function is mostly used with serde to initialize boolean

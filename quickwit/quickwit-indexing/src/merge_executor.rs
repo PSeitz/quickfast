@@ -20,11 +20,11 @@ use std::time::Instant;
 
 use anyhow::{Context, anyhow, bail};
 use itertools::Itertools;
+use quickwit_common::KillSwitch;
 use quickwit_common::io::IoControls;
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::runtimes::RuntimeType;
 use quickwit_common::temp_dir::{self, TempDirectory};
-use quickwit_common::{KillSwitch, Progress};
 use quickwit_config::RetentionPolicy;
 use quickwit_directories::UnionDirectory;
 use quickwit_doc_mapper::DocMapper;
@@ -44,13 +44,13 @@ use tantivy::{DateTime, Directory, Index, IndexMeta, IndexWriter, SegmentReader}
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, instrument, warn};
 
-use crate::actors::packager::create_packaged_split;
-use crate::actors::uploader::stage_upload_and_publish_split;
 use crate::controlled_directory::ControlledDirectory;
 use crate::merge_policy::{MergeOperation, MergeOperationType, MergePolicy};
 use crate::models::{IndexedSplit, PackagedSplit, SplitAttrs};
 use crate::no_fsync_mmap_directory::open_split_scratch_directory;
+use crate::packager::create_packaged_split;
 use crate::split_store::IndexingSplitStore;
+use crate::uploader::stage_upload_and_publish_split;
 
 /// Shared dependencies and controls for executing merge or delete-and-merge operations.
 #[derive(Clone)]
@@ -166,8 +166,7 @@ pub async fn execute_merge_operation(
                     operation_type = %operation_type,
                     "merge-operation-success"
                 );
-                let progress = Progress::default();
-                let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+                let packaged_split = create_packaged_split(indexed_split, &tag_fields)?;
                 Ok::<_, anyhow::Error>(Some(packaged_split))
             }
             .instrument(merge_parent_span),

@@ -26,16 +26,22 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-pub mod actors;
 mod completed_file_cleanup;
+mod delete_task_pipeline;
+mod delete_task_planner;
+mod delete_task_service;
 pub mod error;
+mod garbage_collector;
 mod janitor_service;
 mod metrics;
 mod retention_policy_execution;
+mod retention_policy_executor;
 
+pub use delete_task_service::{DELETE_SERVICE_TASK_DIR_NAME, DeleteTaskService};
+pub use garbage_collector::GarbageCollector;
 pub use janitor_service::{HealthCheckFn, JanitorService};
+pub use retention_policy_executor::RetentionPolicyExecutor;
 
-use crate::actors::{DeleteTaskService, GarbageCollector, RetentionPolicyExecutor};
 use crate::janitor_service::monitor_task;
 
 #[derive(utoipa::OpenApi)]

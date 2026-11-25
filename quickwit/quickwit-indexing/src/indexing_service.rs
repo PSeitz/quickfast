@@ -31,7 +31,7 @@ use tracing::info;
 use crate::ingesthree::S3IndexerSupervisor;
 use crate::source::{IngestRouterSink, SourceForwarderManager};
 
-#[path = "../ingesthree/service.rs"]
+#[path = "ingesthree/service.rs"]
 mod file_indexing;
 
 /// Name of the indexing directory, usually located at `<data_dir_path>/indexing`.

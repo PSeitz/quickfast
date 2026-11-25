@@ -75,8 +75,7 @@ use quickwit_compaction::{
 use quickwit_config::NodeConfig;
 use quickwit_config::service::QuickwitService;
 use quickwit_index_management::{IndexService as IndexManager, IndexServiceError};
-use quickwit_indexing::actors::IndexingService;
-use quickwit_indexing::start_indexing_service;
+use quickwit_indexing::{IndexingService, start_indexing_service};
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_jaeger::JaegerService;
 use quickwit_janitor::{JanitorService, start_janitor_service};

@@ -17,7 +17,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use quickwit_common::Progress;
 use quickwit_common::io::IoControls;
 use quickwit_common::rand::append_random_suffix;
 use quickwit_common::temp_dir::TempDirectory;
@@ -40,11 +39,11 @@ use quickwit_proto::types::{IndexUid, NodeId, PipelineUid, SourceId};
 use quickwit_storage::{Storage, StorageResolver};
 use serde_json::Value as JsonValue;
 
-use crate::actors::{DocumentConverter, create_packaged_split, prepare_split_for_upload};
 use crate::local_merge::run_local_merges;
 use crate::merge_policy::{MergePolicy, merge_policy_from_settings};
 use crate::models::IndexedSplitBuilder;
 use crate::split_store::IndexingSplitStore;
+use crate::{DocumentConverter, create_packaged_split, prepare_split_for_upload};
 
 /// Creates a test environment backed by RAM storage and a local scratch directory.
 pub struct TestSandbox {
@@ -85,7 +84,7 @@ impl TestSandbox {
             .iter()
             .map(|search_field| search_field.to_string())
             .collect();
-        let source_config = SourceConfig::ingest_v2();
+        let source_config = SourceConfig::ingest();
         let storage_resolver = StorageResolver::for_test();
         let metastore_resolver =
             MetastoreResolver::configured(storage_resolver.clone(), &MetastoreConfigs::default());
@@ -177,11 +176,10 @@ impl TestSandbox {
         }
 
         let tag_fields = self.doc_mapper.tag_named_fields()?;
-        let progress = Progress::default();
         let mut new_splits = Vec::with_capacity(builders.len());
         for (_, builder) in builders {
             let indexed_split = builder.finalize()?;
-            let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+            let packaged_split = create_packaged_split(indexed_split, &tag_fields)?;
             let (split_metadata, split_payload) = prepare_split_for_upload(
                 &packaged_split,
                 &self.merge_policy,

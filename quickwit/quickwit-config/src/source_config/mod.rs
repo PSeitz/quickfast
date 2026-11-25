@@ -97,7 +97,7 @@ impl SourceConfig {
     }
 
     /// Creates a native Quickwit ingest source.
-    pub fn ingest_v2() -> Self {
+    pub fn ingest() -> Self {
         Self {
             source_id: INGEST_V2_SOURCE_ID.to_string(),
             enabled: true,

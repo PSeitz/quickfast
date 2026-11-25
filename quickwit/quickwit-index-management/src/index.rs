@@ -142,7 +142,7 @@ impl IndexService {
 
         // Add default sources.
         let source_configs_json = vec![
-            serde_utils::to_json_str(&SourceConfig::ingest_v2())?,
+            serde_utils::to_json_str(&SourceConfig::ingest())?,
             serde_utils::to_json_str(&SourceConfig::cli())?,
         ];
         let create_index_request = CreateIndexRequest {
@@ -255,7 +255,6 @@ impl IndexService {
             storage,
             self.metastore.clone(),
             splits_metadata_to_delete,
-            None,
         )
         .await?;
         let delete_index_request = DeleteIndexRequest {
@@ -396,7 +395,6 @@ impl IndexService {
             Duration::ZERO,
             dry_run,
             None,
-            None,
         )
         .await?;
 
@@ -446,7 +444,6 @@ impl IndexService {
             storage,
             self.metastore.clone(),
             splits_metadata,
-            None,
         )
         .await
         {

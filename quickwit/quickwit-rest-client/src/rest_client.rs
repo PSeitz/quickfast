@@ -18,7 +18,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use quickwit_cluster::ClusterSnapshot;
 use quickwit_config::{ConfigFormat, SourceConfig};
-use quickwit_indexing::actors::IndexingServiceCounters;
+use quickwit_indexing::IndexingServiceCounters;
 use quickwit_metastore::{IndexMetadata, Split, SplitInfo};
 use quickwit_serve::{
     ListSplitsQueryParams, ListSplitsResponse, RestIngestResponse, SearchRequestQueryString,
@@ -1192,7 +1192,7 @@ mod test {
         let mock_server = MockServer::start().await;
         let server_url = Url::parse(&mock_server.uri()).unwrap();
         let qw_client = QuickwitClientBuilder::new(server_url).build();
-        let source_config = SourceConfig::ingest_v2();
+        let source_config = SourceConfig::ingest();
         // POST create source with toml
         Mock::given(method("POST"))
             .and(path("/api/v1/indexes/my-index/sources"))

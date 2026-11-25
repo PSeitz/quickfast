@@ -49,7 +49,7 @@ impl RestIngestResponse {
     ///
     /// Generates a detailed failure description (`parse_failures`) if
     /// `doc_batch_clone_opt.is_some()`
-    pub(crate) fn from_ingest_v2(
+    pub(crate) fn from_ingest_response(
         ingest_response: impl Into<RouterResponse>,
         doc_batch_clone_opt: Option<&DocBatchV2>,
         num_docs_for_processing: u64,
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_ingest_v2_success() {
+    fn test_from_ingest_response_success() {
         let success_resp = IngestResponseV2 {
             successes: vec![IngestSuccess {
                 subrequest_id: 0,
@@ -140,7 +140,8 @@ mod tests {
             }],
             failures: vec![],
         };
-        let rest_response = RestIngestResponse::from_ingest_v2(success_resp, None, 10).unwrap();
+        let rest_response =
+            RestIngestResponse::from_ingest_response(success_resp, None, 10).unwrap();
         assert_eq!(rest_response.num_docs_for_processing, 10);
         assert_eq!(rest_response.num_ingested_docs, Some(5));
         assert_eq!(rest_response.num_rejected_docs, Some(0));
@@ -148,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_ingest_v2_partial_success() {
+    fn test_from_ingest_response_partial_success() {
         let success_resp = IngestResponseV2 {
             successes: vec![IngestSuccess {
                 subrequest_id: 0,
@@ -163,7 +164,8 @@ mod tests {
             }],
             failures: vec![],
         };
-        let rest_response = RestIngestResponse::from_ingest_v2(success_resp, None, 10).unwrap();
+        let rest_response =
+            RestIngestResponse::from_ingest_response(success_resp, None, 10).unwrap();
         assert_eq!(rest_response.num_docs_for_processing, 10);
         assert_eq!(rest_response.num_ingested_docs, Some(5));
         assert_eq!(rest_response.num_rejected_docs, Some(1));
@@ -171,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_ingest_v2_failure() {
+    fn test_from_ingest_response_failure() {
         let failure_resp = IngestResponseV2 {
             successes: vec![],
             failures: vec![IngestFailure {
@@ -181,7 +183,7 @@ mod tests {
                 reason: IngestFailureReason::SourceNotFound.into(),
             }],
         };
-        let result = RestIngestResponse::from_ingest_v2(failure_resp, None, 10);
+        let result = RestIngestResponse::from_ingest_response(failure_resp, None, 10);
         assert!(result.is_err());
     }
 

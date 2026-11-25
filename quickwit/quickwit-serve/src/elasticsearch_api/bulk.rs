@@ -47,7 +47,7 @@ pub fn es_compat_bulk_handler(
     elastic_bulk_filter(max_body_size, max_decompressed_body_size)
         .and(with_arg(ingest_router.into()))
         .then(move |body, bulk_options, ingest_router| {
-            elastic_bulk_ingest_v2(None, body, bulk_options, ingest_router)
+            elastic_bulk_ingest(None, body, bulk_options, ingest_router)
         })
         .and(extract_format_from_qs())
         .map(make_elastic_api_response)
@@ -63,7 +63,7 @@ pub fn es_compat_index_bulk_handler(
     elastic_index_bulk_filter(max_body_size, max_decompressed_body_size)
         .and(with_arg(ingest_router.into()))
         .then(move |index_id, body, bulk_options, ingest_router| {
-            elastic_bulk_ingest_v2(Some(index_id), body, bulk_options, ingest_router)
+            elastic_bulk_ingest(Some(index_id), body, bulk_options, ingest_router)
         })
         .and(extract_format_from_qs())
         .map(make_elastic_api_response)
@@ -120,7 +120,7 @@ struct DocHandle {
     is_parse_failure: bool,
 }
 
-pub(crate) async fn elastic_bulk_ingest_v2(
+pub(crate) async fn elastic_bulk_ingest(
     default_index_id: Option<IndexId>,
     body: Body,
     bulk_options: ElasticBulkOptions,
@@ -478,7 +478,7 @@ mod tests {
         elastic_bulk_filter(max_body_size, ByteSize::mib(256))
             .and(with_arg(ingest_router))
             .then(|body, bulk_options, ingest_router| {
-                elastic_bulk_ingest_v2(None, body, bulk_options, ingest_router)
+                elastic_bulk_ingest(None, body, bulk_options, ingest_router)
             })
             .and(extract_format_from_qs())
             .map(make_elastic_api_response)

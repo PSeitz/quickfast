@@ -20,7 +20,7 @@ use anyhow::Context;
 use quickwit_cluster::Cluster;
 use quickwit_common::pubsub::{Event, EventBroker, EventSubscriber, EventSubscriptionHandle};
 use quickwit_config::NodeConfig;
-use quickwit_indexing::actors::IndexingService;
+use quickwit_indexing::IndexingService;
 use quickwit_ingest::ingesthree::{Uploader, WriteQueue};
 use quickwit_proto::metastore::{
     AddSourceRequest, CreateIndexRequest, DeleteIndexRequest, DeleteSourceRequest,

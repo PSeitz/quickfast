@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, bail};
 use itertools::Itertools;
-use quickwit_common::Progress;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_directories::write_hotcache;
 use quickwit_doc_mapper::NamedField;
@@ -123,7 +122,6 @@ fn try_extract_terms(
 pub fn create_packaged_split(
     split: IndexedSplit,
     tag_fields: &[NamedField],
-    progress: &Progress,
 ) -> anyhow::Result<PackagedSplit> {
     let index_meta = split.index.load_metas()?;
     assert_eq!(index_meta.segments.len(), 1);
@@ -184,12 +182,9 @@ pub fn create_packaged_split(
         }
     }
 
-    progress.record_progress();
-
     debug!(split_id = %split.split_id(), "build-hotcache");
     let mut hotcache_bytes = Vec::new();
     build_hotcache(split.split_scratch_directory.path(), &mut hotcache_bytes)?;
-    progress.record_progress();
 
     let serialized_split_fields = serialize_fields_metadata(&fields_metadata);
 
@@ -446,7 +441,7 @@ mod tests {
             schema.build(),
             &["tag_i64", "added", "tag_str", "timestamp", "text"],
         );
-        let packaged = create_packaged_split(split, &tag_fields, &Progress::default())?;
+        let packaged = create_packaged_split(split, &tag_fields)?;
         assert_eq!(
             packaged.tags,
             ["tag_i64!", "tag_i64:-42", "tag_str!", "tag_str:value"]
@@ -470,7 +465,7 @@ mod tests {
                 "tag_str", "tag_many", "tag_u64", "tag_i64", "tag_f64", "tag_bool",
             ],
         );
-        let split = create_packaged_split(indexed_split, &tag_fields, &Progress::default())?;
+        let split = create_packaged_split(indexed_split, &tag_fields)?;
         assert_eq!(
             &split.tags.iter().map(|s| s.as_str()).collect::<Vec<&str>>(),
             &[

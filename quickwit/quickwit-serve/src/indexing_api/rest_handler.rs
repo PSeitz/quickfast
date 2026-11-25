@@ -14,7 +14,7 @@
 
 use std::convert::Infallible;
 
-use quickwit_indexing::actors::{IndexingService, IndexingServiceCounters};
+use quickwit_indexing::{IndexingService, IndexingServiceCounters};
 use warp::{Filter, Rejection};
 
 use crate::format::extract_format_from_qs;

@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::{fmt, io};
 
 use arc_swap::ArcSwap;
-use quickwit_common::ProtectedZoneGuard;
 use quickwit_common::io::{ControlledWrite, IoControls, IoControlsAccess};
 use tantivy::Directory;
 use tantivy::directory::error::{DeleteError, OpenReadError, OpenWriteError};
@@ -35,9 +34,8 @@ const BUFFER_NUM_BYTES: usize = 8_192;
 
 /// The `ControlledDirectory` wraps another directory and enhances it
 /// with functionalities such as
-/// - records progress everytime a write (Note there is however a buffer writer above it)
 /// - if the killswitch is activated, returns an error on the first write happening after it
-/// - in the future, record a writing speed, possibly introduce some throttling, etc.
+/// - write throttling and byte accounting via `IoControls`
 #[derive(Clone)]
 pub struct ControlledDirectory {
     underlying: Arc<dyn Directory>,
@@ -52,7 +50,7 @@ impl ControlledDirectory {
         }
     }
 
-    pub fn check_if_alive(&self) -> io::Result<ProtectedZoneGuard> {
+    pub fn check_if_alive(&self) -> io::Result<()> {
         self.io_controls.load().check_if_alive()
     }
 
@@ -186,39 +184,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_records_progress_on_write() -> anyhow::Result<()> {
+    fn test_records_written_bytes() -> anyhow::Result<()> {
         let directory = RamDirectory::default();
         let io_controls = IoControls::default();
         let controlled_directory =
             ControlledDirectory::new(Box::new(directory), io_controls.clone());
-        let progress = io_controls.progress().clone();
-        assert!(progress.registered_activity_since_last_call());
-        assert!(!progress.registered_activity_since_last_call());
         let mut wrt = controlled_directory.open_write(Path::new("test"))?;
-        assert!(progress.registered_activity_since_last_call());
         // We use a large buffer to force the buf writer to flush at least once.
         let large_buffer = vec![0u8; wrt.capacity() + 1];
         assert_eq!(io_controls.num_bytes(), 0u64);
         wrt.write_all(&large_buffer)?;
         assert_eq!(io_controls.num_bytes(), 8_193u64);
-        assert!(progress.registered_activity_since_last_call());
         wrt.write_all(b"small payload")?;
         // The buffering makes it so that this last write does not
         // get actually written right away.
         assert_eq!(io_controls.num_bytes(), 8_193u64);
-        // Here we check that the progress only concerns is only
-        // trigger when the BufWriter flushes.
-        assert!(!progress.registered_activity_since_last_call());
         wrt.write_all(&large_buffer)?;
         assert_eq!(io_controls.num_bytes(), 16_399);
-        assert!(progress.registered_activity_since_last_call());
-        assert!(!progress.registered_activity_since_last_call());
         wrt.write_all(&b"aa"[..])?;
         assert_eq!(io_controls.num_bytes(), 16_399u64);
         wrt.terminate()?;
         // Flush works as expected and makes sure all data buffered goes through
         assert_eq!(io_controls.num_bytes(), 16_401u64);
-        assert!(progress.registered_activity_since_last_call());
         Ok(())
     }
 

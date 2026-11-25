@@ -28,9 +28,9 @@ use quickwit_proto::indexing::MergePipelineId;
 use quickwit_proto::metastore::{ListSplitsRequest, MetastoreService, MetastoreServiceClient};
 use time::OffsetDateTime;
 
-use crate::actors::{MergeExecutionContext, execute_merge_operation};
 use crate::merge_policy::MergePolicy;
 use crate::split_store::IndexingSplitStore;
+use crate::{MergeExecutionContext, execute_merge_operation};
 
 /// Runs all pending merge operations for `(index_uid, source_id)` locally until the merge policy
 /// emits no further operations (including finalize operations).

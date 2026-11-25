@@ -388,7 +388,7 @@ pub async fn test_metastore_create_index_with_sources<
 
     let source_configs_json = vec![
         serde_json::to_string(&SourceConfig::cli()).unwrap(),
-        serde_json::to_string(&SourceConfig::ingest_v2()).unwrap(),
+        serde_json::to_string(&SourceConfig::ingest()).unwrap(),
     ];
     let create_index_request = CreateIndexRequest {
         index_config_json,

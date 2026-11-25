@@ -141,7 +141,7 @@ async fn ingest(
         subrequests: vec![subrequest],
     };
     let response = ingest_router.ingest(request).await?;
-    RestIngestResponse::from_ingest_v2(
+    RestIngestResponse::from_ingest_response(
         response,
         doc_batch_clone_opt.as_ref(),
         num_docs_for_processing,

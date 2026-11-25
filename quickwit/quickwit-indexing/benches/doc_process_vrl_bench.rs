@@ -4,7 +4,7 @@ use bytes::Bytes;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use quickwit_config::{SourceInputFormat, TransformConfig};
 use quickwit_doc_mapper::DocMapper;
-use quickwit_indexing::actors::DocumentConverter;
+use quickwit_indexing::DocumentConverter;
 
 const JSON_NORMAL: &str = include_str!("data/bench_data.json");
 const JSON_LIGHT_TRANSFORM: &str = include_str!("data/bench_data_light_transform.json");

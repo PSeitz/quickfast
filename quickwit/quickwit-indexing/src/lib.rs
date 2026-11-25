@@ -20,26 +20,42 @@ use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_storage::StorageResolver;
 use tracing::info;
 
-pub use crate::actors::{IndexingService, IndexingServiceCounters};
 pub use crate::controlled_directory::ControlledDirectory;
+pub use crate::doc_processor::{DocProcessorCounters, DocumentConverter};
+pub use crate::indexing_service::{INDEXING_DIR_NAME, IndexingService, IndexingServiceCounters};
 pub use crate::local_merge::run_local_merges;
+pub use crate::merge_executor::{
+    MergeExecutionContext, combine_partition_ids, execute_merge_operation, merge_split_attrs,
+};
+pub use crate::packager::create_packaged_split;
 pub use crate::split_store::{IndexingSplitStore, get_tantivy_directory_from_split_bundle};
+pub(crate) use crate::uploader::acquire_indexing_upload_permit;
+pub use crate::uploader::prepare_split_for_upload;
 
-pub mod actors;
 mod controlled_directory;
+mod doc_processor;
 mod docs_clustering;
+mod indexing_service;
 pub mod ingesthree;
 mod local_merge;
+mod merge_executor;
 pub mod merge_policy;
 mod metrics;
 pub mod models;
 mod no_fsync_mmap_directory;
+mod packager;
 pub mod source;
 #[cfg(test)]
 mod split_recovery_tests;
 mod split_store;
 #[cfg(any(test, feature = "testsuite"))]
 mod test_utils;
+mod uploader;
+#[cfg(feature = "vrl")]
+mod vrl_processing;
+
+/// Partition ID assigned to overflow splits when the number of partitions exceeds the split limit.
+pub(crate) const OTHER_PARTITION_ID: u64 = 3264326757911759461u64;
 
 #[cfg(any(test, feature = "testsuite"))]
 pub use test_utils::{MockSplitBuilder, TestSandbox, mock_split, mock_split_meta};
