@@ -89,10 +89,6 @@ pub fn get_delete_tasks_handler(
 /// Get Delete Tasks
 ///
 /// Returns delete tasks in json format for a given `index_id`.
-// Note that `_delete_task_service_mailbox` is not used...
-// Explanation: we don't want to expose any delete tasks endpoints without a running
-// `DeleteTaskService`. This is ensured by requiring a `Mailbox<DeleteTaskService>` in
-// `get_delete_tasks_handler` and consequently we get the mailbox in `get_delete_tasks` signature.
 pub async fn get_delete_tasks(
     index_id: IndexId,
     metastore: MetastoreServiceClient,

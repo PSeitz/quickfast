@@ -13,10 +13,6 @@ fmt:
 	@echo "Checking log format"
 	@bash scripts/check_log_format.sh
 
-dependency-licenses.html: Cargo.lock scripts/about.hbs scripts/about.toml
-	@echo "Checking dependency licenses"
-	@cargo about generate -c scripts/about.toml scripts/about.hbs -o dependency-licenses.html --workspace
-
 fix:
 	@echo "Running cargo clippy --fix"
 	@cargo clippy --workspace --all-features --tests --fix --allow-dirty --allow-staged
