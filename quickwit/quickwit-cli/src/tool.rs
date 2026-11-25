@@ -46,7 +46,7 @@ use quickwit_proto::metastore::{
     PublishSplitsRequest, StageSplitsRequest,
 };
 use quickwit_proto::search::{CountHits, SearchResponse};
-use quickwit_proto::types::{IndexId, PipelineUid, SourceId, SplitId};
+use quickwit_proto::types::{IndexId, SourceId, SplitId};
 use quickwit_search::{SearchResponseRest, single_node_search};
 use quickwit_serve::{
     BodyFormat, SearchRequestQueryString, SortBy, search_request_from_api_request,
@@ -477,7 +477,6 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
         node_id: config.node_id.clone(),
         index_uid: index_uid.clone(),
         source_id: CLI_SOURCE_ID.to_string(),
-        pipeline_uid: PipelineUid::random(),
     };
     let scratch_root = tempfile::tempdir()?;
     let mut builders: HashMap<u64, IndexedSplitBuilder> = HashMap::new();

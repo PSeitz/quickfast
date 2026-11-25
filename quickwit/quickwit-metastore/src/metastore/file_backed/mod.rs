@@ -19,7 +19,6 @@
 pub mod file_backed_index;
 mod file_backed_metastore_factory;
 mod index_id_matcher;
-mod index_template_matcher;
 mod lazy_file_backed_index;
 pub(crate) mod manifest;
 mod staged_files;
@@ -43,20 +42,18 @@ use quickwit_proto::metastore::{
     AddSourceRequest, AssignFilesForIndexing, AssignFilesForIndexingResponse, CreateIndexRequest,
     CreateIndexResponse, CreateIndexTemplateRequest, DeleteIndexRequest,
     DeleteIndexTemplatesRequest, DeleteQuery, DeleteSourceRequest, DeleteSplitsRequest, DeleteTask,
-    EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse,
-    GetClusterIdentityRequest, GetClusterIdentityResponse, GetIndexTemplateRequest,
-    GetIndexTemplateResponse, IndexMetadataFailure, IndexMetadataFailureReason,
-    IndexMetadataRequest, IndexMetadataResponse, IndexTemplateMatch, IndexesMetadataRequest,
-    IndexesMetadataResponse, LastDeleteOpstampRequest, LastDeleteOpstampResponse,
-    ListCompletedFilesRequest, ListCompletedFilesResponse, ListDeleteTasksRequest,
-    ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
-    ListIndexTemplatesRequest, ListIndexTemplatesResponse, ListIndexesMetadataRequest,
-    ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest,
-    MarkSplitsForDeletionRequest, MetastoreError, MetastoreResult, MetastoreService,
-    MetastoreServiceStream, PublishFileSplits, PublishFileSplitsResponse, PublishSplitsRequest,
-    RegisterFileForIndexing, RegisterFileForIndexingResponse, StageSplitsRequest,
-    ToggleSourceRequest, UpdateIndexRequest, UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest,
-    UpdateSplitsDeleteOpstampResponse, serde_utils,
+    EmptyResponse, EntityKind, GetIndexTemplateRequest, GetIndexTemplateResponse,
+    IndexMetadataFailure, IndexMetadataFailureReason, IndexMetadataRequest, IndexMetadataResponse,
+    IndexesMetadataRequest, IndexesMetadataResponse, LastDeleteOpstampRequest,
+    LastDeleteOpstampResponse, ListCompletedFilesRequest, ListCompletedFilesResponse,
+    ListDeleteTasksRequest, ListDeleteTasksResponse, ListIndexTemplatesRequest,
+    ListIndexTemplatesResponse, ListIndexesMetadataRequest, ListIndexesMetadataResponse,
+    ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest, MarkSplitsForDeletionRequest,
+    MetastoreError, MetastoreResult, MetastoreService, MetastoreServiceStream, PublishFileSplits,
+    PublishFileSplitsResponse, PublishSplitsRequest, RegisterFileForIndexing,
+    RegisterFileForIndexingResponse, StageSplitsRequest, ToggleSourceRequest, UpdateIndexRequest,
+    UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest, UpdateSplitsDeleteOpstampResponse,
+    serde_utils,
 };
 use quickwit_proto::types::{IndexId, IndexUid};
 use quickwit_storage::Storage;
@@ -64,7 +61,6 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 use tracing::{Instrument, instrument};
 use ulid::Ulid;
-use uuid::Uuid;
 
 use self::file_backed_index::FileBackedIndex;
 pub use self::file_backed_metastore_factory::FileBackedMetastoreFactory;
@@ -889,52 +885,6 @@ impl MetastoreService for FileBackedMetastore {
         Ok(ServiceStream::new(splits_responses_stream))
     }
 
-    #[instrument(name = "metastore.file_backed.list_index_stats", skip_all, fields(index_id_patterns = ?request.index_id_patterns))]
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> MetastoreResult<ListIndexStatsResponse> {
-        let index_id_matcher =
-            IndexIdMatcher::try_from_index_id_patterns(&request.index_id_patterns)?;
-        let index_ids: Vec<IndexId> = {
-            let inner_rlock_guard = self.state.read().await;
-            inner_rlock_guard
-                .indexes
-                .iter()
-                .filter_map(|(index_id, index_state)| match index_state {
-                    LazyIndexStatus::Active(_) if index_id_matcher.is_match(index_id) => {
-                        Some(index_id)
-                    }
-                    _ => None,
-                })
-                .cloned()
-                .collect()
-        };
-
-        let mut index_read_futures = FuturesUnordered::new();
-        for index_id in index_ids {
-            let index_read_future = async move {
-                self.read_any(&index_id, None, |index| index.get_stats())
-                    .await
-            };
-            index_read_futures.push(index_read_future);
-        }
-
-        let mut index_stats = Vec::new();
-        while let Some(index_read_result) = index_read_futures.next().await {
-            match index_read_result {
-                Ok(stats) => index_stats.push(stats),
-                Err(MetastoreError::NotFound(_)) => {
-                    // If the index does not exist, we just skip it.
-                    continue;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-
-        Ok(ListIndexStatsResponse { index_stats })
-    }
-
     #[instrument(name = "metastore.file_backed.list_stale_splits", skip_all, fields(index_uid = %request.index_uid()))]
     async fn list_stale_splits(
         &self,
@@ -1142,16 +1092,6 @@ impl MetastoreService for FileBackedMetastore {
                 }));
             }
         };
-        if let Err(error) = state_wlock_guard.template_matcher.insert(&index_template) {
-            if let Some(evicted_template) = evicted_template_opt {
-                state_wlock_guard
-                    .templates
-                    .insert(evicted_template.template_id.clone(), evicted_template);
-            } else {
-                state_wlock_guard.templates.remove(&template_id);
-            }
-            return Err(error);
-        }
         let manifest = state_wlock_guard.as_manifest();
         let save_result = save_manifest(&*self.storage, &manifest).await;
 
@@ -1159,15 +1099,10 @@ impl MetastoreService for FileBackedMetastore {
         if let Err(error) = save_result {
             if let Some(evicted_template) = evicted_template_opt {
                 state_wlock_guard
-                    .template_matcher
-                    .insert(&evicted_template)
-                    .expect("evicted template should be valid");
-                state_wlock_guard
                     .templates
                     .insert(evicted_template.template_id.clone(), evicted_template);
             } else {
                 state_wlock_guard.templates.remove(&template_id);
-                state_wlock_guard.template_matcher.remove(&template_id);
             }
             return Err(error);
         }
@@ -1192,38 +1127,6 @@ impl MetastoreService for FileBackedMetastore {
         let response = GetIndexTemplateResponse {
             index_template_json,
         };
-        Ok(response)
-    }
-
-    #[instrument(name = "metastore.file_backed.find_index_template_matches", skip(self))]
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> MetastoreResult<FindIndexTemplateMatchesResponse> {
-        let inner_rlock_guard = self.state.read().await;
-
-        let mut matches = Vec::new();
-
-        for index_id in request.index_ids {
-            if let Some(template_id) = inner_rlock_guard
-                .template_matcher
-                .find_match(&index_id)
-                .clone()
-            {
-                let index_template = inner_rlock_guard
-                    .templates
-                    .get(&template_id)
-                    .expect("template should exist");
-                let index_template_json = serde_utils::to_json_str(index_template)?;
-                let index_template_match = IndexTemplateMatch {
-                    index_id,
-                    template_id,
-                    index_template_json,
-                };
-                matches.push(index_template_match);
-            };
-        }
-        let response = FindIndexTemplateMatchesResponse { matches };
         Ok(response)
     }
 
@@ -1256,7 +1159,6 @@ impl MetastoreService for FileBackedMetastore {
         for template_id in &request.template_ids {
             if let Some(evicted_template) = state_wlock_guard.templates.remove(template_id) {
                 evicted_templates.push(evicted_template);
-                state_wlock_guard.template_matcher.remove(template_id);
             }
         }
         let manifest = state_wlock_guard.as_manifest();
@@ -1266,43 +1168,12 @@ impl MetastoreService for FileBackedMetastore {
         if let Err(error) = save_result {
             for evicted_template in evicted_templates {
                 state_wlock_guard
-                    .template_matcher
-                    .insert(&evicted_template)
-                    .expect("evicted template should be valid");
-                state_wlock_guard
                     .templates
                     .insert(evicted_template.template_id.clone(), evicted_template);
             }
             return Err(error);
         }
         Ok(EmptyResponse {})
-    }
-
-    // Get cluster identity api
-
-    // this returns a constant uuid. on first call, it generate said uuid if it doesn't already
-    // exists
-    #[instrument(name = "metastore.file_backed.get_cluster_identity", skip_all)]
-    async fn get_cluster_identity(
-        &self,
-        _: GetClusterIdentityRequest,
-    ) -> MetastoreResult<GetClusterIdentityResponse> {
-        let mut state_wlock_guard = self.state.write().await;
-
-        if state_wlock_guard.identity.is_nil() {
-            state_wlock_guard.identity = Uuid::new_v4();
-
-            let manifest = state_wlock_guard.as_manifest();
-
-            if let Err(error) = save_manifest(&*self.storage, &manifest).await {
-                state_wlock_guard.identity = Uuid::nil();
-                return Err(error);
-            }
-        }
-
-        Ok(GetClusterIdentityResponse {
-            uuid: state_wlock_guard.identity.hyphenated().to_string(),
-        })
     }
 }
 
@@ -2328,7 +2199,10 @@ mod tests {
         {
             let state = metastore.state.read().await;
             assert_eq!(state.templates.len(), 1);
-            state.template_matcher.find_match("test-index-foo").unwrap();
+            assert_eq!(
+                state.templates["test-template"].index_id_patterns,
+                vec!["test-index-foo*"]
+            );
         }
         let index_template = IndexTemplate::for_test("test-template", &["test-index-bar*"], 100);
         let index_template_json = serde_json::to_string(&index_template).unwrap();
@@ -2343,7 +2217,10 @@ mod tests {
         {
             let state = metastore.state.read().await;
             assert_eq!(state.templates.len(), 1);
-            state.template_matcher.find_match("test-index-foo").unwrap();
+            assert_eq!(
+                state.templates["test-template"].index_id_patterns,
+                vec!["test-index-foo*"]
+            );
         }
     }
 
@@ -2387,7 +2264,7 @@ mod tests {
         {
             let state = metastore.state.read().await;
             assert_eq!(state.templates.len(), 1);
-            state.template_matcher.find_match("test-index-foo").unwrap();
+            assert!(state.templates.contains_key("test-template"));
         }
         let delete_index_templates_request = DeleteIndexTemplatesRequest {
             template_ids: vec![index_template.template_id],
@@ -2399,14 +2276,7 @@ mod tests {
         {
             let state = metastore.state.read().await;
             assert_eq!(state.templates.len(), 1);
-            state.template_matcher.find_match("test-index-foo").unwrap();
-
-            assert!(
-                state
-                    .template_matcher
-                    .find_match("test-index-bar")
-                    .is_none()
-            );
+            assert!(state.templates.contains_key("test-template"));
         }
     }
 }

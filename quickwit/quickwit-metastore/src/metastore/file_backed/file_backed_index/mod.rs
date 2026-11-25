@@ -31,8 +31,7 @@ use quickwit_config::{
     DocMapping, IndexingSettings, IngestSettings, RetentionPolicy, SearchSettings, SourceConfig,
 };
 use quickwit_proto::metastore::{
-    DeleteQuery, DeleteTask, DocumentsStagedForUpload, EntityKind, IndexStats, MetastoreError,
-    MetastoreResult, SplitStats,
+    DeleteQuery, DeleteTask, DocumentsStagedForUpload, EntityKind, MetastoreError, MetastoreResult,
 };
 use quickwit_proto::types::{IndexUid, SplitId};
 use serde::{Deserialize, Serialize};
@@ -421,34 +420,6 @@ impl FileBackedIndex {
         Ok(())
     }
 
-    /// Gets IndexStats for this index
-    pub(crate) fn get_stats(&self) -> MetastoreResult<IndexStats> {
-        let mut staged_stats = SplitStats::default();
-        let mut published_stats = SplitStats::default();
-        let mut marked_for_deletion_stats = SplitStats::default();
-
-        for split in self.splits.values() {
-            match split.split_state {
-                SplitState::Staged => {
-                    staged_stats.add_split(split.split_metadata.footer_offsets.end)
-                }
-                SplitState::Published => {
-                    published_stats.add_split(split.split_metadata.footer_offsets.end)
-                }
-                SplitState::MarkedForDeletion => {
-                    marked_for_deletion_stats.add_split(split.split_metadata.footer_offsets.end)
-                }
-            }
-        }
-
-        Ok(IndexStats {
-            index_uid: Some(self.index_uid().clone()),
-            staged: Some(staged_stats),
-            published: Some(published_stats),
-            marked_for_deletion: Some(marked_for_deletion_stats),
-        })
-    }
-
     /// Adds a source.
     pub(crate) fn add_source(&mut self, source_config: SourceConfig) -> MetastoreResult<()> {
         self.metadata.add_source(source_config)
@@ -639,12 +610,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use quickwit_doc_mapper::tag_pruning::TagFilterAst;
-    use quickwit_proto::metastore::SplitStats;
     use quickwit_proto::types::IndexUid;
 
-    use super::FileBackedIndex;
     use crate::file_backed::file_backed_index::split_query_predicate;
-    use crate::{IndexMetadata, ListSplitsQuery, Split, SplitMetadata, SplitState};
+    use crate::{ListSplitsQuery, Split, SplitMetadata, SplitState};
 
     fn make_splits() -> [Split; 3] {
         [
@@ -824,30 +793,5 @@ mod tests {
             query.after_split = Some((split.split_metadata.index_uid.clone(), "split-z".into()));
             assert!(!split_query_predicate(&&split, &query));
         }
-    }
-
-    #[test]
-    fn test_get_stats() {
-        let index_id = "test-index";
-        let index_metadata = IndexMetadata::for_test(index_id, "file:///qwdata/indexes/test-index");
-        let index = FileBackedIndex::new(index_metadata, make_splits().into(), vec![]);
-
-        let expected_staged = Some(SplitStats {
-            num_splits: 1,
-            total_size_bytes: 2048,
-        });
-        let expected_published = Some(SplitStats {
-            num_splits: 1,
-            total_size_bytes: 512,
-        });
-        let expected_marked_for_deletion = Some(SplitStats {
-            num_splits: 1,
-            total_size_bytes: 1024,
-        });
-        let stats = index.get_stats().unwrap();
-
-        assert_eq!(stats.staged, expected_staged);
-        assert_eq!(stats.published, expected_published);
-        assert_eq!(stats.marked_for_deletion, expected_marked_for_deletion);
     }
 }

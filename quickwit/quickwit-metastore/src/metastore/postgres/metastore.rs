@@ -12,43 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::{self, Write};
-use std::str::FromStr;
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use quickwit_common::pretty::PrettySample;
 use quickwit_common::uri::Uri;
 use quickwit_common::{ServiceStream, get_bool_from_env_cached, rate_limited_error};
-use quickwit_config::{
-    IndexTemplate, IndexTemplateId, PostgresMetastoreConfig, validate_index_id_pattern,
-};
+use quickwit_config::{IndexTemplate, PostgresMetastoreConfig, validate_index_id_pattern};
 use quickwit_proto::metastore::{
     AddSourceRequest, AssignFilesForIndexing, AssignFilesForIndexingResponse, CreateIndexRequest,
     CreateIndexResponse, CreateIndexTemplateRequest, DeleteIndexRequest,
     DeleteIndexTemplatesRequest, DeleteQuery, DeleteSourceRequest, DeleteSplitsRequest, DeleteTask,
-    EmptyResponse, EntityKind, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse,
-    GetClusterIdentityRequest, GetClusterIdentityResponse, GetIndexTemplateRequest,
-    GetIndexTemplateResponse, IndexMetadataFailure, IndexMetadataFailureReason,
-    IndexMetadataRequest, IndexMetadataResponse, IndexStats, IndexTemplateMatch,
+    EmptyResponse, EntityKind, GetIndexTemplateRequest, GetIndexTemplateResponse,
+    IndexMetadataFailure, IndexMetadataFailureReason, IndexMetadataRequest, IndexMetadataResponse,
     IndexesMetadataRequest, IndexesMetadataResponse, LastDeleteOpstampRequest,
     LastDeleteOpstampResponse, ListCompletedFilesRequest, ListCompletedFilesResponse,
-    ListDeleteTasksRequest, ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
-    ListIndexTemplatesRequest, ListIndexTemplatesResponse, ListIndexesMetadataRequest,
-    ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest,
-    MarkSplitsForDeletionRequest, MetastoreError, MetastoreResult, MetastoreService,
-    MetastoreServiceStream, PublishFileSplits, PublishFileSplitsResponse, PublishSplitsRequest,
-    RegisterFileForIndexing, RegisterFileForIndexingResponse, SplitStats, StageSplitsRequest,
-    ToggleSourceRequest, UpdateIndexRequest, UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest,
-    UpdateSplitsDeleteOpstampResponse, serde_utils,
+    ListDeleteTasksRequest, ListDeleteTasksResponse, ListIndexTemplatesRequest,
+    ListIndexTemplatesResponse, ListIndexesMetadataRequest, ListIndexesMetadataResponse,
+    ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest, MarkSplitsForDeletionRequest,
+    MetastoreError, MetastoreResult, MetastoreService, MetastoreServiceStream, PublishFileSplits,
+    PublishFileSplitsResponse, PublishSplitsRequest, RegisterFileForIndexing,
+    RegisterFileForIndexingResponse, StageSplitsRequest, ToggleSourceRequest, UpdateIndexRequest,
+    UpdateSourceRequest, UpdateSplitsDeleteOpstampRequest, UpdateSplitsDeleteOpstampResponse,
+    serde_utils,
 };
 use quickwit_proto::types::{IndexId, IndexUid};
 use sea_query::{Asterisk, PostgresQueryBuilder, Query};
 use sea_query_sqlx::SqlxBinder;
 use sqlx::{Acquire, Postgres, Transaction};
 use tracing::{debug, info, instrument, warn};
-use uuid::Uuid;
 
 use super::error::convert_sqlx_err;
 use super::metrics::MetastoreKind;
@@ -860,83 +853,6 @@ impl MetastoreService for PostgresqlMetastore {
         Ok(service_stream)
     }
 
-    #[instrument(name = "metastore.postgres.list_index_stats", skip_all, fields(index_id_patterns = ?request.index_id_patterns))]
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> MetastoreResult<ListIndexStatsResponse> {
-        let index_pattern_sql = build_index_id_patterns_sql_query(&request.index_id_patterns)
-            .map_err(|error| MetastoreError::Internal {
-                message: "failed to build `list_index_stats` SQL query".to_string(),
-                cause: error.to_string(),
-            })?;
-        let sql = format!(
-            "SELECT
-                i.index_uid,
-                s.split_state,
-                COUNT(s.split_state) AS num_splits,
-                COALESCE(SUM(s.split_size_bytes)::BIGINT, 0) AS total_size_bytes
-            FROM ({index_pattern_sql}) i
-            LEFT JOIN splits s ON s.index_uid = i.index_uid
-            GROUP BY i.index_uid, s.split_state"
-        );
-
-        let rows: Vec<(String, Option<String>, i64, i64)> = sqlx::query_as(&sql)
-            .fetch_all(&self.connection_pool)
-            .await?;
-
-        let mut index_stats = HashMap::new();
-        for (index_uid_str, split_state, num_splits, total_size_bytes) in rows {
-            let Ok(index_uid) = IndexUid::from_str(&index_uid_str) else {
-                return Err(MetastoreError::Internal {
-                    message: "failed to parse index_uid".to_string(),
-                    cause: index_uid_str.to_string(),
-                });
-            };
-            let stats = index_stats
-                .entry(index_uid_str)
-                .or_insert_with(|| IndexStats {
-                    index_uid: Some(index_uid),
-                    staged: Some(SplitStats::default()),
-                    published: Some(SplitStats::default()),
-                    marked_for_deletion: Some(SplitStats::default()),
-                });
-            let num_splits = num_splits as u64;
-            let total_size_bytes = total_size_bytes as u64;
-            match split_state.as_deref() {
-                Some("Staged") => {
-                    stats.staged = Some(SplitStats {
-                        num_splits,
-                        total_size_bytes,
-                    });
-                }
-                Some("Published") => {
-                    stats.published = Some(SplitStats {
-                        num_splits,
-                        total_size_bytes,
-                    });
-                }
-                Some("MarkedForDeletion") => {
-                    stats.marked_for_deletion = Some(SplitStats {
-                        num_splits,
-                        total_size_bytes,
-                    });
-                }
-                None => {} // if an index has no splits, we can keep the defaults
-                Some(split_state) => {
-                    return Err(MetastoreError::Internal {
-                        message: "invalid split state".to_string(),
-                        cause: split_state.to_string(),
-                    });
-                }
-            }
-        }
-
-        Ok(ListIndexStatsResponse {
-            index_stats: index_stats.into_values().collect(),
-        })
-    }
-
     #[instrument(name = "metastore.postgres.mark_splits_for_deletion", skip(self))]
     async fn mark_splits_for_deletion(
         &self,
@@ -1402,37 +1318,6 @@ impl MetastoreService for PostgresqlMetastore {
         Ok(response)
     }
 
-    #[instrument(name = "metastore.postgres.find_index_template_matches", skip(self))]
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> MetastoreResult<FindIndexTemplateMatchesResponse> {
-        if request.index_ids.is_empty() {
-            return Ok(Default::default());
-        }
-        const FIND_INDEX_TEMPLATE_MATCHES_QUERY: &str =
-            include_str!("queries/index_templates/find.sql");
-
-        let sql_matches: Vec<(IndexId, IndexTemplateId, String)> =
-            sqlx::query_as(FIND_INDEX_TEMPLATE_MATCHES_QUERY)
-                .bind(&request.index_ids)
-                .fetch_all(&self.connection_pool)
-                .await?;
-
-        let matches = sql_matches
-            .into_iter()
-            .map(
-                |(index_id, template_id, index_template_json)| IndexTemplateMatch {
-                    index_id,
-                    template_id,
-                    index_template_json,
-                },
-            )
-            .collect();
-        let response = FindIndexTemplateMatchesResponse { matches };
-        Ok(response)
-    }
-
     #[instrument(name = "metastore.postgres.list_index_templates", skip_all)]
     async fn list_index_templates(
         &self,
@@ -1463,27 +1348,6 @@ impl MetastoreService for PostgresqlMetastore {
             .execute(&self.connection_pool)
             .await?;
         Ok(EmptyResponse {})
-    }
-
-    #[instrument(name = "metastore.postgres.get_cluster_identity", skip_all)]
-    async fn get_cluster_identity(
-        &self,
-        _: GetClusterIdentityRequest,
-    ) -> MetastoreResult<GetClusterIdentityResponse> {
-        // `ON CONFLICT DO NOTHING RETURNING` returns NULL if no insert happens.
-        // To always get the value, we use this pattern:
-        let (uuid,) = sqlx::query_as(
-            r"
-                INSERT INTO kv (key, value)
-                VALUES ('cluster_identity', $1)
-                ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key
-                RETURNING value
-            ",
-        )
-        .bind(Uuid::new_v4().hyphenated().to_string())
-        .fetch_one(&self.connection_pool)
-        .await?;
-        Ok(GetClusterIdentityResponse { uuid })
     }
 }
 

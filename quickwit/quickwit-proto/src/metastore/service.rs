@@ -34,12 +34,10 @@ use super::{
     AddSourceRequest, AssignFilesForIndexing, AssignFilesForIndexingResponse, CreateIndexRequest,
     CreateIndexResponse, CreateIndexTemplateRequest, DeleteIndexRequest,
     DeleteIndexTemplatesRequest, DeleteQuery, DeleteSourceRequest, DeleteSplitsRequest, DeleteTask,
-    EmptyResponse, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse,
-    GetClusterIdentityRequest, GetClusterIdentityResponse, GetIndexTemplateRequest,
-    GetIndexTemplateResponse, IndexMetadataRequest, IndexMetadataResponse, IndexesMetadataRequest,
-    IndexesMetadataResponse, LastDeleteOpstampRequest, LastDeleteOpstampResponse,
-    ListCompletedFilesRequest, ListCompletedFilesResponse, ListDeleteTasksRequest,
-    ListDeleteTasksResponse, ListIndexStatsRequest, ListIndexStatsResponse,
+    EmptyResponse, GetIndexTemplateRequest, GetIndexTemplateResponse, IndexMetadataRequest,
+    IndexMetadataResponse, IndexesMetadataRequest, IndexesMetadataResponse,
+    LastDeleteOpstampRequest, LastDeleteOpstampResponse, ListCompletedFilesRequest,
+    ListCompletedFilesResponse, ListDeleteTasksRequest, ListDeleteTasksResponse,
     ListIndexTemplatesRequest, ListIndexTemplatesResponse, ListIndexesMetadataRequest,
     ListIndexesMetadataResponse, ListSplitsRequest, ListSplitsResponse, ListStaleSplitsRequest,
     MarkSplitsForDeletionRequest, MetastoreError, MetastoreResult, PublishFileSplits,
@@ -62,7 +60,6 @@ macro_rules! for_each_unary_metastore_rpc {
             (indexes_metadata, IndexesMetadataRequest, IndexesMetadataResponse, plain),
             (list_indexes_metadata, ListIndexesMetadataRequest, ListIndexesMetadataResponse, plain),
             (delete_index, DeleteIndexRequest, EmptyResponse, event),
-            (list_index_stats, ListIndexStatsRequest, ListIndexStatsResponse, plain),
             (register_file_for_indexing, RegisterFileForIndexing, RegisterFileForIndexingResponse, plain),
             (assign_files_for_indexing, AssignFilesForIndexing, AssignFilesForIndexingResponse, plain),
             (publish_file_splits, PublishFileSplits, PublishFileSplitsResponse, plain),
@@ -82,10 +79,8 @@ macro_rules! for_each_unary_metastore_rpc {
             (list_stale_splits, ListStaleSplitsRequest, ListSplitsResponse, plain),
             (create_index_template, CreateIndexTemplateRequest, EmptyResponse, plain),
             (get_index_template, GetIndexTemplateRequest, GetIndexTemplateResponse, plain),
-            (find_index_template_matches, FindIndexTemplateMatchesRequest, FindIndexTemplateMatchesResponse, plain),
             (list_index_templates, ListIndexTemplatesRequest, ListIndexTemplatesResponse, plain),
             (delete_index_templates, DeleteIndexTemplatesRequest, EmptyResponse, plain),
-            (get_cluster_identity, GetClusterIdentityRequest, GetClusterIdentityResponse, plain),
         }
     };
 }
@@ -120,10 +115,6 @@ pub trait MetastoreService: fmt::Debug + Send + Sync + 'static {
         request: ListIndexesMetadataRequest,
     ) -> MetastoreResult<ListIndexesMetadataResponse>;
     async fn delete_index(&self, request: DeleteIndexRequest) -> MetastoreResult<EmptyResponse>;
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> MetastoreResult<ListIndexStatsResponse>;
     async fn list_splits(
         &self,
         request: ListSplitsRequest,
@@ -181,10 +172,6 @@ pub trait MetastoreService: fmt::Debug + Send + Sync + 'static {
         &self,
         request: GetIndexTemplateRequest,
     ) -> MetastoreResult<GetIndexTemplateResponse>;
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> MetastoreResult<FindIndexTemplateMatchesResponse>;
     async fn list_index_templates(
         &self,
         request: ListIndexTemplatesRequest,
@@ -193,10 +180,6 @@ pub trait MetastoreService: fmt::Debug + Send + Sync + 'static {
         &self,
         request: DeleteIndexTemplatesRequest,
     ) -> MetastoreResult<EmptyResponse>;
-    async fn get_cluster_identity(
-        &self,
-        request: GetClusterIdentityRequest,
-    ) -> MetastoreResult<GetClusterIdentityResponse>;
 }
 
 #[derive(Debug, Clone)]

@@ -15,9 +15,8 @@
 use quickwit_common::rand::append_random_suffix;
 use quickwit_config::IndexTemplate;
 use quickwit_proto::metastore::{
-    CreateIndexTemplateRequest, DeleteIndexTemplatesRequest, EntityKind,
-    FindIndexTemplateMatchesRequest, GetIndexTemplateRequest, ListIndexTemplatesRequest,
-    MetastoreError, MetastoreResult, MetastoreService, serde_utils,
+    CreateIndexTemplateRequest, DeleteIndexTemplatesRequest, EntityKind, GetIndexTemplateRequest,
+    ListIndexTemplatesRequest, MetastoreError, MetastoreResult, MetastoreService, serde_utils,
 };
 
 use super::DefaultForTest;
@@ -150,84 +149,6 @@ pub async fn test_metastore_get_index_template<
     assert_eq!(index_template.template_id, template_id);
     assert_eq!(index_template.index_id_patterns, ["test-template"]);
     assert_eq!(index_template.priority, 100);
-}
-
-pub async fn test_metastore_find_index_template_matches<
-    MetastoreUnderTest: MetastoreService + MetastoreServiceExt + DefaultForTest,
->() {
-    let mut metastore = MetastoreUnderTest::default_for_test().await;
-    cleanup_templates(&mut metastore).await;
-
-    let foo_template_id = append_random_suffix("test-template-foo");
-    let foo_index_template = IndexTemplate::for_test(
-        &foo_template_id,
-        &["test-index-foo*", "-test-index-fool"],
-        200,
-    );
-    let foo_index_template_json = serde_json::to_string(&foo_index_template).unwrap();
-
-    let create_index_template_request = CreateIndexTemplateRequest {
-        index_template_json: foo_index_template_json,
-        overwrite: false,
-    };
-    metastore
-        .create_index_template(create_index_template_request)
-        .await
-        .unwrap();
-
-    let foobar_template_id = append_random_suffix("test-template-foobar");
-    let foobar_index_template =
-        IndexTemplate::for_test(&foobar_template_id, &["test-index-foobar*"], 100);
-    let foobar_index_template_json = serde_json::to_string(&foobar_index_template).unwrap();
-
-    let create_index_template_request = CreateIndexTemplateRequest {
-        index_template_json: foobar_index_template_json,
-        overwrite: false,
-    };
-    metastore
-        .create_index_template(create_index_template_request)
-        .await
-        .unwrap();
-
-    let bar_template_id = append_random_suffix("test-template-bar");
-    let bar_index_template = IndexTemplate::for_test(&bar_template_id, &["test-index-bar*"], 100);
-    let bar_index_template_json = serde_json::to_string(&bar_index_template).unwrap();
-
-    let create_index_template_request = CreateIndexTemplateRequest {
-        index_template_json: bar_index_template_json,
-        overwrite: false,
-    };
-    metastore
-        .create_index_template(create_index_template_request)
-        .await
-        .unwrap();
-
-    let find_index_template_matches = FindIndexTemplateMatchesRequest {
-        index_ids: vec![
-            "test-index-foo".to_string(),
-            "test-index-fool".to_string(),
-            "test-index-foobar".to_string(),
-            "test-index-bar".to_string(),
-            "test-index-qux".to_string(),
-        ],
-    };
-    let find_index_template_matches_response = metastore
-        .find_index_template_matches(find_index_template_matches)
-        .await
-        .unwrap();
-    let mut matches = find_index_template_matches_response.matches;
-    matches.sort_unstable_by(|left, right| left.index_id.cmp(&right.index_id));
-
-    assert_eq!(matches.len(), 3);
-
-    assert_eq!(matches[0].index_id, "test-index-bar");
-    assert_eq!(matches[0].template_id, bar_template_id);
-
-    assert_eq!(matches[1].index_id, "test-index-foo");
-    assert_eq!(matches[1].template_id, foo_template_id);
-
-    assert_eq!(matches[2].index_id, "test-index-foobar");
-    assert_eq!(matches[2].template_id, foo_template_id);
 }
 
 pub async fn test_metastore_list_index_templates<

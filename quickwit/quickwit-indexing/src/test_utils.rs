@@ -35,7 +35,7 @@ use quickwit_proto::metastore::{
     CreateIndexRequest, LastDeleteOpstampRequest, MetastoreService, MetastoreServiceClient,
     PublishSplitsRequest, StageSplitsRequest,
 };
-use quickwit_proto::types::{IndexUid, NodeId, PipelineUid, SourceId};
+use quickwit_proto::types::{IndexUid, NodeId, SourceId};
 use quickwit_storage::{Storage, StorageResolver};
 use serde_json::Value as JsonValue;
 
@@ -151,7 +151,6 @@ impl TestSandbox {
             node_id: self.node_id.clone(),
             index_uid: self.index_uid.clone(),
             source_id: self.source_id.clone(),
-            pipeline_uid: PipelineUid::for_test(0u128),
         };
         let mut builders: HashMap<u64, IndexedSplitBuilder> = HashMap::new();
         for doc in processed_docs {

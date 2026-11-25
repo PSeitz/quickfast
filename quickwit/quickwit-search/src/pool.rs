@@ -21,8 +21,7 @@ use std::hash::Hash;
 use std::sync::{Arc, RwLock};
 
 use futures::{Stream, StreamExt};
-
-use super::Change;
+use quickwit_common::tower::Change;
 
 /// A pool of `V` values identified by `K` keys. The pool can be updated manually by calling the
 /// `add/remove` methods or by listening to a stream of changes.
@@ -206,14 +205,13 @@ where K: Eq + PartialEq + Hash
 mod tests {
     use std::time::Duration;
 
-    use tokio_stream::wrappers::ReceiverStream;
+    use futures::SinkExt;
 
     use super::*;
 
     #[tokio::test]
     async fn test_pool() {
-        let (change_stream_tx, change_stream_rx) = tokio::sync::mpsc::channel(10);
-        let change_stream = ReceiverStream::new(change_stream_rx);
+        let (mut change_stream_tx, change_stream) = futures::channel::mpsc::channel(10);
 
         let pool = Pool::default();
         pool.listen_for_changes(change_stream);

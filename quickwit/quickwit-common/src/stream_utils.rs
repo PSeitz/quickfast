@@ -17,8 +17,8 @@ use std::fmt;
 use std::pin::Pin;
 
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use tokio::sync::{mpsc, watch};
-use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream, WatchStream};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::warn;
 
 use crate::tower::RpcName;
@@ -67,22 +67,8 @@ impl<T> Unpin for ServiceStream<T> {}
 impl<T> ServiceStream<T>
 where T: Send + 'static
 {
-    pub fn new_bounded(capacity: usize) -> (mpsc::Sender<T>, Self) {
-        let (sender, receiver) = mpsc::channel(capacity);
-        (sender, receiver.into())
-    }
-
     pub fn new_unbounded() -> (mpsc::UnboundedSender<T>, Self) {
         let (sender, receiver) = mpsc::unbounded_channel();
-        (sender, receiver.into())
-    }
-}
-
-impl<T> ServiceStream<T>
-where T: Clone + Send + Sync + 'static
-{
-    pub fn new_watch(init: T) -> (watch::Sender<T>, Self) {
-        let (sender, receiver) = watch::channel(init);
         (sender, receiver.into())
     }
 }
@@ -114,32 +100,12 @@ impl<T> Stream for ServiceStream<T> {
     }
 }
 
-impl<T> From<mpsc::Receiver<T>> for ServiceStream<T>
-where T: Send + 'static
-{
-    fn from(receiver: mpsc::Receiver<T>) -> Self {
-        Self {
-            inner: Box::pin(ReceiverStream::new(receiver)),
-        }
-    }
-}
-
 impl<T> From<mpsc::UnboundedReceiver<T>> for ServiceStream<T>
 where T: Send + 'static
 {
     fn from(receiver: mpsc::UnboundedReceiver<T>) -> Self {
         Self {
             inner: Box::pin(UnboundedReceiverStream::new(receiver)),
-        }
-    }
-}
-
-impl<T> From<watch::Receiver<T>> for ServiceStream<T>
-where T: Clone + Send + Sync + 'static
-{
-    fn from(receiver: watch::Receiver<T>) -> Self {
-        Self {
-            inner: Box::pin(WatchStream::new(receiver)),
         }
     }
 }

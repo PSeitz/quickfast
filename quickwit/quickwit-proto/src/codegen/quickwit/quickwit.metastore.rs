@@ -277,42 +277,6 @@ pub struct IndexMetadataFailure {
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListIndexStatsRequest {
-    /// List of patterns an index should match or not match to get considered
-    /// An index must match at least one positive pattern (a pattern not starting
-    /// with a '-'), and no negative pattern (a pattern starting with a '-').
-    #[prost(string, repeated, tag = "1")]
-    pub index_id_patterns: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListIndexStatsResponse {
-    /// list of IndexStats. each one has the index id, the number of splits and the total size.
-    #[prost(message, repeated, tag = "1")]
-    pub index_stats: ::prost::alloc::vec::Vec<IndexStats>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct IndexStats {
-    #[prost(message, optional, tag = "1")]
-    pub index_uid: ::core::option::Option<crate::types::IndexUid>,
-    #[prost(message, optional, tag = "2")]
-    pub staged: ::core::option::Option<SplitStats>,
-    #[prost(message, optional, tag = "3")]
-    pub published: ::core::option::Option<SplitStats>,
-    #[prost(message, optional, tag = "4")]
-    pub marked_for_deletion: ::core::option::Option<SplitStats>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SplitStats {
-    #[prost(uint64, tag = "1")]
-    pub num_splits: u64,
-    #[prost(uint64, tag = "2")]
-    pub total_size_bytes: u64,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListSplitsRequest {
     /// Predicate used to filter splits.
     /// The predicate is expressed as a JSON serialized
@@ -496,28 +460,6 @@ pub struct GetIndexTemplateResponse {
     pub index_template_json: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct FindIndexTemplateMatchesRequest {
-    #[prost(string, repeated, tag = "1")]
-    pub index_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct FindIndexTemplateMatchesResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub matches: ::prost::alloc::vec::Vec<IndexTemplateMatch>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct IndexTemplateMatch {
-    #[prost(string, tag = "1")]
-    pub index_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub template_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub index_template_json: ::prost::alloc::string::String,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ListIndexTemplatesRequest {}
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
@@ -531,15 +473,6 @@ pub struct ListIndexTemplatesResponse {
 pub struct DeleteIndexTemplatesRequest {
     #[prost(string, repeated, tag = "1")]
     pub template_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetClusterIdentityRequest {}
-#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetClusterIdentityResponse {
-    #[prost(string, tag = "1")]
-    pub uuid: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -930,36 +863,6 @@ pub mod metastore_service_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("quickwit.metastore.MetastoreService", "DeleteIndex"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Returns a list of size info for each index.
-        pub async fn list_index_stats(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ListIndexStatsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListIndexStatsResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/ListIndexStats",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "ListIndexStats",
-                    ),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -1532,36 +1435,6 @@ pub mod metastore_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Finds matching index templates.
-        pub async fn find_index_template_matches(
-            &mut self,
-            request: impl tonic::IntoRequest<super::FindIndexTemplateMatchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindIndexTemplateMatchesResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/FindIndexTemplateMatches",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "FindIndexTemplateMatches",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
         /// Returns all the index templates.
         pub async fn list_index_templates(
             &mut self,
@@ -1615,36 +1488,6 @@ pub mod metastore_service_client {
                     GrpcMethod::new(
                         "quickwit.metastore.MetastoreService",
                         "DeleteIndexTemplates",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /// Get cluster identity
-        pub async fn get_cluster_identity(
-            &mut self,
-            request: impl tonic::IntoRequest<super::GetClusterIdentityRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetClusterIdentityResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic_prost::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/quickwit.metastore.MetastoreService/GetClusterIdentity",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "quickwit.metastore.MetastoreService",
-                        "GetClusterIdentity",
                     ),
                 );
             self.inner.unary(req, path, codec).await
@@ -1712,14 +1555,6 @@ pub mod metastore_service_server {
             &self,
             request: tonic::Request<super::DeleteIndexRequest>,
         ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status>;
-        /// Returns a list of size info for each index.
-        async fn list_index_stats(
-            &self,
-            request: tonic::Request<super::ListIndexStatsRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ListIndexStatsResponse>,
-            tonic::Status,
-        >;
         /// Server streaming response type for the ListSplits method.
         type ListSplitsStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ListSplitsResponse, tonic::Status>,
@@ -1861,14 +1696,6 @@ pub mod metastore_service_server {
             tonic::Response<super::GetIndexTemplateResponse>,
             tonic::Status,
         >;
-        /// Finds matching index templates.
-        async fn find_index_template_matches(
-            &self,
-            request: tonic::Request<super::FindIndexTemplateMatchesRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::FindIndexTemplateMatchesResponse>,
-            tonic::Status,
-        >;
         /// Returns all the index templates.
         async fn list_index_templates(
             &self,
@@ -1882,14 +1709,6 @@ pub mod metastore_service_server {
             &self,
             request: tonic::Request<super::DeleteIndexTemplatesRequest>,
         ) -> std::result::Result<tonic::Response<super::EmptyResponse>, tonic::Status>;
-        /// Get cluster identity
-        async fn get_cluster_identity(
-            &self,
-            request: tonic::Request<super::GetClusterIdentityRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetClusterIdentityResponse>,
-            tonic::Status,
-        >;
     }
     /// Metastore meant to manage Quickwit's indexes, their splits and delete tasks.
     ///
@@ -2282,52 +2101,6 @@ pub mod metastore_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = DeleteIndexSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/ListIndexStats" => {
-                    #[allow(non_camel_case_types)]
-                    struct ListIndexStatsSvc<T: MetastoreService>(pub Arc<T>);
-                    impl<
-                        T: MetastoreService,
-                    > tonic::server::UnaryService<super::ListIndexStatsRequest>
-                    for ListIndexStatsSvc<T> {
-                        type Response = super::ListIndexStatsResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ListIndexStatsRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreService>::list_index_stats(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = ListIndexStatsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -3288,57 +3061,6 @@ pub mod metastore_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/quickwit.metastore.MetastoreService/FindIndexTemplateMatches" => {
-                    #[allow(non_camel_case_types)]
-                    struct FindIndexTemplateMatchesSvc<T: MetastoreService>(pub Arc<T>);
-                    impl<
-                        T: MetastoreService,
-                    > tonic::server::UnaryService<super::FindIndexTemplateMatchesRequest>
-                    for FindIndexTemplateMatchesSvc<T> {
-                        type Response = super::FindIndexTemplateMatchesResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<
-                                super::FindIndexTemplateMatchesRequest,
-                            >,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreService>::find_index_template_matches(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = FindIndexTemplateMatchesSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
                 "/quickwit.metastore.MetastoreService/ListIndexTemplates" => {
                     #[allow(non_camel_case_types)]
                     struct ListIndexTemplatesSvc<T: MetastoreService>(pub Arc<T>);
@@ -3422,55 +3144,6 @@ pub mod metastore_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = DeleteIndexTemplatesSvc(inner);
-                        let codec = tonic_prost::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/quickwit.metastore.MetastoreService/GetClusterIdentity" => {
-                    #[allow(non_camel_case_types)]
-                    struct GetClusterIdentitySvc<T: MetastoreService>(pub Arc<T>);
-                    impl<
-                        T: MetastoreService,
-                    > tonic::server::UnaryService<super::GetClusterIdentityRequest>
-                    for GetClusterIdentitySvc<T> {
-                        type Response = super::GetClusterIdentityResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::GetClusterIdentityRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as MetastoreService>::get_cluster_identity(
-                                        &inner,
-                                        request,
-                                    )
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let method = GetClusterIdentitySvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

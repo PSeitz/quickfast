@@ -284,7 +284,7 @@ mod tests {
     use std::time::Duration;
 
     use quickwit_config::DocsClusteringConfig;
-    use quickwit_proto::types::{IndexUid, NodeId, PipelineUid};
+    use quickwit_proto::types::{IndexUid, NodeId};
     use quickwit_storage::PutPayload;
     use tantivy::schema::Value;
     use tantivy::{DocAddress, TantivyDocument};
@@ -308,7 +308,6 @@ mod tests {
                 node_id: NodeId::from_str("test-node"),
                 index_uid: IndexUid::for_test("partitions", 1),
                 source_id: "ingesthree".into(),
-                pipeline_uid: PipelineUid::random(),
             },
             7,
             TempDirectory::for_test(),
@@ -410,7 +409,6 @@ mod tests {
                 node_id: NodeId::from_str("test-node"),
                 index_uid: IndexUid::for_test("writer-memory", 1),
                 source_id: "ingesthree".into(),
-                pipeline_uid: PipelineUid::random(),
             },
             0,
             directory,

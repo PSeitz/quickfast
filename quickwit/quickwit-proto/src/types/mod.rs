@@ -24,13 +24,11 @@ pub use ulid::Ulid;
 mod doc_mapping_uid;
 mod doc_uid;
 mod index_uid;
-mod pipeline_uid;
 mod split_id;
 
 pub use doc_mapping_uid::DocMappingUid;
 pub use doc_uid::{DocUid, DocUidGenerator};
 pub use index_uid::IndexUid;
-pub use pipeline_uid::PipelineUid;
 pub use split_id::SplitId;
 
 /// The size of an ULID in bytes. Use `ULID_LEN` for the length of Base32 encoded ULID strings.

@@ -32,6 +32,7 @@ mod leaf_cache;
 mod list_fields;
 mod list_terms;
 mod metrics_trackers;
+mod pool;
 mod retry;
 mod root;
 mod scroll_context;
@@ -50,7 +51,6 @@ mod tests;
 
 pub use collector::QuickwitAggregations;
 use quickwit_common::thread_pool::with_priority::ThreadPoolWithPriority;
-use quickwit_common::tower::Pool;
 use quickwit_doc_mapper::DocMapper;
 use quickwit_proto::metastore::{
     ListIndexesMetadataRequest, ListSplitsRequest, MetastoreServiceClient,
@@ -132,6 +132,8 @@ impl SearcherNode {
         }
     }
 }
+
+pub use pool::Pool;
 
 /// A pool of searchers identified by their gRPC socket address.
 ///

@@ -16,7 +16,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
 
-use crate::types::{IndexUid, NodeId, PipelineUid, SourceId};
+use crate::types::{IndexUid, NodeId, SourceId};
 
 /// Uniquely identifies an indexing pipeline.
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -24,7 +24,6 @@ pub struct IndexingPipelineId {
     pub node_id: NodeId,
     pub index_uid: IndexUid,
     pub source_id: SourceId,
-    pub pipeline_uid: PipelineUid,
 }
 
 impl Display for IndexingPipelineId {

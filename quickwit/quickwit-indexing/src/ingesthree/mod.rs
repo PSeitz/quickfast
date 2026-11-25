@@ -43,7 +43,7 @@ use quickwit_proto::metastore::{
     AssignFilesForIndexing, IndexMetadataRequest, LastDeleteOpstampRequest, MetastoreError,
     MetastoreService, MetastoreServiceClient, PublishFileSplits, StageSplitsRequest,
 };
-use quickwit_proto::types::{IndexUid, NodeId, PipelineUid, SourceId};
+use quickwit_proto::types::{IndexUid, NodeId, SourceId};
 use quickwit_storage::{StorageError, StorageErrorKind, StorageResolver};
 use tracing::{Instrument, warn};
 use ulid::Ulid;
@@ -152,7 +152,6 @@ impl S3Indexer {
             node_id: self.node_id.clone(),
             source_id: self.source_id.clone(),
             index_uid: index_uid.clone(),
-            pipeline_uid: PipelineUid::random(),
         };
         let scratch_directory = self.scratch_directory.clone();
         let clustering_config = self.clustering_config.clone();

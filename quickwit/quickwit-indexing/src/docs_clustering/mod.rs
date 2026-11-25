@@ -43,7 +43,7 @@ mod tests {
     use quickwit_config::{DocsClusteringConfig, IndexingSettings};
     use quickwit_doc_mapper::DocMapper;
     use quickwit_proto::indexing::IndexingPipelineId;
-    use quickwit_proto::types::{IndexUid, NodeId, PipelineUid};
+    use quickwit_proto::types::{IndexUid, NodeId};
     use tantivy::schema::Value;
     use tantivy::{DocAddress, Document, TantivyDocument, doc};
 
@@ -69,7 +69,6 @@ mod tests {
                 index_uid: IndexUid::for_test("clustering", 1),
                 source_id: "test-source".into(),
                 node_id: NodeId::from_str("test-node"),
-                pipeline_uid: PipelineUid::default(),
             },
             0,
             0,

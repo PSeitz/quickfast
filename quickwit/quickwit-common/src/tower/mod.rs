@@ -12,21 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod change;
 mod metrics;
-mod pool;
 mod transport;
 
-use std::error;
 use std::pin::Pin;
 
-pub use change::Change;
 use futures::Future;
 pub use metrics::{GrpcMetrics, GrpcMetricsLayer, GrpcStatusCode, RpcName};
-pub use pool::Pool;
-pub use transport::{BalanceChannel, warmup_channel};
-
-pub type BoxError = Box<dyn error::Error + Send + Sync + 'static>;
+pub use transport::{BalanceChannel, Change, warmup_channel};
 
 pub type BoxFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'static>>;
 

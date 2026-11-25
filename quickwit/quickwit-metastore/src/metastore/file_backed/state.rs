@@ -23,7 +23,6 @@ use quickwit_storage::Storage;
 use uuid::Uuid;
 
 use super::LazyIndexStatus;
-use super::index_template_matcher::IndexTemplateMatcher;
 use super::lazy_file_backed_index::LazyFileBackedIndex;
 use super::manifest::{IndexStatus, Manifest};
 
@@ -31,7 +30,6 @@ use super::manifest::{IndexStatus, Manifest};
 pub(super) struct MetastoreState {
     pub indexes: HashMap<IndexId, LazyIndexStatus>,
     pub templates: HashMap<IndexTemplateId, IndexTemplate>,
-    pub template_matcher: IndexTemplateMatcher,
     pub identity: Uuid,
 }
 
@@ -59,13 +57,9 @@ impl MetastoreState {
             })
             .collect();
 
-        let template_matcher =
-            IndexTemplateMatcher::try_from_index_templates(manifest.templates.values())?;
-
         let state = Self {
             indexes,
             templates: manifest.templates,
-            template_matcher,
             identity: manifest.identity,
         };
         Ok(state)
