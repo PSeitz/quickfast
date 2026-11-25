@@ -72,7 +72,7 @@ jobs:
           sudo apt-get -y install clang lld libsasl2-dev libcurl4-openssl-dev
 
       - name: Install protoc
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c
         with:
           tool: protoc
 
@@ -89,7 +89,7 @@ jobs:
           save-if: "false"
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c
         with:
           tool: cargo-nextest
 
@@ -230,7 +230,7 @@ jobs:
     steps:
       - name: Send message
         if: env.DISCORD_WEBHOOK != ''
-        uses: sarisia/actions-status-discord@eb045afee445dc055c18d3d90bd0f244fd062708 # v1.16.0
+        uses: sarisia/actions-status-discord@74e2ad0c4e57ca8b9ba6aee75d5a7841497bbb87 # v1.16.1
         with:
           webhook: ${{ env.DISCORD_WEBHOOK }}
           nodetail: true
