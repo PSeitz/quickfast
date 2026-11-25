@@ -17,9 +17,6 @@ use std::fmt;
 use std::pin::Pin;
 
 use futures::{Stream, StreamExt, TryStreamExt, stream};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::warn;
 
 pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send + Unpin + 'static>>;
 
@@ -62,15 +59,6 @@ where T: 'static
 
 impl<T> Unpin for ServiceStream<T> {}
 
-impl<T> ServiceStream<T>
-where T: Send + 'static
-{
-    pub fn new_unbounded() -> (mpsc::UnboundedSender<T>, Self) {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        (sender, receiver.into())
-    }
-}
-
 impl<T, E> ServiceStream<Result<T, E>>
 where
     T: Send + 'static,
@@ -98,17 +86,7 @@ impl<T> Stream for ServiceStream<T> {
     }
 }
 
-impl<T> From<mpsc::UnboundedReceiver<T>> for ServiceStream<T>
-where T: Send + 'static
-{
-    fn from(receiver: mpsc::UnboundedReceiver<T>) -> Self {
-        Self {
-            inner: Box::pin(UnboundedReceiverStream::new(receiver)),
-        }
-    }
-}
-
-/// Adapts a server-side tonic::Streaming into a ServiceStream of `Result<T, tonic::Status>`. Once
+/// Adapts a tonic::Streaming into a ServiceStream of `Result<T, tonic::Status>`. Once
 /// an error is encountered, the stream will be closed and subsequent calls to `poll_next` will
 /// return `None`.
 impl<T> From<tonic::Streaming<T>> for ServiceStream<Result<T, tonic::Status>>
@@ -117,30 +95,6 @@ where T: Send + 'static
     fn from(streaming: tonic::Streaming<T>) -> Self {
         Self {
             inner: Box::pin(streaming),
-        }
-    }
-}
-
-/// Adapts a client-side tonic::Streaming into a ServiceStream of `T`. Once an error is encountered,
-/// the stream will be closed and subsequent calls to `poll_next` will return `None`.
-impl<T> From<tonic::Streaming<T>> for ServiceStream<T>
-where T: Send + 'static
-{
-    fn from(streaming: tonic::Streaming<T>) -> Self {
-        let message_stream = stream::unfold(streaming, |mut streaming| {
-            Box::pin(async {
-                match streaming.message().await {
-                    Ok(Some(message)) => Some((message, streaming)),
-                    Ok(None) => None,
-                    Err(error) => {
-                        warn!(error=?error, "gRPC transport error");
-                        None
-                    }
-                }
-            })
-        });
-        Self {
-            inner: Box::pin(message_stream),
         }
     }
 }

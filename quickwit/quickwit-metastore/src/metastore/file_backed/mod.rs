@@ -1276,7 +1276,7 @@ mod tests {
         let ram_storage_clone = ram_storage.clone();
         mock_storage // remove this if we end up changing the semantics of create.
             .expect_exists()
-            .times(3)
+            .times(2)
             .returning(|_| Ok(false));
         mock_storage
             .expect_put()

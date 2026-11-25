@@ -20,7 +20,6 @@ bytes = { workspace = true }
 bytesize = { workspace = true }
 futures = { workspace = true }
 google-cloud-auth = { workspace = true, optional = true }
-google-cloud-googleapis = { workspace = true, optional = true }
 google-cloud-pubsub = { workspace = true, optional = true }
 itertools = { workspace = true }
 libz-sys = { workspace = true, optional = true }
@@ -44,7 +43,6 @@ vrl = { workspace = true, optional = true }
 
 
 quickwit-aws = { workspace = true }
-quickwit-cluster = { workspace = true }
 quickwit-common = { workspace = true }
 quickwit-metrics = { workspace = true }
 quickwit-config = { workspace = true }
@@ -59,7 +57,6 @@ quickwit-storage = { workspace = true }
 [features]
 gcp-pubsub = [
   "dep:google-cloud-auth",
-  "dep:google-cloud-googleapis",
   "dep:google-cloud-pubsub",
 ]
 kafka = ["rdkafka"]
@@ -75,7 +72,6 @@ vendored-kafka = [
 ]
 vendored-kafka-macos = ["kafka", "libz-sys/static", "openssl/vendored"]
 testsuite = [
-  "quickwit-cluster/testsuite",
   "quickwit-common/testsuite",
   "quickwit-config/testsuite",
   "quickwit-proto/testsuite",
@@ -94,7 +90,6 @@ rand = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 tempfile = { workspace = true }
 
-quickwit-cluster = { workspace = true, features = ["testsuite"] }
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
 quickwit-doc-mapper = { workspace = true, features = ["testsuite"] }

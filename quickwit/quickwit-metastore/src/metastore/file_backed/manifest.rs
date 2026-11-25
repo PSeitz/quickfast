@@ -20,41 +20,17 @@ use quickwit_common::uri::Uri;
 use quickwit_config::{IndexTemplate, IndexTemplateId};
 use quickwit_proto::metastore::{MetastoreError, MetastoreResult, serde_utils};
 use quickwit_proto::types::{DocMappingUid, IndexId};
-use quickwit_storage::{OwnedBytes, Storage, StorageError, StorageErrorKind, StorageResult};
+use quickwit_storage::{OwnedBytes, Storage, StorageError, StorageErrorKind};
 use serde::{Deserialize, Serialize};
-use tracing::error;
 use uuid::Uuid;
 
 pub(super) const MANIFEST_FILE_NAME: &str = "manifest.json";
 
-// The legacy manifest file was deprecated in 0.8.0, we can drop support for it in 0.10.0 or 0.11.0.
-const LEGACY_MANIFEST_FILE_NAME: &str = "indexes_states.json";
-
-#[derive(Clone, Debug, Deserialize)]
-struct LegacyManifest {
-    #[serde(default, flatten)]
-    indexes: BTreeMap<IndexId, IndexStatus>,
-}
-
-impl LegacyManifest {
-    fn into_manifest(self) -> Manifest {
-        Manifest {
-            indexes: self.indexes,
-            templates: HashMap::new(),
-            identity: Uuid::nil(),
-        }
-    }
-}
-
-// TODO: Remove the aliases once we drop support for the legacy manifest file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum IndexStatus {
-    #[serde(alias = "Creating")]
     Creating,
-    #[serde(alias = "Alive")]
     Active,
-    #[serde(alias = "Deleting")]
     Deleting,
 }
 
@@ -173,20 +149,6 @@ pub(super) async fn load_or_create_manifest(storage: &dyn Storage) -> MetastoreR
         let manifest: Manifest = serde_utils::from_json_bytes(&manifest_json)?;
         return Ok(manifest);
     }
-    if file_exists(storage, LEGACY_MANIFEST_FILE_NAME).await? {
-        let legacy_manifest_json = get_bytes(storage, LEGACY_MANIFEST_FILE_NAME).await?;
-        let legacy_manifest: LegacyManifest = serde_utils::from_json_bytes(&legacy_manifest_json)?;
-        let manifest = legacy_manifest.into_manifest();
-        save_manifest(storage, &manifest).await?;
-
-        if let Err(storage_error) = delete_file(storage, LEGACY_MANIFEST_FILE_NAME).await {
-            error!(
-                error=%storage_error,
-                "failed to delete legacy manifest file located at `{}/{LEGACY_MANIFEST_FILE_NAME}`", storage.uri()
-            );
-        }
-        return Ok(manifest);
-    }
     let manifest = Manifest::default();
     save_manifest(storage, &manifest).await?;
     Ok(manifest)
@@ -198,11 +160,6 @@ pub(super) async fn save_manifest(
 ) -> MetastoreResult<()> {
     let manifest_json_bytes = serde_utils::to_json_bytes_pretty(manifest)?;
     put_bytes(storage, MANIFEST_FILE_NAME, manifest_json_bytes).await?;
-    Ok(())
-}
-
-async fn delete_file(storage: &dyn Storage, path: &str) -> StorageResult<()> {
-    storage.delete(Path::new(path)).await?;
     Ok(())
 }
 
@@ -258,64 +215,7 @@ fn into_metastore_error(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
-
-    #[test]
-    fn test_legacy_manifest_deserialization() {
-        let legacy_manifest_json = r#"{
-            "test-index-1": "Creating",
-            "test-index-2": "Alive",
-            "test-index-3": "Deleting"
-        }
-        "#;
-        let legacy_manifest: LegacyManifest = serde_json::from_str(legacy_manifest_json).unwrap();
-        assert_eq!(legacy_manifest.indexes.len(), 3);
-
-        assert_eq!(
-            legacy_manifest.indexes.get("test-index-1").unwrap(),
-            &IndexStatus::Creating
-        );
-        assert_eq!(
-            legacy_manifest.indexes.get("test-index-2").unwrap(),
-            &IndexStatus::Active
-        );
-        assert_eq!(
-            legacy_manifest.indexes.get("test-index-3").unwrap(),
-            &IndexStatus::Deleting
-        );
-    }
-
-    #[test]
-    fn test_legacy_manifest_into_manifest() {
-        let legacy_manifest = LegacyManifest {
-            indexes: vec![
-                ("test-index-1".to_string(), IndexStatus::Creating),
-                ("test-index-2".to_string(), IndexStatus::Active),
-                ("test-index-3".to_string(), IndexStatus::Deleting),
-            ]
-            .into_iter()
-            .collect(),
-        };
-        let manifest = legacy_manifest.into_manifest();
-
-        assert_eq!(manifest.indexes.len(), 3);
-        assert_eq!(manifest.templates.len(), 0);
-
-        assert_eq!(
-            manifest.indexes.get("test-index-1").unwrap(),
-            &IndexStatus::Creating
-        );
-        assert_eq!(
-            manifest.indexes.get("test-index-2").unwrap(),
-            &IndexStatus::Active
-        );
-        assert_eq!(
-            manifest.indexes.get("test-index-3").unwrap(),
-            &IndexStatus::Deleting
-        );
-    }
 
     #[test]
     fn test_manifest_serde() {
@@ -389,51 +289,5 @@ mod tests {
         assert_eq!(template.template_id, "test-template");
         assert_eq!(template.index_id_patterns, ["test-index-*"]);
         assert_eq!(template.priority, 100);
-    }
-
-    #[tokio::test]
-    async fn test_legacy_manifest_migration() {
-        let storage = quickwit_storage::storage_for_test();
-        let legacy_manifest_json = json!(
-            {
-                "test-index-1": "Creating",
-                "test-index-2": "Alive",
-                "test-index-3": "Deleting"
-            }
-        );
-        let legacy_manifest_json_bytes = serde_json::to_vec(&legacy_manifest_json).unwrap();
-
-        put_bytes(
-            &*storage,
-            LEGACY_MANIFEST_FILE_NAME,
-            legacy_manifest_json_bytes,
-        )
-        .await
-        .unwrap();
-
-        let manifest = load_or_create_manifest(&*storage).await.unwrap();
-        assert_eq!(manifest.indexes.len(), 3);
-        assert_eq!(manifest.templates.len(), 0);
-
-        assert_eq!(
-            manifest.indexes.get("test-index-1").unwrap(),
-            &IndexStatus::Creating
-        );
-        assert_eq!(
-            manifest.indexes.get("test-index-2").unwrap(),
-            &IndexStatus::Active
-        );
-        assert_eq!(
-            manifest.indexes.get("test-index-3").unwrap(),
-            &IndexStatus::Deleting
-        );
-
-        let legacy_manifest_exists = file_exists(&*storage, LEGACY_MANIFEST_FILE_NAME)
-            .await
-            .unwrap();
-        assert!(!legacy_manifest_exists);
-
-        let manifest_exists = file_exists(&*storage, MANIFEST_FILE_NAME).await.unwrap();
-        assert!(manifest_exists);
     }
 }

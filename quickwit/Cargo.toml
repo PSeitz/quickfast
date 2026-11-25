@@ -74,7 +74,6 @@ cron = "0.17"
 dashmap = "6.2"
 dialoguer = { version = "0.12", default-features = false }
 dotenvy = "0.15"
-dyn-clone = "1.0"
 enum-iterator = "2.3"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
 flate2 = "1.1"
@@ -86,7 +85,6 @@ glob = "0.3"
 # with an unrelated API from google-cloud-auth 0.18, google-cloud-gax 0.20 and google-cloud-pubsub 0.31 on,
 # so they can't be bumped past google-cloud-pubsub 0.30 (which requires google-cloud-auth ^0.17).
 google-cloud-auth = { version = "0.17", default-features = false, features = ["rustls-tls"] }
-google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-pubsub = { version = "0.30", default-features = false, features = ["auth", "rustls-tls"] }
 hex = "0.4"
 home = "0.5"
