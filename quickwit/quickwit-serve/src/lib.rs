@@ -511,7 +511,7 @@ pub async fn serve_quickwit(
         "configured search metastore client"
     );
 
-    let (search_job_placer, search_service) = setup_searcher(
+    let (searcher_pool, search_job_placer, search_service) = setup_searcher(
         &node_config,
         cluster.change_stream(),
         search_metastore_client.clone(),
@@ -520,6 +520,21 @@ pub async fn serve_quickwit(
     )
     .await
     .context("failed to start searcher service")?;
+
+    let local_searcher_opt = node_config
+        .is_service_enabled(QuickwitService::Searcher)
+        .then(|| {
+            let grpc_addr = node_config.grpc_advertise_addr;
+            let client = SearchServiceClient::from_service(search_service.clone(), grpc_addr);
+            (
+                searcher_pool,
+                grpc_addr,
+                SearcherNode {
+                    node_id: node_config.node_id.clone(),
+                    client,
+                },
+            )
+        });
 
     let report_splits_subscription_handle_opt =
         // DISCLAIMER: This is quirky here: We base our decision to forward the split report depending
@@ -718,6 +733,7 @@ pub async fn serve_quickwit(
         grpc_readiness_signal_rx,
         rest_readiness_signal_rx,
         health_reporter,
+        local_searcher_opt,
     );
 
     let shutdown_token = CancellationToken::new();
@@ -794,7 +810,7 @@ async fn setup_searcher(
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
     searcher_context: Arc<SearcherContext>,
-) -> anyhow::Result<(SearchJobPlacer, Arc<dyn SearchService>)> {
+) -> anyhow::Result<(SearcherPool, SearchJobPlacer, Arc<dyn SearchService>)> {
     let searcher_pool = SearcherPool::default();
     let search_job_placer = SearchJobPlacer::new(searcher_pool.clone());
 
@@ -805,17 +821,6 @@ async fn setup_searcher(
         searcher_context,
     )
     .await?;
-    if node_config.is_service_enabled(QuickwitService::Searcher) {
-        let grpc_addr = node_config.grpc_advertise_addr;
-        let client = SearchServiceClient::from_service(search_service.clone(), grpc_addr);
-        searcher_pool.insert(
-            grpc_addr,
-            SearcherNode {
-                node_id: node_config.node_id.clone(),
-                client,
-            },
-        );
-    }
     let search_service_clone = search_service.clone();
     let max_message_size = node_config.grpc_config.max_message_size;
     let request_timeout = node_config.searcher_config.request_timeout();
@@ -865,7 +870,7 @@ async fn setup_searcher(
         })
     });
     searcher_pool.listen_for_changes(searcher_change_stream);
-    Ok((search_job_placer, search_service))
+    Ok((searcher_pool, search_job_placer, search_service))
 }
 
 fn require<T: Clone + Send>(
@@ -893,6 +898,7 @@ async fn advertise_node_readiness(
     grpc_readiness_signal_rx: oneshot::Receiver<()>,
     rest_readiness_signal_rx: oneshot::Receiver<()>,
     health_reporter: HealthReporter,
+    local_searcher_opt: Option<(SearcherPool, std::net::SocketAddr, SearcherNode)>,
 ) -> anyhow::Result<()> {
     cluster.set_self_node_readiness(false).await;
     // Set the initial health status to `NotServing` with "" meaning all services, as per
@@ -910,6 +916,10 @@ async fn advertise_node_readiness(
         .await
         .context("REST readiness trigger was dropped before firing")?;
     info!("REST server is ready");
+
+    if let Some((searcher_pool, grpc_addr, local_searcher)) = local_searcher_opt {
+        searcher_pool.insert(grpc_addr, local_searcher);
+    }
 
     cluster.set_self_node_readiness(true).await;
     health_reporter
@@ -1043,6 +1053,7 @@ mod tests {
             grpc_readiness_signal_rx,
             rest_readiness_signal_rx,
             health_reporter,
+            None,
         ));
         assert!(!cluster.is_self_node_ready().await);
 
@@ -1079,6 +1090,7 @@ mod tests {
             grpc_readiness_signal_rx,
             rest_readiness_signal_rx,
             stuck_health_reporter,
+            None,
         )
         .await
         .unwrap_err();
@@ -1096,7 +1108,7 @@ mod tests {
         let metastore = metastore_for_test();
         let (change_stream, change_stream_tx) = ClusterChangeStream::new_unbounded();
         let storage_resolver = StorageResolver::unconfigured();
-        let (search_job_placer, _searcher_service) = setup_searcher(
+        let (_searcher_pool, search_job_placer, _searcher_service) = setup_searcher(
             &node_config,
             change_stream,
             metastore,

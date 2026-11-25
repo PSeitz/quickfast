@@ -14,14 +14,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, ActorHandle, Handler, Mailbox};
+use quickwit_actors::{Actor, ActorContext, ActorExitStatus, ActorHandle, Handler};
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::temp_dir::{self};
 use quickwit_config::IndexConfig;
-use quickwit_indexing::actors::MergeSchedulerService;
 use quickwit_metastore::{IndexMetadataResponseExt, ListIndexesMetadataResponseExt};
 use quickwit_proto::metastore::{
     IndexMetadataRequest, ListIndexesMetadataRequest, MetastoreService, MetastoreServiceClient,
@@ -30,6 +30,7 @@ use quickwit_proto::types::IndexUid;
 use quickwit_search::SearchJobPlacer;
 use quickwit_storage::StorageResolver;
 use serde::Serialize;
+use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
 
 use super::delete_task_pipeline::DeleteTaskPipeline;
@@ -57,7 +58,7 @@ pub struct DeleteTaskService {
     pipeline_handles_by_index_uid: HashMap<IndexUid, ActorHandle<DeleteTaskPipeline>>,
     max_concurrent_split_uploads: usize,
     event_broker: EventBroker,
-    merge_scheduler_service: Mailbox<MergeSchedulerService>,
+    delete_execution_semaphore: Arc<Semaphore>,
 }
 
 impl DeleteTaskService {
@@ -67,7 +68,7 @@ impl DeleteTaskService {
         storage_resolver: StorageResolver,
         data_dir_path: PathBuf,
         max_concurrent_split_uploads: usize,
-        merge_scheduler_service: Mailbox<MergeSchedulerService>,
+        delete_execution_semaphore: Arc<Semaphore>,
         event_broker: EventBroker,
     ) -> anyhow::Result<Self> {
         let delete_service_task_path = data_dir_path.join(DELETE_SERVICE_TASK_DIR_NAME);
@@ -80,7 +81,7 @@ impl DeleteTaskService {
             delete_service_task_dir,
             pipeline_handles_by_index_uid: Default::default(),
             max_concurrent_split_uploads,
-            merge_scheduler_service,
+            delete_execution_semaphore,
             event_broker,
         })
     }
@@ -177,7 +178,7 @@ impl DeleteTaskService {
             index_storage,
             self.delete_service_task_dir.clone(),
             self.max_concurrent_split_uploads,
-            self.merge_scheduler_service.clone(),
+            self.delete_execution_semaphore.clone(),
             self.event_broker.clone(),
         );
         let (_pipeline_mailbox, pipeline_handler) = ctx.spawn_actor().spawn(pipeline);
@@ -248,7 +249,7 @@ mod tests {
             StorageResolver::unconfigured(),
             data_dir_path,
             4,
-            universe.get_or_spawn_one(),
+            std::sync::Arc::new(tokio::sync::Semaphore::new(3)),
             EventBroker::default(),
         )
         .await

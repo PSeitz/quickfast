@@ -85,20 +85,6 @@ pub fn build_source_command() -> Command {
                 ])
             )
         .subcommand(
-            Command::new("ingest-api")
-                .about("Enables/disables the ingest API of an index.")
-                .args(&[
-                    arg!(--index <INDEX> "ID of the target index")
-                        .display_order(1)
-                        .required(true),
-                    arg!(--enable "Enables the ingest API.")
-                        .display_order(2),
-                    arg!(--disable "Disables the ingest API.")
-                        .display_order(3)
-                        .conflicts_with("enable"),
-                ])
-            )
-        .subcommand(
             Command::new("delete")
                 .about("Deletes a source from an index.")
                 .alias("del")

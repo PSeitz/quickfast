@@ -103,21 +103,3 @@ pub(crate) static AVAILABLE_CONCURRENT_UPLOAD_PERMITS: LazyGauge = lazy_gauge!(
         description: "Number of available concurrent upload permits by component in [merger, indexer]",
         subsystem: "indexing",
 );
-
-pub(crate) static ONGOING_MERGE_OPERATIONS: LazyGauge = lazy_gauge!(
-        name: "ongoing_merge_operations",
-        description: "Number of ongoing merge operations",
-        subsystem: "indexing",
-);
-
-pub(crate) static PENDING_MERGE_OPERATIONS: LazyGauge = lazy_gauge!(
-        name: "pending_merge_operations",
-        description: "Number of pending merge operations",
-        subsystem: "indexing",
-);
-
-pub(crate) static PENDING_MERGE_BYTES: LazyGauge = lazy_gauge!(
-        name: "pending_merge_bytes",
-        description: "Number of pending merge bytes",
-        subsystem: "indexing",
-);

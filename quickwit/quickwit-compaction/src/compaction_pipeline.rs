@@ -17,8 +17,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Context;
-use quickwit_actors::{ActorHandle, HEARTBEAT, Health, SpawnContext, Supervisable};
 use quickwit_common::KillSwitch;
 use quickwit_common::io::{IoControls, Limiter};
 use quickwit_common::pubsub::EventBroker;
@@ -26,15 +24,15 @@ use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::RetentionPolicy;
 use quickwit_doc_mapper::DocMapper;
 use quickwit_indexing::IndexingSplitStore;
-use quickwit_indexing::actors::{
-    MergeExecutor, MergeSplitDownloader, Packager, Publisher, Uploader, UploaderType,
-};
-use quickwit_indexing::merge_policy::{MergeOperation, MergeSource};
+use quickwit_indexing::actors::{MergeExecutionContext, execute_merge_operation};
+use quickwit_indexing::merge_policy::MergeOperation;
 use quickwit_metrics::{counter, gauge, histogram, label_values};
 use quickwit_proto::indexing::MergePipelineId;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_proto::types::{IndexUid, SourceId, SplitId};
-use tokio::sync::Semaphore;
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::{Semaphore, oneshot};
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::metrics::{
@@ -67,35 +65,14 @@ pub struct PipelineStatusUpdate {
     pub status: PipelineStatus,
 }
 
-struct CompactionPipelineHandles {
-    merge_split_downloader: ActorHandle<MergeSplitDownloader>,
-    merge_executor: ActorHandle<MergeExecutor>,
-    merge_packager: ActorHandle<Packager>,
-    merge_uploader: ActorHandle<Uploader>,
-    merge_publisher: ActorHandle<Publisher>,
-    next_check_for_progress: Instant,
-}
-
-impl CompactionPipelineHandles {
-    /// Returns true once per HEARTBEAT interval. Between heartbeats we only
-    /// check whether actors are alive, not whether they are making progress.
-    /// This gives CPU-intensive actors (like the packager) up to 30s to
-    /// complete before being declared unhealthy.
-    fn should_check_for_progress(&mut self) -> bool {
-        let now = Instant::now();
-        let check_for_progress = now > self.next_check_for_progress;
-        if check_for_progress {
-            self.next_check_for_progress = now + *HEARTBEAT;
-        }
-        check_for_progress
-    }
+struct RunningCompaction {
+    task_handle: JoinHandle<()>,
+    result_rx: oneshot::Receiver<Result<(), String>>,
 }
 
 /// A single-use compaction pipeline. Processes one merge task and terminates.
 ///
-/// Owned by the `CompactorService`, which periodically calls
-/// `check_actor_health()` to collect status updates. The pipeline manages
-/// its own retry logic internally.
+/// Owned by `CompactorService`, which periodically polls `pipeline_status_update()`.
 pub struct CompactionPipeline {
     task_id: TaskId,
     merge_operation: MergeOperation,
@@ -103,7 +80,7 @@ pub struct CompactionPipeline {
     status: PipelineStatus,
     kill_switch: KillSwitch,
     scratch_directory: TempDirectory,
-    handles: Option<CompactionPipelineHandles>,
+    running: Option<RunningCompaction>,
     doc_mapper: Arc<DocMapper>,
     merge_policy: Arc<dyn quickwit_indexing::merge_policy::MergePolicy>,
     retention_policy: Option<RetentionPolicy>,
@@ -114,6 +91,15 @@ pub struct CompactionPipeline {
     event_broker: EventBroker,
     merge_execution_semaphore: Arc<Semaphore>,
     pipeline_start: Option<Instant>,
+}
+
+impl Drop for CompactionPipeline {
+    fn drop(&mut self) {
+        self.kill_switch.kill();
+        if let Some(running) = self.running.take() {
+            running.task_handle.abort();
+        }
+    }
 }
 
 impl CompactionPipeline {
@@ -138,7 +124,7 @@ impl CompactionPipeline {
             status: PipelineStatus::InProgress,
             kill_switch: KillSwitch::default(),
             scratch_directory,
-            handles: None,
+            running: None,
             merge_operation,
             pipeline_id,
             doc_mapper,
@@ -158,76 +144,47 @@ impl CompactionPipeline {
         &self.status
     }
 
-    fn supervisables(&self) -> Vec<&dyn Supervisable> {
-        let Some(handles) = &self.handles else {
-            return Vec::new();
-        };
-        vec![
-            &handles.merge_split_downloader,
-            &handles.merge_executor,
-            &handles.merge_packager,
-            &handles.merge_uploader,
-            &handles.merge_publisher,
-        ]
-    }
-
-    /// Returns pipeline status update by checking the health of individual pipeline actors.
+    /// Returns the latest status update for this compaction task.
     ///
-    /// If the pipeline is already completed or failed (terminal status), returns the status
-    /// without re-checking actors. The pipeline sits in this "completed" state (finished or failed)
-    /// until the compactor service cleans up the spot in favor of a new pipeline. This is done to
-    /// ensure that the planner acks the success/failure.
+    /// Once terminal (`Completed` or `Failed`), the status is sticky until the
+    /// compactor service frees the slot after planner acknowledgement.
     pub fn pipeline_status_update(&mut self) -> PipelineStatusUpdate {
         self.update_status();
         self.build_status_update()
     }
 
     fn update_status(&mut self) {
-        // Pipeline is finished but yet to be cleaned up.
-        if matches!(
-            self.status,
-            PipelineStatus::Completed | PipelineStatus::Failed { .. }
-        ) {
+        if self.status.is_terminal() {
             return;
         }
-        let Some(handles) = self.handles.as_mut() else {
+        let Some(running) = self.running.as_mut() else {
             return;
         };
 
-        // We check whether actors are alive on every tick (1s), but only
-        // check whether they are making progress once per HEARTBEAT (30s).
-        // This gives CPU-intensive actors like the packager time to finish
-        // without being falsely declared unhealthy.
-        let check_for_progress = handles.should_check_for_progress();
-
-        let mut has_healthy = false;
-        let mut failure_actor_names: Vec<String> = Vec::new();
-
-        for supervisable in self.supervisables() {
-            match supervisable.check_health(check_for_progress) {
-                Health::Healthy => {
-                    has_healthy = true;
-                }
-                Health::FailureOrUnhealthy => {
-                    failure_actor_names.push(supervisable.name().to_string());
-                }
-                Health::Success => {}
+        match running.result_rx.try_recv() {
+            Ok(Ok(())) => {
+                self.record_pipeline_duration();
+                info!(task_id = %self.task_id, "compaction pipeline completed");
+                self.status = PipelineStatus::Completed;
+                self.record_terminal_metrics(true);
+                self.running = None;
             }
-        }
-
-        if !failure_actor_names.is_empty() {
-            self.record_pipeline_duration();
-            let error_msg = format!("failed actors: {:?}", failure_actor_names);
-            error!(task_id=%self.task_id, "{error_msg}");
-            self.status = PipelineStatus::Failed { error: error_msg };
-            self.record_terminal_metrics(false);
-            return;
-        }
-        if !has_healthy {
-            self.record_pipeline_duration();
-            info!(task_id=%self.task_id, "all compaction pipeline actors completed");
-            self.status = PipelineStatus::Completed;
-            self.record_terminal_metrics(true);
+            Ok(Err(error_msg)) => {
+                self.record_pipeline_duration();
+                error!(task_id = %self.task_id, error = %error_msg, "compaction pipeline failed");
+                self.status = PipelineStatus::Failed { error: error_msg };
+                self.record_terminal_metrics(false);
+                self.running = None;
+            }
+            Err(TryRecvError::Closed) => {
+                self.record_pipeline_duration();
+                let error_msg = "compaction task exited unexpectedly".to_string();
+                error!(task_id = %self.task_id, "{error_msg}");
+                self.status = PipelineStatus::Failed { error: error_msg };
+                self.record_terminal_metrics(false);
+                self.running = None;
+            }
+            Err(TryRecvError::Empty) => {}
         }
     }
 
@@ -274,96 +231,49 @@ impl CompactionPipeline {
         }
     }
 
-    /// Spawns the 5-actor merge execution chain and sends the `MergeOperation`
-    /// to the downloader to kick off execution.
-    pub(crate) fn spawn_pipeline(&mut self, spawn_ctx: &SpawnContext) -> anyhow::Result<()> {
+    /// Spawns a background task executing the merge operation end-to-end.
+    pub(crate) fn spawn_pipeline(&mut self) -> anyhow::Result<()> {
         info!(
-            task_id=%self.task_id,
-            pipeline_id=%self.pipeline_id,
+            task_id = %self.task_id,
+            pipeline_id = %self.pipeline_id,
             "spawning compaction pipeline"
         );
 
-        let merge_publisher = Publisher::new(
-            quickwit_indexing::PublisherType::MergePublisher,
-            self.metastore.clone(),
-        );
-        let (merge_publisher_mailbox, merge_publisher_handle) = spawn_ctx
-            .spawn_builder()
-            .set_kill_switch(self.kill_switch.child())
-            .spawn(merge_publisher);
-
-        // Uploader
-        let merge_uploader = Uploader::new(
-            UploaderType::MergeUploader,
-            self.metastore.clone(),
-            self.merge_policy.clone(),
-            self.retention_policy.clone(),
-            self.split_store.clone(),
-            merge_publisher_mailbox,
-            self.max_concurrent_split_uploads.get(),
-            self.event_broker.clone(),
-        );
-        let (merge_uploader_mailbox, merge_uploader_handle) = spawn_ctx
-            .spawn_builder()
-            .set_kill_switch(self.kill_switch.child())
-            .spawn(merge_uploader);
-
-        // Packager
-        let tag_fields = self.doc_mapper.tag_named_fields()?;
-        let merge_packager = Packager::new("MergePackager", tag_fields, merge_uploader_mailbox);
-        let (merge_packager_mailbox, merge_packager_handle) = spawn_ctx
-            .spawn_builder()
-            .set_kill_switch(self.kill_switch.child())
-            .spawn(merge_packager);
-
-        // MergeExecutor
-        let split_downloader_io_controls = IoControls::default()
+        let download_io_controls = IoControls::default()
             .set_throughput_limiter_opt(self.io_throughput_limiter.clone())
             .set_component("split_downloader_merge");
-        let merge_executor_io_controls =
-            split_downloader_io_controls.clone().set_component("merger");
+        let merge_io_controls = download_io_controls.clone().set_component("merger");
 
-        let merge_executor = MergeExecutor::new(
-            self.pipeline_id.clone(),
-            self.metastore.clone(),
-            self.doc_mapper.clone(),
-            merge_executor_io_controls,
-            merge_packager_mailbox,
-            Some(self.merge_execution_semaphore.clone()),
-        );
-        let (merge_executor_mailbox, merge_executor_handle) = spawn_ctx
-            .spawn_builder()
-            .set_kill_switch(self.kill_switch.child())
-            .spawn(merge_executor);
-
-        // MergeSplitDownloader
-        let merge_split_downloader = MergeSplitDownloader {
-            scratch_directory: self.scratch_directory.clone(),
+        let merge_ctx = MergeExecutionContext {
+            pipeline_id: self.pipeline_id.clone(),
+            metastore: self.metastore.clone(),
+            doc_mapper: self.doc_mapper.clone(),
             split_store: self.split_store.clone(),
-            executor_mailbox: merge_executor_mailbox,
-            io_controls: split_downloader_io_controls,
+            merge_policy: self.merge_policy.clone(),
+            retention_policy: self.retention_policy.clone(),
+            scratch_directory: self.scratch_directory.clone(),
+            download_io_controls,
+            merge_io_controls,
+            max_concurrent_split_uploads: self.max_concurrent_split_uploads.get(),
+            event_broker: self.event_broker.clone(),
+            merge_execution_semaphore: Some(self.merge_execution_semaphore.clone()),
+            kill_switch: self.kill_switch.child(),
         };
-        let (merge_split_downloader_mailbox, merge_split_downloader_handle) = spawn_ctx
-            .spawn_builder()
-            .set_kill_switch(self.kill_switch.child())
-            .spawn(merge_split_downloader);
+        let merge_operation = self.merge_operation.clone();
+        let (result_tx, result_rx) = oneshot::channel();
 
-        let now = Instant::now();
-        self.pipeline_start = Some(now);
-        // Kick off the pipeline.
-        merge_split_downloader_mailbox
-            .try_send_message(MergeSource::Operation(self.merge_operation.clone()))
-            .context("failed to send merge operation to downloader")?;
-
-        self.handles = Some(CompactionPipelineHandles {
-            merge_split_downloader: merge_split_downloader_handle,
-            merge_executor: merge_executor_handle,
-            merge_packager: merge_packager_handle,
-            merge_uploader: merge_uploader_handle,
-            merge_publisher: merge_publisher_handle,
-            next_check_for_progress: Instant::now() + *HEARTBEAT,
+        self.pipeline_start = Some(Instant::now());
+        let task_handle = tokio::spawn(async move {
+            let outcome = execute_merge_operation(&merge_ctx, merge_operation)
+                .await
+                .map(|_| ())
+                .map_err(|err| format!("{err:#}"));
+            let _ = result_tx.send(outcome);
         });
-
+        self.running = Some(RunningCompaction {
+            task_handle,
+            result_rx,
+        });
         Ok(())
     }
 }
@@ -374,7 +284,6 @@ pub(crate) mod tests {
     use std::num::NonZeroUsize;
     use std::sync::Arc;
 
-    use quickwit_actors::Universe;
     use quickwit_common::pubsub::EventBroker;
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_doc_mapper::default_doc_mapper_for_test;
@@ -421,13 +330,11 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_spawn_pipeline_creates_handles() {
-        let universe = Universe::new();
+    async fn test_spawn_pipeline_creates_task() {
         let mut pipeline = test_pipeline("task-1", &["split-1", "split-2"]);
-        assert!(pipeline.handles.is_none());
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
-        assert!(pipeline.handles.is_some());
-        universe.assert_quit().await;
+        assert!(pipeline.running.is_none());
+        pipeline.spawn_pipeline().unwrap();
+        assert!(pipeline.running.is_some());
     }
 
     #[tokio::test]
@@ -443,19 +350,16 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_status_update_healthy_pipeline() {
-        let universe = Universe::new();
         let mut pipeline = test_pipeline("task-1", &["split-1"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
         let update = pipeline.pipeline_status_update();
         assert_eq!(update.status, PipelineStatus::InProgress);
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
     async fn test_killed_pipeline_fails() {
-        let universe = Universe::new();
         let mut pipeline = test_pipeline("task-1", &["split-1"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
 
         pipeline.kill_switch.kill();
         tokio::task::yield_now().await;
@@ -465,6 +369,5 @@ pub(crate) mod tests {
         // Calling again still returns Failed (sticky).
         let update = pipeline.pipeline_status_update();
         assert!(matches!(update.status, PipelineStatus::Failed { .. }));
-        universe.assert_quit().await;
     }
 }

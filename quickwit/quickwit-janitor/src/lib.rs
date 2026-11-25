@@ -14,15 +14,17 @@
 
 #![deny(clippy::disallowed_methods)]
 
+use std::sync::Arc;
+
 use quickwit_actors::{ActorHandle, Mailbox, Universe};
 use quickwit_common::pubsub::EventBroker;
 use quickwit_compaction::planner::CompactionPlanner;
 use quickwit_config::NodeConfig;
-use quickwit_indexing::actors::MergeSchedulerService;
 use quickwit_metastore::SplitInfo;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_search::SearchJobPlacer;
 use quickwit_storage::StorageResolver;
+use tokio::sync::Semaphore;
 use tracing::info;
 
 pub mod actors;
@@ -60,13 +62,14 @@ pub async fn start_janitor_service(
     let (_, retention_policy_executor_handle) =
         universe.spawn_builder().spawn(retention_policy_executor);
     let delete_task_service_handle = if run_delete_task_service {
+        const DEFAULT_DELETE_CONCURRENCY: usize = 3;
         let delete_task_service = DeleteTaskService::new(
             metastore,
             search_job_placer,
             storage_resolver,
             config.data_dir_path.clone(),
             config.indexer_config.max_concurrent_split_uploads,
-            universe.get_or_spawn_one::<MergeSchedulerService>(),
+            Arc::new(Semaphore::new(DEFAULT_DELETE_CONCURRENCY)),
             event_broker,
         )
         .await?;

@@ -17,7 +17,6 @@ mod nop_merge_policy;
 mod stable_log_merge_policy;
 
 use std::fmt;
-use std::ops::Deref;
 use std::sync::Arc;
 
 pub(crate) use const_write_amplification::ConstWriteAmplificationMergePolicy;
@@ -29,10 +28,7 @@ use quickwit_metastore::{SplitMaturity, SplitMetadata};
 use quickwit_proto::types::SplitId;
 use serde::Serialize;
 pub(crate) use stable_log_merge_policy::StableLogMergePolicy;
-use tantivy::TrackedObject;
 use tracing::{Span, info_span};
-
-use crate::actors::MergePermit;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum MergeOperationType {
@@ -43,59 +39,6 @@ pub enum MergeOperationType {
 impl fmt::Display for MergeOperationType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{self:?}")
-    }
-}
-
-pub struct MergeTask {
-    pub merge_operation: TrackedObject<MergeOperation>,
-    pub(crate) _merge_permit: MergePermit,
-}
-
-impl MergeTask {
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn from_merge_operation_for_test(merge_operation: MergeOperation) -> MergeTask {
-        let inventory = tantivy::Inventory::default();
-        let tracked_merge_operation = inventory.track(merge_operation);
-        MergeTask {
-            merge_operation: tracked_merge_operation,
-            _merge_permit: MergePermit::for_test(),
-        }
-    }
-}
-
-/// Carries either a scheduled merge task (old pipeline, with RAII permit + inventory tracking)
-/// or a bare operation (compactor pipeline, which manages concurrency and dedup independently).
-pub enum MergeSource {
-    Task(MergeTask),
-    Operation(MergeOperation),
-}
-
-impl MergeSource {
-    pub fn as_operation(&self) -> &MergeOperation {
-        match self {
-            MergeSource::Task(task) => task,
-            MergeSource::Operation(op) => op,
-        }
-    }
-}
-
-impl fmt::Debug for MergeSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.as_operation().fmt(f)
-    }
-}
-
-impl fmt::Debug for MergeTask {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.merge_operation.as_ref().fmt(f)
-    }
-}
-
-impl Deref for MergeTask {
-    type Target = MergeOperation;
-
-    fn deref(&self) -> &Self::Target {
-        self.merge_operation.as_ref()
     }
 }
 

@@ -18,11 +18,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, bail};
-use async_trait::async_trait;
 use itertools::Itertools;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::Progress;
-use quickwit_common::runtimes::RuntimeType;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_directories::write_hotcache;
 use quickwit_doc_mapper::NamedField;
@@ -31,8 +28,7 @@ use quickwit_proto::search::{ListFieldsEntry, ListFieldsMetadata, ListFieldsType
 use tantivy::index::FieldMetadata;
 use tantivy::schema::{FieldType, Type};
 use tantivy::{IndexMeta, InvertedIndexReader, ReloadPolicy};
-use tokio::runtime::Handle;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, warn};
 
 /// Maximum distinct values allowed for a tag field within a split.
 const MAX_VALUES_PER_TAG_FIELD: usize = if cfg!(any(test, feature = "testsuite")) {
@@ -41,112 +37,7 @@ const MAX_VALUES_PER_TAG_FIELD: usize = if cfg!(any(test, feature = "testsuite")
     1000
 };
 
-use crate::actors::Uploader;
-use crate::models::{IndexedSplit, IndexedSplitBatch, PackagedSplit, PackagedSplitBatch};
-
-/// The role of the packager is to get an index writer and
-/// produce a split file.
-///
-/// This includes the following steps:
-/// - commit: this step is CPU heavy
-/// - identifying the list of tags for the splits, and labelling it accordingly
-/// - creating a bundle file
-/// - computing the hotcache
-/// - appending it to the split file.
-///
-/// The split format is described in `internals/split-format.md`
-#[derive(Clone)]
-pub struct Packager {
-    actor_name: &'static str,
-    uploader_mailbox: Mailbox<Uploader>,
-    /// List of tag fields ([`Vec<NamedField>`]) defined in the index config.
-    tag_fields: Vec<NamedField>,
-}
-
-impl Packager {
-    pub fn new(
-        actor_name: &'static str,
-        tag_fields: Vec<NamedField>,
-        uploader_mailbox: Mailbox<Uploader>,
-    ) -> Packager {
-        Packager {
-            actor_name,
-            uploader_mailbox,
-            tag_fields,
-        }
-    }
-
-    pub fn process_indexed_split(
-        &self,
-        split: IndexedSplit,
-        ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<PackagedSplit> {
-        create_packaged_split(split, &self.tag_fields, ctx.progress())
-    }
-}
-
-#[async_trait]
-impl Actor for Packager {
-    type ObservableState = ();
-
-    #[allow(clippy::unused_unit)]
-    fn observable_state(&self) -> Self::ObservableState {
-        ()
-    }
-
-    fn queue_capacity(&self) -> QueueCapacity {
-        QueueCapacity::Bounded(1)
-    }
-
-    fn name(&self) -> String {
-        self.actor_name.to_string()
-    }
-
-    fn task_metrics_label(&self) -> &'static str {
-        quickwit_actors::to_task_metrics_label(self.actor_name)
-    }
-
-    fn runtime_handle(&self) -> Handle {
-        RuntimeType::Blocking.get_runtime_handle()
-    }
-}
-
-#[async_trait]
-impl Handler<IndexedSplitBatch> for Packager {
-    type Reply = ();
-
-    #[instrument(level = "info", name = "packager", parent=batch.batch_parent_span.id(), skip_all)]
-    async fn handle(
-        &mut self,
-        batch: IndexedSplitBatch,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        let split_ids: Vec<String> = batch
-            .splits
-            .iter()
-            .map(|split| split.split_id().to_string())
-            .collect_vec();
-        debug!(
-            split_ids=?split_ids,
-            "start-packaging-splits"
-        );
-        let mut packaged_splits = Vec::with_capacity(batch.splits.len());
-        for split in batch.splits {
-            let packaged_split = self.process_indexed_split(split, ctx)?;
-            packaged_splits.push(packaged_split);
-        }
-        ctx.send_message(
-            &self.uploader_mailbox,
-            PackagedSplitBatch::new(
-                packaged_splits,
-                batch.merge_task_opt,
-                batch.batch_parent_span,
-            ),
-        )
-        .await?;
-        Ok(())
-    }
-}
+use crate::models::{IndexedSplit, PackagedSplit};
 
 fn list_split_files(
     index_meta: &IndexMeta,
@@ -367,14 +258,12 @@ fn u64_from_term_data(data: &[u8]) -> anyhow::Result<u64> {
 mod tests {
     use std::ops::RangeInclusive;
 
-    use quickwit_actors::{ObservationType, Universe};
     use quickwit_common::io::IoControls;
     use quickwit_proto::search::{ListFieldsEntry, ListFieldsMetadata};
     use quickwit_proto::types::{DocMappingUid, IndexUid, NodeId};
     use tantivy::directory::MmapDirectory;
     use tantivy::schema::{FAST, NumericOptions, STRING, Schema, TEXT, Type};
     use tantivy::{DateTime, IndexBuilder, IndexSettings, doc};
-    use tracing::Span;
 
     use super::*;
     use crate::controlled_directory::ControlledDirectory;
@@ -568,11 +457,9 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_packager_simple() -> anyhow::Result<()> {
+    #[test]
+    fn test_packager_simple() -> anyhow::Result<()> {
         quickwit_common::setup_logging_for_tests();
-        let universe = Universe::with_accelerated_time();
-        let (mailbox, inbox) = universe.create_test_mailbox();
         let indexed_split = make_indexed_split_for_test(&[
             DateTime::from_timestamp_secs(1628203589),
             DateTime::from_timestamp_secs(1628203640),
@@ -583,25 +470,7 @@ mod tests {
                 "tag_str", "tag_many", "tag_u64", "tag_i64", "tag_f64", "tag_bool",
             ],
         );
-        let packager = Packager::new("TestPackager", tag_fields, mailbox);
-        let (packager_mailbox, packager_handle) = universe.spawn_builder().spawn(packager);
-        packager_mailbox
-            .send_message(IndexedSplitBatch {
-                splits: vec![indexed_split],
-                merge_task_opt: None,
-                batch_parent_span: Span::none(),
-            })
-            .await?;
-        assert_eq!(
-            packager_handle.process_pending_and_observe().await.obs_type,
-            ObservationType::Alive
-        );
-        let packaged_splits = inbox.drain_for_test();
-        assert_eq!(packaged_splits.len(), 1);
-        let packaged_split = packaged_splits[0]
-            .downcast_ref::<PackagedSplitBatch>()
-            .unwrap();
-        let split = &packaged_split.splits[0];
+        let split = create_packaged_split(indexed_split, &tag_fields, &Progress::default())?;
         assert_eq!(
             &split.tags.iter().map(|s| s.as_str()).collect::<Vec<&str>>(),
             &[
@@ -624,7 +493,6 @@ mod tests {
                     ..=DateTime::from_timestamp_secs(1628203640)
             )
         );
-        universe.assert_quit().await;
         Ok(())
     }
 }

@@ -206,18 +206,6 @@ quickwit_indexing_ingesthree_worker_restarts_total:
   module: quickwit_indexing::ingesthree::metrics
   kind: counter
   description: Worker restarts begun after failure backoff.
-quickwit_indexing_ongoing_merge_operations:
-  module: quickwit_indexing::metrics
-  kind: gauge
-  description: Number of ongoing merge operations
-quickwit_indexing_pending_merge_bytes:
-  module: quickwit_indexing::metrics
-  kind: gauge
-  description: Number of pending merge bytes
-quickwit_indexing_pending_merge_operations:
-  module: quickwit_indexing::metrics
-  kind: gauge
-  description: Number of pending merge operations
 quickwit_indexing_processed_bytes:
   module: quickwit_indexing::metrics
   kind: counter

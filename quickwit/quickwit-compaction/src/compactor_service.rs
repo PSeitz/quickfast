@@ -19,9 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use quickwit_actors::{
-    Actor, ActorContext, ActorExitStatus, Handler, Healthz, Mailbox, SpawnContext,
-};
+use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Healthz, Mailbox};
 use quickwit_common::io::{self, Limiter};
 use quickwit_common::pretty::PrettyDisplay;
 use quickwit_common::pubsub::EventBroker;
@@ -166,13 +164,12 @@ impl CompactorService {
         }
     }
 
-    async fn report_status_and_maybe_finish(&mut self, ctx: &ActorContext<Self>) {
+    async fn report_status_and_maybe_finish(&mut self, _ctx: &ActorContext<Self>) {
         let statuses = self.check_pipeline_statuses();
         let request = self.build_report_status_request(&statuses);
         match self.planner_client.report_status(request).await {
             Ok(response) => {
-                self.process_new_tasks(response.new_tasks, ctx.spawn_ctx())
-                    .await;
+                self.process_new_tasks(response.new_tasks).await;
                 self.check_decommissioning_status();
             }
             Err(error) => {
@@ -192,20 +189,16 @@ impl CompactorService {
         statuses
     }
 
-    async fn process_new_tasks(
-        &mut self,
-        assignments: Vec<MergeTaskAssignment>,
-        spawn_ctx: &SpawnContext,
-    ) {
+    async fn process_new_tasks(&mut self, assignments: Vec<MergeTaskAssignment>) {
         // The planner has acknowledged the statuses we just sent — drop any
-        // Completed/Failed pipelines so their scratch directories and actor
+        // Completed/Failed pipelines so their scratch directories and task
         // handles are released.
         for slot in &mut self.pipelines {
             slot.take_if(|p| p.status().is_terminal());
         }
         for assignment in assignments {
             let task_id = assignment.task_id.clone();
-            if let Err(error) = self.spawn_task(assignment, spawn_ctx).await {
+            if let Err(error) = self.spawn_task(assignment).await {
                 error!(%task_id, %error, "failed to spawn compaction task");
             }
         }
@@ -217,11 +210,7 @@ impl CompactorService {
         AVAILABLE_SLOTS.set(available_slots as f64);
     }
 
-    async fn spawn_task(
-        &mut self,
-        assignment: MergeTaskAssignment,
-        spawn_ctx: &SpawnContext,
-    ) -> anyhow::Result<()> {
+    async fn spawn_task(&mut self, assignment: MergeTaskAssignment) -> anyhow::Result<()> {
         if self.status() != CompactorStatus::Ready {
             info!(
                 task_id = %assignment.task_id,
@@ -247,7 +236,7 @@ impl CompactorService {
         let mut pipeline = self
             .build_compaction_pipeline(assignment, scratch_directory)
             .await?;
-        pipeline.spawn_pipeline(spawn_ctx)?;
+        pipeline.spawn_pipeline()?;
         self.pipelines[slot_idx] = Some(pipeline);
         gauge!(parent: COMPACTIONS_IN_PROGRESS, labels: [labels]).inc();
         Ok(())
@@ -563,15 +552,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_pipeline_statuses_with_pipelines() {
-        let universe = Universe::new();
         let mut compactor_service = test_compactor_service(4);
 
         let mut pipeline = test_pipeline("task-1", &["split-a", "split-b"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
         compactor_service.pipelines[0] = Some(pipeline);
 
         let mut pipeline = test_pipeline("task-2", &["split-c"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
         compactor_service.pipelines[2] = Some(pipeline);
 
         let statuses = compactor_service.check_pipeline_statuses();
@@ -586,17 +574,15 @@ mod tests {
             statuses[1].split_ids,
             HashSet::from([SplitId::from("split-c")])
         );
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
     async fn test_end_to_end_statuses_to_proto() {
-        let universe = Universe::new();
         // 3 merge-executions → 6 pipeline slots
         let mut compactor_service = test_compactor_service(3);
 
         let mut pipeline = test_pipeline("task-1", &["s1", "s2"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
         compactor_service.pipelines[0] = Some(pipeline);
 
         let statuses = compactor_service.check_pipeline_statuses();
@@ -617,7 +603,6 @@ mod tests {
         );
         assert!(request.successes.is_empty());
         assert!(request.failures.is_empty());
-        universe.assert_quit().await;
     }
 
     #[test]
@@ -725,34 +710,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_task_fails_when_all_slots_occupied() {
-        let universe = Universe::new();
         // 1 merge-execution → 2 pipeline slots
         let mut compactor_service = test_compactor_service(1);
 
         compactor_service
-            .spawn_task(test_assignment("task-1", &["s1"]), universe.spawn_ctx())
+            .spawn_task(test_assignment("task-1", &["s1"]))
             .await
             .unwrap();
         compactor_service
-            .spawn_task(test_assignment("task-2", &["s2"]), universe.spawn_ctx())
+            .spawn_task(test_assignment("task-2", &["s2"]))
             .await
             .unwrap();
 
         // Both slots InProgress — no room.
         assert!(
             compactor_service
-                .spawn_task(test_assignment("task-3", &["s3"]), universe.spawn_ctx())
+                .spawn_task(test_assignment("task-3", &["s3"]))
                 .await
                 .is_err()
         );
-
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
     async fn test_end_to_end_report_status_and_spawn() {
-        let universe = Universe::new();
-
         // Mock planner that returns one assignment on the first call.
         let assignment = test_assignment("planner-task-1", &["s1", "s2"]);
         let assignments = vec![assignment];
@@ -790,7 +770,7 @@ mod tests {
             .await
             .unwrap();
         compactor_service
-            .process_new_tasks(response.new_tasks, universe.spawn_ctx())
+            .process_new_tasks(response.new_tasks)
             .await;
 
         // Verify the pipeline was spawned.
@@ -800,8 +780,6 @@ mod tests {
         assert_eq!(request.in_progress[0].task_id, "planner-task-1");
         assert_eq!(request.in_progress[0].split_ids.len(), 2);
         assert_eq!(request.available_slots, 5);
-
-        universe.assert_quit().await;
     }
 
     #[test]
@@ -881,11 +859,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_decommissioning_waits_for_in_flight_merge() {
-        let universe = Universe::new();
         let mut compactor_service = test_compactor_service(4);
 
         let mut pipeline = test_pipeline("task-1", &["s1"]);
-        pipeline.spawn_pipeline(universe.spawn_ctx()).unwrap();
+        pipeline.spawn_pipeline().unwrap();
         compactor_service.pipelines[0] = Some(pipeline);
 
         compactor_service.set_status(CompactorStatus::Decommissioning);
@@ -897,18 +874,15 @@ mod tests {
         let request = compactor_service.build_report_status_request(&statuses);
         assert_eq!(request.available_slots, 0);
         assert_eq!(request.in_progress.len(), 1);
-
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
     async fn test_spawn_task_dropped_while_decommissioning() {
-        let universe = Universe::new();
         let mut compactor_service = test_compactor_service(2);
         compactor_service.set_status(CompactorStatus::Decommissioning);
 
         compactor_service
-            .spawn_task(test_assignment("task-1", &["s1"]), universe.spawn_ctx())
+            .spawn_task(test_assignment("task-1", &["s1"]))
             .await
             .unwrap();
 
@@ -918,7 +892,6 @@ mod tests {
                 .iter()
                 .all(|slot| slot.is_none())
         );
-        universe.assert_quit().await;
     }
 
     #[tokio::test]

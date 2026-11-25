@@ -18,13 +18,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, anyhow};
-use async_trait::async_trait;
+use anyhow::{Context, anyhow, bail};
 use itertools::Itertools;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Mailbox, QueueCapacity};
 use quickwit_common::io::IoControls;
+use quickwit_common::pubsub::EventBroker;
 use quickwit_common::runtimes::RuntimeType;
-use quickwit_common::temp_dir::TempDirectory;
+use quickwit_common::temp_dir::{self, TempDirectory};
+use quickwit_common::{KillSwitch, Progress};
+use quickwit_config::RetentionPolicy;
 use quickwit_directories::UnionDirectory;
 use quickwit_doc_mapper::DocMapper;
 use quickwit_metastore::SplitMetadata;
@@ -40,148 +41,224 @@ use tantivy::directory::{Advice, DirectoryClone, RamDirectory};
 use tantivy::index::SegmentId;
 use tantivy::tokenizer::TokenizerManager;
 use tantivy::{DateTime, Directory, Index, IndexMeta, IndexWriter, SegmentReader};
-use tokio::runtime::Handle;
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{Instrument, debug, info, instrument, warn};
 
-use crate::actors::Packager;
+use crate::actors::packager::create_packaged_split;
+use crate::actors::uploader::stage_upload_and_publish_split;
 use crate::controlled_directory::ControlledDirectory;
-use crate::merge_policy::{MergeOperationType, MergeSource};
-use crate::models::{IndexedSplit, IndexedSplitBatch, MergeScratch, SplitAttrs};
+use crate::merge_policy::{MergeOperation, MergeOperationType, MergePolicy};
+use crate::models::{IndexedSplit, PackagedSplit, SplitAttrs};
 use crate::no_fsync_mmap_directory::open_split_scratch_directory;
+use crate::split_store::IndexingSplitStore;
 
+/// Shared dependencies and controls for executing merge or delete-and-merge operations.
 #[derive(Clone)]
-pub struct MergeExecutor {
-    pipeline_id: MergePipelineId,
-    metastore: MetastoreServiceClient,
-    doc_mapper: Arc<DocMapper>,
-    io_controls: IoControls,
-    merge_packager_mailbox: Mailbox<Packager>,
-    /// Bounds concurrent Tantivy merges across pipelines on this node.
-    /// `None` in the legacy indexing-side merge pipeline.
-    merge_execution_semaphore: Option<Arc<Semaphore>>,
+pub struct MergeExecutionContext {
+    pub pipeline_id: MergePipelineId,
+    pub metastore: MetastoreServiceClient,
+    pub doc_mapper: Arc<DocMapper>,
+    pub split_store: IndexingSplitStore,
+    pub merge_policy: Arc<dyn MergePolicy>,
+    pub retention_policy: Option<RetentionPolicy>,
+    pub scratch_directory: TempDirectory,
+    pub download_io_controls: IoControls,
+    pub merge_io_controls: IoControls,
+    pub max_concurrent_split_uploads: usize,
+    pub event_broker: EventBroker,
+    /// Bounds concurrent CPU-heavy Tantivy merges across pipelines on this node.
+    pub merge_execution_semaphore: Option<Arc<Semaphore>>,
+    pub kill_switch: KillSwitch,
 }
 
-#[async_trait]
-impl Actor for MergeExecutor {
-    type ObservableState = ();
-
-    fn runtime_handle(&self) -> Handle {
-        RuntimeType::Blocking.get_runtime_handle()
+/// Executes a single merge or delete-and-merge operation end-to-end:
+/// download -> merge/delete -> package -> stage & upload -> publish.
+///
+/// Returns `Ok(None)` when a delete operation removes every document in the split
+/// (marking the original split for deletion) or finds no pending delete tasks.
+#[instrument(
+    level = "info",
+    name = "execute_merge_operation",
+    parent = merge_operation.merge_parent_span.id(),
+    skip_all
+)]
+pub async fn execute_merge_operation(
+    ctx: &MergeExecutionContext,
+    merge_operation: MergeOperation,
+) -> anyhow::Result<Option<SplitMetadata>> {
+    if ctx.kill_switch.is_dead() {
+        debug!("kill switch was activated, cancelling merge operation");
+        bail!("merge operation cancelled by kill switch");
     }
 
-    fn observable_state(&self) -> Self::ObservableState {}
+    let start = Instant::now();
+    let merge_scratch_directory = temp_dir::Builder::default()
+        .join("merge")
+        .tempdir_in(ctx.scratch_directory.path())?;
+    debug!(dir=%merge_scratch_directory.path().display(), "download-merge-splits");
+    let downloaded_splits_directory = temp_dir::Builder::default()
+        .join("downloaded-splits")
+        .tempdir_in(merge_scratch_directory.path())?;
 
-    fn queue_capacity(&self) -> QueueCapacity {
-        QueueCapacity::Bounded(1)
+    let download_io_controls = ctx
+        .download_io_controls
+        .clone()
+        .set_kill_switch(ctx.kill_switch.clone());
+    let tantivy_dirs = download_splits(
+        &ctx.split_store,
+        &merge_operation.splits,
+        downloaded_splits_directory.path(),
+        &download_io_controls,
+        &ctx.kill_switch,
+    )
+    .await?;
+
+    let _cpu_permit = match &ctx.merge_execution_semaphore {
+        Some(semaphore) => Some(
+            semaphore
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("merge execution semaphore should never be closed"),
+        ),
+        None => None,
+    };
+
+    if ctx.kill_switch.is_dead() {
+        debug!("kill switch was activated before merge execution");
+        bail!("merge operation cancelled by kill switch");
     }
 
-    fn name(&self) -> String {
-        "MergeExecutor".to_string()
-    }
-}
+    let tag_fields = ctx.doc_mapper.tag_named_fields()?;
+    let pipeline_id = ctx.pipeline_id.clone();
+    let metastore = ctx.metastore.clone();
+    let doc_mapper = ctx.doc_mapper.clone();
+    let merge_io_controls = ctx
+        .merge_io_controls
+        .clone()
+        .set_kill_switch(ctx.kill_switch.clone());
+    let operation_type = merge_operation.operation_type.clone();
+    let merge_parent_span = merge_operation.merge_parent_span.clone();
 
-#[async_trait]
-impl Handler<MergeScratch> for MergeExecutor {
-    type Reply = ();
-
-    #[instrument(level = "info", name = "merge_executor", parent = merge_scratch.merge_source.as_operation().merge_parent_span.id(), skip_all)]
-    async fn handle(
-        &mut self,
-        merge_scratch: MergeScratch,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        let start = Instant::now();
-        let MergeScratch {
-            merge_source,
-            tantivy_dirs,
-            merge_scratch_directory,
-            ..
-        } = merge_scratch;
-        let merge_operation = merge_source.as_operation();
-        // On nodes running the split compaction architecture, merge pipelines are ephemeral, and we
-        // need to make sure there aren't too many CPU-bound operations occurring concurrently.
-        let _cpu_permit = match &self.merge_execution_semaphore {
-            Some(semaphore) => Some(
-                ctx.protect_future(semaphore.clone().acquire_owned())
-                    .await
-                    .expect("merge execution semaphore should never be closed"),
-            ),
-            None => None,
-        };
-        let indexed_split_opt: Option<IndexedSplit> = match merge_operation.operation_type {
-            MergeOperationType::Merge => {
-                let merge_res = self
-                    .process_merge(
-                        merge_operation.merge_split_id.clone(),
-                        merge_operation.splits.clone(),
-                        tantivy_dirs,
-                        merge_scratch_directory,
-                        ctx,
-                    )
-                    .await;
-                match merge_res {
-                    Ok(indexed_split) => Some(indexed_split),
-                    Err(err) => {
-                        // A failure in a merge is a bit special.
-                        //
-                        // Instead of failing the pipeline, we just log it.
-                        // The idea is to limit the risk associated with a potential split of death.
-                        //
-                        // Such a split is now not tracked by the merge planner and won't undergo a
-                        // merge until the merge pipeline is restarted.
-                        //
-                        // With a merge policy that marks splits as mature after a day or so, this
-                        // limits the noise associated to those failed
-                        // merges.
-                        error!(task=?merge_operation, err=?err, "failed to merge splits");
-                        return Ok(());
-                    }
-                }
-            }
-            MergeOperationType::DeleteAndMerge => {
-                assert_eq!(
-                    merge_operation.splits.len(),
-                    1,
-                    "Delete tasks can be applied only on one split."
-                );
-                assert_eq!(tantivy_dirs.len(), 1);
-                let split_with_docs_to_delete = merge_operation.splits[0].clone();
-                self.process_delete_and_merge(
-                    merge_operation.merge_split_id.clone(),
-                    split_with_docs_to_delete,
+    let packaged_split_opt: Option<PackagedSplit> = RuntimeType::Blocking
+        .get_runtime_handle()
+        .spawn(
+            async move {
+                let indexed_split_opt = execute_merge_to_indexed_split(
+                    pipeline_id,
+                    &metastore,
+                    &doc_mapper,
+                    merge_io_controls,
+                    merge_operation,
                     tantivy_dirs,
                     merge_scratch_directory,
-                    ctx,
                 )
-                .await?
+                .await?;
+                // Drop downloaded split files before packaging and uploading.
+                drop(downloaded_splits_directory);
+                let Some(indexed_split) = indexed_split_opt else {
+                    info!("no-splits-merged");
+                    return Ok(None);
+                };
+                info!(
+                    merged_num_docs = %indexed_split.split_attrs.num_docs,
+                    elapsed_secs = %start.elapsed().as_secs_f32(),
+                    operation_type = %operation_type,
+                    "merge-operation-success"
+                );
+                let progress = Progress::default();
+                let packaged_split = create_packaged_split(indexed_split, &tag_fields, &progress)?;
+                Ok::<_, anyhow::Error>(Some(packaged_split))
             }
-        };
-        if let Some(indexed_split) = indexed_split_opt {
-            info!(
-                merged_num_docs = %indexed_split.split_attrs.num_docs,
-                elapsed_secs = %start.elapsed().as_secs_f32(),
-                operation_type = %merge_operation.operation_type,
-                "merge-operation-success"
-            );
-            let batch_parent_span = merge_operation.merge_parent_span.clone();
-            let merge_task_opt = match merge_source {
-                MergeSource::Task(task) => Some(task),
-                MergeSource::Operation(_) => None,
-            };
-            ctx.send_message(
-                &self.merge_packager_mailbox,
-                IndexedSplitBatch {
-                    splits: vec![indexed_split],
-                    batch_parent_span,
-                    merge_task_opt,
-                },
+            .instrument(merge_parent_span),
+        )
+        .await
+        .context("merge task panicked")??;
+
+    let Some(packaged_split) = packaged_split_opt else {
+        return Ok(None);
+    };
+
+    let published_split = stage_upload_and_publish_split(
+        packaged_split,
+        &ctx.metastore,
+        &ctx.split_store,
+        &ctx.merge_policy,
+        ctx.retention_policy.as_ref(),
+        ctx.max_concurrent_split_uploads,
+        &ctx.event_broker,
+        &ctx.kill_switch,
+    )
+    .await?;
+
+    Ok(Some(published_split))
+}
+
+async fn download_splits(
+    split_store: &IndexingSplitStore,
+    splits: &[SplitMetadata],
+    download_directory: &Path,
+    io_controls: &IoControls,
+    kill_switch: &KillSwitch,
+) -> anyhow::Result<Vec<Box<dyn Directory>>> {
+    if kill_switch.is_dead() {
+        debug!("kill switch was activated, cancelling download");
+        bail!("download cancelled by kill switch");
+    }
+    let download_futures = splits.iter().map(|split| {
+        let io_controls = io_controls.clone();
+        async move {
+            split_store
+                .fetch_and_open_split(split.split_id().clone(), download_directory, &io_controls)
+                .await
+                .with_context(|| format!("failed to download split `{}`", split.split_id()))
+        }
+    });
+    futures::future::try_join_all(download_futures).await
+}
+
+async fn execute_merge_to_indexed_split(
+    pipeline_id: MergePipelineId,
+    metastore: &MetastoreServiceClient,
+    doc_mapper: &Arc<DocMapper>,
+    io_controls: IoControls,
+    merge_operation: MergeOperation,
+    tantivy_dirs: Vec<Box<dyn Directory>>,
+    merge_scratch_directory: TempDirectory,
+) -> anyhow::Result<Option<IndexedSplit>> {
+    match merge_operation.operation_type {
+        MergeOperationType::Merge => {
+            let indexed_split = process_merge(
+                pipeline_id,
+                doc_mapper,
+                io_controls,
+                merge_operation.merge_split_id,
+                merge_operation.splits,
+                tantivy_dirs,
+                merge_scratch_directory,
             )
             .await?;
-        } else {
-            info!("no-splits-merged");
+            Ok(Some(indexed_split))
         }
-        Ok(())
+        MergeOperationType::DeleteAndMerge => {
+            assert_eq!(
+                merge_operation.splits.len(),
+                1,
+                "Delete tasks can be applied only on one split."
+            );
+            assert_eq!(tantivy_dirs.len(), 1);
+            let split_with_docs_to_delete = merge_operation.splits.into_iter().next().unwrap();
+            process_delete_and_merge(
+                metastore,
+                doc_mapper,
+                io_controls,
+                merge_operation.merge_split_id,
+                split_with_docs_to_delete,
+                tantivy_dirs,
+                merge_scratch_directory,
+            )
+            .await
+        }
     }
 }
 
@@ -194,7 +271,6 @@ fn combine_index_meta(mut index_metas: Vec<IndexMeta>) -> anyhow::Result<IndexMe
 }
 
 fn open_split_directories(
-    // Directories containing the splits to merge
     tantivy_dirs: &[Box<dyn Directory>],
     tokenizer_manager: &TokenizerManager,
 ) -> anyhow::Result<(IndexMeta, Vec<Box<dyn Directory>>)> {
@@ -210,7 +286,7 @@ fn open_split_directories(
     Ok((union_index_meta, directories))
 }
 
-/// Creates a directory with a single `meta.json` file describe in `index_meta`
+/// Creates a directory with a single `meta.json` file described in `index_meta`.
 fn create_shadowing_meta_json_directory(index_meta: IndexMeta) -> anyhow::Result<RamDirectory> {
     let union_index_meta_json = serde_json::to_string_pretty(&index_meta)?;
     let ram_directory = RamDirectory::default();
@@ -260,7 +336,6 @@ fn combine_partition_ids_aux(partition_ids: impl IntoIterator<Item = u64>) -> u6
             combine_two_hashes(acc, partition_id)
         })
     } else {
-        // This is not forbidden but this should never happen.
         0u64
     }
 }
@@ -321,267 +396,221 @@ fn max_merge_ops(splits: &[SplitMetadata]) -> usize {
         .unwrap_or(0)
 }
 
-impl MergeExecutor {
-    pub fn new(
-        pipeline_id: MergePipelineId,
-        metastore: MetastoreServiceClient,
-        doc_mapper: Arc<DocMapper>,
-        io_controls: IoControls,
-        merge_packager_mailbox: Mailbox<Packager>,
-        merge_execution_semaphore: Option<Arc<Semaphore>>,
-    ) -> Self {
-        MergeExecutor {
-            pipeline_id,
-            metastore,
-            doc_mapper,
-            io_controls,
-            merge_packager_mailbox,
-            merge_execution_semaphore,
-        }
+async fn process_merge(
+    pipeline_id: MergePipelineId,
+    doc_mapper: &Arc<DocMapper>,
+    io_controls: IoControls,
+    merge_split_id: SplitId,
+    splits: Vec<SplitMetadata>,
+    tantivy_dirs: Vec<Box<dyn Directory>>,
+    merge_scratch_directory: TempDirectory,
+) -> anyhow::Result<IndexedSplit> {
+    let (union_index_meta, split_directories) = open_split_directories(
+        &tantivy_dirs,
+        doc_mapper.tokenizer_manager().tantivy_manager(),
+    )?;
+    let controlled_directory = merge_split_directories(
+        doc_mapper,
+        io_controls,
+        union_index_meta,
+        split_directories,
+        Vec::new(),
+        None,
+        merge_scratch_directory.path(),
+    )
+    .await?;
+
+    let merged_index = open_index(
+        controlled_directory.clone(),
+        doc_mapper.tokenizer_manager().tantivy_manager(),
+    )?;
+
+    let split_attrs = merge_split_attrs(pipeline_id, merge_split_id, &splits)?;
+    Ok(IndexedSplit {
+        split_attrs,
+        index: merged_index,
+        split_scratch_directory: merge_scratch_directory,
+        controlled_directory,
+    })
+}
+
+async fn process_delete_and_merge(
+    metastore: &MetastoreServiceClient,
+    doc_mapper: &Arc<DocMapper>,
+    io_controls: IoControls,
+    merge_split_id: SplitId,
+    split: SplitMetadata,
+    tantivy_dirs: Vec<Box<dyn Directory>>,
+    merge_scratch_directory: TempDirectory,
+) -> anyhow::Result<Option<IndexedSplit>> {
+    let list_delete_tasks_request =
+        ListDeleteTasksRequest::new(split.index_uid.clone(), split.delete_opstamp);
+    let delete_tasks = metastore
+        .list_delete_tasks(list_delete_tasks_request)
+        .await?
+        .delete_tasks;
+    if delete_tasks.is_empty() {
+        warn!(
+            "No delete task found for split `{}` with `delete_opstamp` = `{}`.",
+            split.split_id(),
+            split.delete_opstamp
+        );
+        return Ok(None);
     }
 
-    async fn process_merge(
-        &mut self,
-        merge_split_id: SplitId,
-        splits: Vec<SplitMetadata>,
-        tantivy_dirs: Vec<Box<dyn Directory>>,
-        merge_scratch_directory: TempDirectory,
-        ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<IndexedSplit> {
-        let (union_index_meta, split_directories) = open_split_directories(
-            &tantivy_dirs,
-            self.doc_mapper.tokenizer_manager().tantivy_manager(),
-        )?;
-        let controlled_directory = self
-            .merge_split_directories(
-                union_index_meta,
-                split_directories,
-                Vec::new(),
-                None,
-                merge_scratch_directory.path(),
-                ctx,
-            )
-            .await?;
+    let last_delete_opstamp = delete_tasks
+        .iter()
+        .map(|delete_task| delete_task.opstamp)
+        .max()
+        .expect("There is at least one delete task.");
+    info!(
+        delete_opstamp_start = split.delete_opstamp,
+        num_delete_tasks = delete_tasks.len()
+    );
 
-        // This will have the side effect of deleting the directory containing the downloaded
-        // splits.
-        let merged_index = open_index(
-            controlled_directory.clone(),
-            self.doc_mapper.tokenizer_manager().tantivy_manager(),
-        )?;
-        ctx.record_progress();
+    let (union_index_meta, split_directories) = open_split_directories(
+        &tantivy_dirs,
+        doc_mapper.tokenizer_manager().tantivy_manager(),
+    )?;
+    let controlled_directory = merge_split_directories(
+        doc_mapper,
+        io_controls,
+        union_index_meta,
+        split_directories,
+        delete_tasks,
+        Some(doc_mapper.clone()),
+        merge_scratch_directory.path(),
+    )
+    .await?;
 
-        let split_attrs = merge_split_attrs(self.pipeline_id.clone(), merge_split_id, &splits)?;
-        Ok(IndexedSplit {
-            split_attrs,
-            index: merged_index,
-            split_scratch_directory: merge_scratch_directory,
-            controlled_directory,
-        })
-    }
+    let mut merged_index = Index::open(controlled_directory.clone())?;
+    merged_index.set_tokenizers(doc_mapper.tokenizer_manager().tantivy_manager().clone());
+    merged_index.set_fast_field_tokenizers(
+        get_quickwit_fastfield_normalizer_manager()
+            .tantivy_manager()
+            .clone(),
+    );
 
-    async fn process_delete_and_merge(
-        &mut self,
-        merge_split_id: SplitId,
-        split: SplitMetadata,
-        tantivy_dirs: Vec<Box<dyn Directory>>,
-        merge_scratch_directory: TempDirectory,
-        ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<Option<IndexedSplit>> {
-        let list_delete_tasks_request =
-            ListDeleteTasksRequest::new(split.index_uid.clone(), split.delete_opstamp);
-        let delete_tasks = ctx
-            .protect_future(self.metastore.list_delete_tasks(list_delete_tasks_request))
-            .await?
-            .delete_tasks;
-        if delete_tasks.is_empty() {
-            warn!(
-                "No delete task found for split `{}` with `delete_optamp` = `{}`.",
-                split.split_id(),
-                split.delete_opstamp
-            );
-            return Ok(None);
-        }
-
-        let last_delete_opstamp = delete_tasks
-            .iter()
-            .map(|delete_task| delete_task.opstamp)
-            .max()
-            .expect("There is at least one delete task.");
+    let merged_segment = if let Some(segment) =
+        merged_index.searchable_segments()?.into_iter().next()
+    {
+        segment
+    } else {
         info!(
-            delete_opstamp_start = split.delete_opstamp,
-            num_delete_tasks = delete_tasks.len()
+            "All documents from split `{}` were deleted.",
+            split.split_id()
         );
-
-        let (union_index_meta, split_directories) = open_split_directories(
-            &tantivy_dirs,
-            self.doc_mapper.tokenizer_manager().tantivy_manager(),
-        )?;
-        let controlled_directory = self
-            .merge_split_directories(
-                union_index_meta,
-                split_directories,
-                delete_tasks,
-                Some(self.doc_mapper.clone()),
-                merge_scratch_directory.path(),
-                ctx,
-            )
+        let mark_splits_for_deletion_request =
+            MarkSplitsForDeletionRequest::new(split.index_uid.clone(), [split.split_id.clone()]);
+        metastore
+            .mark_splits_for_deletion(mark_splits_for_deletion_request)
             .await?;
+        return Ok(None);
+    };
 
-        // This will have the side effect of deleting the directory containing the downloaded split.
-        let mut merged_index = Index::open(controlled_directory.clone())?;
-        ctx.record_progress();
-        merged_index.set_tokenizers(
-            self.doc_mapper
-                .tokenizer_manager()
-                .tantivy_manager()
-                .clone(),
-        );
-        merged_index.set_fast_field_tokenizers(
-            get_quickwit_fastfield_normalizer_manager()
-                .tantivy_manager()
-                .clone(),
-        );
+    let merged_segment_reader = SegmentReader::open(&merged_segment)?;
+    let num_docs = merged_segment_reader.num_docs() as u64;
+    let uncompressed_docs_size_in_bytes = (num_docs as f32
+        * split.uncompressed_docs_size_in_bytes as f32
+        / split.num_docs as f32) as u64;
+    let time_range = if let Some(timestamp_field_name) = doc_mapper.timestamp_field_name() {
+        let reader = merged_segment_reader
+            .fast_fields()
+            .date(timestamp_field_name)?;
+        Some(reader.min_value()..=reader.max_value())
+    } else {
+        None
+    };
+    let indexed_split = IndexedSplit {
+        split_attrs: SplitAttrs {
+            node_id: NodeId::from_str(&split.node_id),
+            index_uid: split.index_uid,
+            source_id: split.source_id,
+            doc_mapping_uid: split.doc_mapping_uid,
+            split_id: merge_split_id,
+            partition_id: split.partition_id,
+            replaced_split_ids: vec![split.split_id.clone()],
+            time_range,
+            num_docs,
+            uncompressed_docs_size_in_bytes,
+            delete_opstamp: last_delete_opstamp,
+            num_merge_ops: split.num_merge_ops,
+        },
+        index: merged_index,
+        split_scratch_directory: merge_scratch_directory,
+        controlled_directory,
+    };
+    Ok(Some(indexed_split))
+}
 
-        ctx.record_progress();
+async fn merge_split_directories(
+    doc_mapper: &Arc<DocMapper>,
+    io_controls: IoControls,
+    union_index_meta: IndexMeta,
+    split_directories: Vec<Box<dyn Directory>>,
+    delete_tasks: Vec<DeleteTask>,
+    doc_mapper_opt: Option<Arc<DocMapper>>,
+    output_path: &Path,
+) -> anyhow::Result<ControlledDirectory> {
+    let shadowing_meta_json_directory = create_shadowing_meta_json_directory(union_index_meta)?;
 
-        // Compute merged split attributes.
-        let merged_segment =
-            if let Some(segment) = merged_index.searchable_segments()?.into_iter().next() {
-                segment
-            } else {
-                info!(
-                    "All documents from split `{}` were deleted.",
-                    split.split_id()
-                );
-                let mark_splits_for_deletion_request = MarkSplitsForDeletionRequest::new(
-                    split.index_uid.clone(),
-                    [split.split_id.clone()],
-                );
-                self.metastore
-                    .mark_splits_for_deletion(mark_splits_for_deletion_request)
-                    .await?;
-                return Ok(None);
-            };
+    let output_directory = ControlledDirectory::new(
+        open_split_scratch_directory(output_path, Advice::Sequential)?,
+        io_controls,
+    );
+    let mut directory_stack: Vec<Box<dyn Directory>> = vec![
+        output_directory.box_clone(),
+        Box::new(shadowing_meta_json_directory),
+    ];
+    directory_stack.extend(split_directories);
+    let union_directory = UnionDirectory::union_of(directory_stack);
+    let union_index = open_index(
+        union_directory,
+        doc_mapper.tokenizer_manager().tantivy_manager(),
+    )?;
 
-        let merged_segment_reader = SegmentReader::open(&merged_segment)?;
-        let num_docs = merged_segment_reader.num_docs() as u64;
-        let uncompressed_docs_size_in_bytes = (num_docs as f32
-            * split.uncompressed_docs_size_in_bytes as f32
-            / split.num_docs as f32) as u64;
-        let time_range = if let Some(timestamp_field_name) = self.doc_mapper.timestamp_field_name()
-        {
-            let reader = merged_segment_reader
-                .fast_fields()
-                .date(timestamp_field_name)?;
-            Some(reader.min_value()..=reader.max_value())
-        } else {
-            None
-        };
-        let indexed_split = IndexedSplit {
-            split_attrs: SplitAttrs {
-                node_id: NodeId::from_str(&split.node_id),
-                index_uid: split.index_uid,
-                source_id: split.source_id,
-                doc_mapping_uid: split.doc_mapping_uid,
-                split_id: merge_split_id,
-                partition_id: split.partition_id,
-                replaced_split_ids: vec![split.split_id.clone()],
-                time_range,
-                num_docs,
-                uncompressed_docs_size_in_bytes,
-                delete_opstamp: last_delete_opstamp,
-                num_merge_ops: split.num_merge_ops,
-            },
-            index: merged_index,
-            split_scratch_directory: merge_scratch_directory,
-            controlled_directory,
-        };
-        Ok(Some(indexed_split))
+    let mut index_writer: IndexWriter = union_index.writer_with_num_threads(1, 15_000_000)?;
+    let num_delete_tasks = delete_tasks.len();
+    if num_delete_tasks > 0 {
+        let doc_mapper = doc_mapper_opt
+            .ok_or_else(|| anyhow!("doc mapper must be present if there are delete tasks"))?;
+        for delete_task in delete_tasks {
+            let delete_query = delete_task
+                .delete_query
+                .expect("A delete task must have a delete query.");
+            let query_ast: QueryAst =
+                serde_json::from_str(&delete_query.query_ast).context("invalid query_ast json")?;
+            let parsed_query_ast = query_ast.parse_user_query(&[]).context("invalid query")?;
+            debug!(
+                "Delete all documents matched by query `{:?}`",
+                parsed_query_ast
+            );
+            let (query, _) =
+                doc_mapper.query(union_index.schema(), parsed_query_ast, false, None)?;
+            index_writer.delete_query(query)?;
+        }
+        debug!("commit-delete-operations");
+        index_writer.commit()?;
     }
 
-    async fn merge_split_directories(
-        &self,
-        union_index_meta: IndexMeta,
-        split_directories: Vec<Box<dyn Directory>>,
-        delete_tasks: Vec<DeleteTask>,
-        doc_mapper_opt: Option<Arc<DocMapper>>,
-        output_path: &Path,
-        ctx: &ActorContext<MergeExecutor>,
-    ) -> anyhow::Result<ControlledDirectory> {
-        let shadowing_meta_json_directory = create_shadowing_meta_json_directory(union_index_meta)?;
+    let segment_ids: Vec<SegmentId> = union_index
+        .searchable_segment_metas()?
+        .into_iter()
+        .map(|segment_meta| segment_meta.id())
+        .collect();
 
-        // This directory is here to receive the merged split, as well as the final meta.json file.
-        let output_directory = ControlledDirectory::new(
-            open_split_scratch_directory(output_path, Advice::Sequential)?,
-            self.io_controls
-                .clone()
-                .set_kill_switch(ctx.kill_switch().clone())
-                .set_progress(ctx.progress().clone()),
-        );
-        let mut directory_stack: Vec<Box<dyn Directory>> = vec![
-            output_directory.box_clone(),
-            Box::new(shadowing_meta_json_directory),
-        ];
-        directory_stack.extend(split_directories);
-        let union_directory = UnionDirectory::union_of(directory_stack);
-        let union_index = open_index(
-            union_directory,
-            self.doc_mapper.tokenizer_manager().tantivy_manager(),
-        )?;
-
-        ctx.record_progress();
-        let _protect_guard = ctx.protect_zone();
-
-        let mut index_writer: IndexWriter = union_index.writer_with_num_threads(1, 15_000_000)?;
-        let num_delete_tasks = delete_tasks.len();
-        if num_delete_tasks > 0 {
-            let doc_mapper = doc_mapper_opt
-                .ok_or_else(|| anyhow!("doc mapper must be present if there are delete tasks"))?;
-            for delete_task in delete_tasks {
-                let delete_query = delete_task
-                    .delete_query
-                    .expect("A delete task must have a delete query.");
-                let query_ast: QueryAst = serde_json::from_str(&delete_query.query_ast)
-                    .context("invalid query_ast json")?;
-                // We ignore the docmapper default fields when we consider delete query.
-                // We reparse the query here defensively, but actually, it should already have been
-                // done in the delete task rest handler.
-                let parsed_query_ast = query_ast.parse_user_query(&[]).context("invalid query")?;
-                debug!(
-                    "Delete all documents matched by query `{:?}`",
-                    parsed_query_ast
-                );
-                let (query, _) =
-                    doc_mapper.query(union_index.schema(), parsed_query_ast, false, None)?;
-                index_writer.delete_query(query)?;
-            }
-            debug!("commit-delete-operations");
-            index_writer.commit()?;
-        }
-
-        let segment_ids: Vec<SegmentId> = union_index
-            .searchable_segment_metas()?
-            .into_iter()
-            .map(|segment_meta| segment_meta.id())
-            .collect();
-
-        // A merge is useless if there is no delete and only one segment.
-        if num_delete_tasks == 0 && segment_ids.len() <= 1 {
-            return Ok(output_directory);
-        }
-
-        // If after deletion there is no longer any document, don't try to merge.
-        if num_delete_tasks != 0 && segment_ids.is_empty() {
-            return Ok(output_directory);
-        }
-
-        debug!(segment_ids=?segment_ids,"merging-segments");
-        // TODO it would be nice if tantivy could let us run the merge in the current thread.
-        index_writer.merge(&segment_ids).await?;
-
-        Ok(output_directory)
+    if num_delete_tasks == 0 && segment_ids.len() <= 1 {
+        return Ok(output_directory);
     }
+
+    if num_delete_tasks != 0 && segment_ids.is_empty() {
+        return Ok(output_directory);
+    }
+
+    debug!(segment_ids=?segment_ids, "merging-segments");
+    index_writer.merge(&segment_ids).await?;
+
+    Ok(output_directory)
 }
 
 fn open_index<T: Into<Box<dyn Directory>>>(
@@ -600,7 +629,6 @@ fn open_index<T: Into<Box<dyn Directory>>>(
 
 #[cfg(test)]
 mod tests {
-    use quickwit_actors::Universe;
     use quickwit_common::split_file;
     use quickwit_metastore::{
         ListSplitsRequestExt, MetastoreServiceStreamSplitsExt, SplitMetadata, StageSplitsRequestExt,
@@ -612,7 +640,7 @@ mod tests {
     use tantivy::{Document, ReloadPolicy, TantivyDocument};
 
     use super::*;
-    use crate::merge_policy::{MergeOperation, MergeSource, MergeTask};
+    use crate::merge_policy::MergeOperation;
     use crate::{TestSandbox, get_tantivy_directory_from_split_bundle};
 
     #[test]
@@ -640,9 +668,9 @@ mod tests {
         let test_sandbox =
             TestSandbox::create("test-index", doc_mapping_yaml, "", &["body"]).await?;
         for split_id in 0..4 {
-            let single_doc = std::iter::once(
-                serde_json::json!({"body ": format!("split{split_id}"), "ts": 1631072713u64 + split_id }),
-            );
+            let single_doc = std::iter::once(serde_json::json!(
+                {"body ": format!("split{split_id}"), "ts": 1631072713u64 + split_id }
+            ));
             test_sandbox.add_documents(single_doc).await?;
         }
         let metastore = test_sandbox.metastore();
@@ -670,41 +698,29 @@ mod tests {
             tantivy_dirs.push(get_tantivy_directory_from_split_bundle(&dest_filepath).unwrap())
         }
         let merge_operation = MergeOperation::new_merge_operation(split_metas);
-        let merge_task = MergeTask::from_merge_operation_for_test(merge_operation);
-        let merge_scratch = MergeScratch {
-            merge_source: MergeSource::Task(merge_task),
-            tantivy_dirs,
-            merge_scratch_directory,
-            downloaded_splits_directory,
-        };
         let pipeline_id = MergePipelineId {
             node_id: test_sandbox.node_id(),
             index_uid,
             source_id: test_sandbox.source_id(),
         };
-        let (merge_packager_mailbox, merge_packager_inbox) =
-            test_sandbox.universe().create_test_mailbox();
-        let merge_executor = MergeExecutor::new(
+        let merged_split = execute_merge_to_indexed_split(
             pipeline_id,
-            test_sandbox.metastore(),
-            test_sandbox.doc_mapper(),
+            &test_sandbox.metastore(),
+            &test_sandbox.doc_mapper(),
             IoControls::default(),
-            merge_packager_mailbox,
-            None,
+            merge_operation,
+            tantivy_dirs,
+            merge_scratch_directory,
+        )
+        .await?
+        .expect("merge should produce an indexed split");
+        assert_eq!(merged_split.split_attrs.num_docs, 4);
+        assert_eq!(
+            merged_split.split_attrs.uncompressed_docs_size_in_bytes,
+            136
         );
-        let (merge_executor_mailbox, merge_executor_handle) = test_sandbox
-            .universe()
-            .spawn_builder()
-            .spawn(merge_executor);
-        merge_executor_mailbox.send_message(merge_scratch).await?;
-        merge_executor_handle.process_pending_and_observe().await;
-        let packager_msgs: Vec<IndexedSplitBatch> = merge_packager_inbox.drain_for_test_typed();
-        assert_eq!(packager_msgs.len(), 1);
-        let split_attrs_after_merge = &packager_msgs[0].splits[0].split_attrs;
-        assert_eq!(split_attrs_after_merge.num_docs, 4);
-        assert_eq!(split_attrs_after_merge.uncompressed_docs_size_in_bytes, 136);
-        assert_eq!(split_attrs_after_merge.num_merge_ops, 1);
-        let reader = packager_msgs[0].splits[0]
+        assert_eq!(merged_split.split_attrs.num_merge_ops, 1);
+        let reader = merged_split
             .index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
@@ -813,41 +829,25 @@ mod tests {
             .await?;
         let tantivy_dir = get_tantivy_directory_from_split_bundle(&dest_filepath).unwrap();
         let merge_operation = MergeOperation::new_delete_and_merge_operation(new_split_metadata);
-        let merge_task = MergeTask::from_merge_operation_for_test(merge_operation);
-        let merge_scratch = MergeScratch {
-            merge_source: MergeSource::Task(merge_task),
-            tantivy_dirs: vec![tantivy_dir],
-            merge_scratch_directory,
-            downloaded_splits_directory,
-        };
         let pipeline_id = MergePipelineId {
             node_id: test_sandbox.node_id(),
             index_uid: test_sandbox.index_uid(),
             source_id: test_sandbox.source_id(),
         };
-        let universe = Universe::with_accelerated_time();
-        let (merge_packager_mailbox, merge_packager_inbox) = universe.create_test_mailbox();
-        let delete_task_executor = MergeExecutor::new(
-            pipeline_id,
-            metastore,
-            test_sandbox.doc_mapper(),
-            IoControls::default(),
-            merge_packager_mailbox,
-            None,
-        );
-        let (delete_task_executor_mailbox, delete_task_executor_handle) =
-            universe.spawn_builder().spawn(delete_task_executor);
-        delete_task_executor_mailbox
-            .send_message(merge_scratch)
-            .await?;
-        delete_task_executor_handle
-            .process_pending_and_observe()
-            .await;
 
-        let packager_msgs: Vec<IndexedSplitBatch> = merge_packager_inbox.drain_for_test_typed();
+        let merged_split_opt = execute_merge_to_indexed_split(
+            pipeline_id,
+            &metastore,
+            &test_sandbox.doc_mapper(),
+            IoControls::default(),
+            merge_operation,
+            vec![tantivy_dir],
+            merge_scratch_directory,
+        )
+        .await?;
+
         if !result_docs.is_empty() {
-            assert_eq!(packager_msgs.len(), 1);
-            let split = &packager_msgs[0].splits[0];
+            let split = merged_split_opt.expect("delete should produce an indexed split");
             assert_eq!(split.split_attrs.num_docs, result_docs.len() as u64);
             assert_eq!(split.split_attrs.delete_opstamp, 1);
             // Delete operations do not update the num_merge_ops value.
@@ -886,7 +886,7 @@ mod tests {
                 assert!(documents_left.contains(doc));
             }
         } else {
-            assert!(packager_msgs.is_empty());
+            assert!(merged_split_opt.is_none());
             let metastore = test_sandbox.metastore();
             let index_uid = test_sandbox.index_uid();
             let splits = metastore
@@ -901,7 +901,6 @@ mod tests {
             ));
         }
         test_sandbox.assert_quit().await;
-        universe.assert_quit().await;
         Ok(())
     }
 

@@ -21,7 +21,7 @@ use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_storage::StorageResolver;
 use tracing::info;
 
-pub use crate::actors::{IndexingService, IndexingServiceCounters, PublisherType};
+pub use crate::actors::{IndexingService, IndexingServiceCounters};
 pub use crate::controlled_directory::ControlledDirectory;
 pub use crate::local_merge::run_local_merges;
 pub use crate::split_store::{IndexingSplitStore, get_tantivy_directory_from_split_bundle};

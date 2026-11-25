@@ -29,10 +29,9 @@ use quickwit_query::get_quickwit_fastfield_normalizer_manager;
 use tantivy::directory::{Advice, RamDirectory};
 use tantivy::store::{Compressor, ZstdCompressor};
 use tantivy::{ClusteringConfig, DateTime, IndexBuilder, IndexSettings};
-use tracing::{Span, instrument};
+use tracing::instrument;
 
 use crate::controlled_directory::ControlledDirectory;
-use crate::merge_policy::MergeTask;
 use crate::metrics::{DOCS_CLUSTER_GROUP_SIZE, INDEX_SOURCE};
 use crate::models::{ProcessedDoc, SplitAttrs};
 use crate::no_fsync_mmap_directory::open_split_scratch_directory;
@@ -282,14 +281,6 @@ fn record_timestamp(timestamp: DateTime, time_range: &mut Option<RangeInclusive<
         None => timestamp..=timestamp,
     };
     *time_range = Some(new_timestamp_range);
-}
-
-#[derive(Debug)]
-pub struct IndexedSplitBatch {
-    pub splits: Vec<IndexedSplit>,
-    /// A [`MergeTask`] tracked by the `DeleteTaskPlanner` in `DeleteTaskPipeline`.
-    pub merge_task_opt: Option<MergeTask>,
-    pub batch_parent_span: Span,
 }
 
 #[cfg(test)]

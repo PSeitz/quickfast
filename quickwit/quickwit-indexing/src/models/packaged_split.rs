@@ -16,12 +16,9 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::PathBuf;
 
-use itertools::Itertools;
 use quickwit_common::temp_dir::TempDirectory;
-use quickwit_proto::types::{IndexUid, SplitId};
-use tracing::Span;
+use quickwit_proto::types::IndexUid;
 
-use crate::merge_policy::MergeTask;
 use crate::models::SplitAttrs;
 
 pub struct PackagedSplit {
@@ -51,50 +48,5 @@ impl fmt::Debug for PackagedSplit {
             .field("tags", &self.tags)
             .field("split_files", &self.split_files)
             .finish()
-    }
-}
-
-#[derive(Debug)]
-pub struct PackagedSplitBatch {
-    pub splits: Vec<PackagedSplit>,
-    /// A [`MergeTask`] tracked by the `DeleteTaskPlanner` in `DeleteTaskPipeline`.
-    pub merge_task_opt: Option<MergeTask>,
-    pub batch_parent_span: Span,
-}
-
-impl PackagedSplitBatch {
-    /// Instantiate a consistent [`PackagedSplitBatch`] that
-    /// satisfies two constraints:
-    /// - a batch must have at least one split
-    /// - all splits must belong to the same `index_uid`.
-    pub fn new(
-        splits: Vec<PackagedSplit>,
-        merge_task_opt: Option<MergeTask>,
-        batch_parent_span: Span,
-    ) -> Self {
-        assert!(!splits.is_empty());
-        assert!(
-            splits
-                .iter()
-                .tuple_windows()
-                .all(|(left_split, right_split)| left_split.index_uid() == right_split.index_uid()),
-            "All splits must belong to the same `index_uid`."
-        );
-        Self {
-            splits,
-            merge_task_opt,
-            batch_parent_span,
-        }
-    }
-
-    pub fn index_uid(&self) -> IndexUid {
-        self.splits[0].split_attrs.index_uid.clone()
-    }
-
-    pub fn split_ids(&self) -> Vec<SplitId> {
-        self.splits
-            .iter()
-            .map(|split| split.split_attrs.split_id.clone())
-            .collect::<Vec<_>>()
     }
 }

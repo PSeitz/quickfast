@@ -59,46 +59,8 @@ pub static IN_FLIGHT_INGEST_ROUTER: LazyGauge =
 pub static IN_FLIGHT_INGESTHREE_QUEUE: LazyGauge =
     LazyGauge::new(|| in_flight_data_gauge("ingesthree_queue"));
 
-pub static IN_FLIGHT_INGESTER_PERSIST: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("ingester_persist"));
-
-pub static IN_FLIGHT_WAL: LazyGauge = LazyGauge::new(|| in_flight_data_gauge("wal"));
-
-pub static IN_FLIGHT_FETCH_STREAM: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("fetch_stream"));
-
-pub static IN_FLIGHT_MULTI_FETCH_STREAM: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("multi_fetch_stream"));
-
-pub static IN_FLIGHT_DOC_PROCESSOR_MAILBOX: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("doc_processor_mailbox"));
-
-pub static IN_FLIGHT_INDEXER_MAILBOX: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("indexer_mailbox"));
-
 pub static IN_FLIGHT_INDEX_WRITER: LazyGauge =
     LazyGauge::new(|| in_flight_data_gauge("index_writer"));
-
-pub static IN_FLIGHT_FILE_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("file_source"));
-
-pub static IN_FLIGHT_INGEST_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("ingest_source"));
-
-pub static IN_FLIGHT_KAFKA_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("kafka_source"));
-
-pub static IN_FLIGHT_KINESIS_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("kinesis_source"));
-
-pub static IN_FLIGHT_PUBSUB_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("pubsub_source"));
-
-pub static IN_FLIGHT_PULSAR_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("pulsar_source"));
-
-pub static IN_FLIGHT_OTHER_SOURCE: LazyGauge =
-    LazyGauge::new(|| in_flight_data_gauge("other_source"));
 
 fn in_flight_data_gauge(component: &'static str) -> Gauge {
     gauge!(parent: IN_FLIGHT_DATA_BYTES, "component" => component)
