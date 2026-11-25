@@ -39,14 +39,14 @@ use rest_handler::{
     es_compat_cluster_health_handler, es_compat_nodes_handler, es_compat_search_shards_handler,
 };
 use serde::{Deserialize, Serialize};
+use warp::Filter;
 use warp::hyper::StatusCode;
-use warp::{Filter, Rejection};
 
 use crate::elasticsearch_api::model::ElasticsearchError;
 use crate::elasticsearch_api::rest_handler::{
     es_compat_aliases_handler, es_compat_index_mapping_handler,
 };
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::rest_api_response::RestApiResponse;
 use crate::{BodyFormat, BuildInfo};
 
@@ -61,52 +61,53 @@ pub fn elastic_api_handlers(
     ingest_router: impl Into<IngestRouterClient>,
     metastore: MetastoreServiceClient,
     index_service: IndexService,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
+) -> BoxedRoute {
     let ingest_router = ingest_router.into();
     let max_body_size = node_config.ingest_api_config.max_body_size;
     let max_decompressed_body_size = node_config.ingest_api_config.max_decompressed_body_size;
-    es_compat_cluster_info_handler(node_config.clone(), BuildInfo::get())
-        .or(es_compat_nodes_handler(node_config.clone()))
-        .or(es_compat_search_handler(search_service.clone()))
-        .or(es_compat_bulk_handler(
-            ingest_router.clone(),
-            max_body_size,
-            max_decompressed_body_size,
-        ))
-        .boxed()
-        .or(es_compat_index_bulk_handler(
-            ingest_router,
-            max_body_size,
-            max_decompressed_body_size,
-        ))
-        .or(es_compat_index_search_handler(search_service.clone()))
-        .or(es_compat_index_count_handler(search_service.clone()))
-        .or(es_compat_scroll_handler(search_service.clone()))
-        .or(es_compat_delete_scroll_handler())
-        .or(es_compat_index_multi_search_handler(search_service.clone()))
-        .or(es_compat_index_field_capabilities_handler(
-            search_service.clone(),
-        ))
-        .boxed()
-        .or(es_compat_index_stats_handler(metastore.clone()))
-        .or(es_compat_delete_index_handler(index_service))
-        .or(es_compat_stats_handler(metastore.clone()))
-        .or(es_compat_cluster_health_handler(cluster))
-        .or(es_compat_index_cat_indices_handler(metastore.clone()))
-        .or(es_compat_cat_indices_handler(metastore.clone()))
-        .or(es_compat_resolve_index_handler(metastore.clone()))
-        .or(es_compat_aliases_handler())
-        .or(es_compat_index_mapping_handler(
-            metastore.clone(),
-            search_service.clone(),
-        ))
-        .or(es_compat_search_shards_handler(node_config))
+    boxed_route(
+        combine_routes([
+            boxed_route(es_compat_cluster_info_handler(
+                node_config.clone(),
+                BuildInfo::get(),
+            )),
+            boxed_route(es_compat_nodes_handler(node_config.clone())),
+            boxed_route(es_compat_search_handler(search_service.clone())),
+            boxed_route(es_compat_bulk_handler(
+                ingest_router.clone(),
+                max_body_size,
+                max_decompressed_body_size,
+            )),
+            boxed_route(es_compat_index_bulk_handler(
+                ingest_router,
+                max_body_size,
+                max_decompressed_body_size,
+            )),
+            boxed_route(es_compat_index_search_handler(search_service.clone())),
+            boxed_route(es_compat_index_count_handler(search_service.clone())),
+            boxed_route(es_compat_scroll_handler(search_service.clone())),
+            boxed_route(es_compat_delete_scroll_handler()),
+            boxed_route(es_compat_index_multi_search_handler(search_service.clone())),
+            boxed_route(es_compat_index_field_capabilities_handler(
+                search_service.clone(),
+            )),
+            boxed_route(es_compat_index_stats_handler(metastore.clone())),
+            boxed_route(es_compat_delete_index_handler(index_service)),
+            boxed_route(es_compat_stats_handler(metastore.clone())),
+            boxed_route(es_compat_cluster_health_handler(cluster)),
+            boxed_route(es_compat_index_cat_indices_handler(metastore.clone())),
+            boxed_route(es_compat_cat_indices_handler(metastore.clone())),
+            boxed_route(es_compat_resolve_index_handler(metastore.clone())),
+            boxed_route(es_compat_aliases_handler()),
+            boxed_route(es_compat_index_mapping_handler(metastore, search_service)),
+            boxed_route(es_compat_search_shards_handler(node_config)),
+        ])
         .recover(recover_fn)
         .with(warp::reply::with::header(
             "X-Elastic-Product",
             "Elasticsearch",
-        ))
-        .boxed()
+        )),
+    )
     // Register newly created handlers here.
 }
 

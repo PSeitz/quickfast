@@ -22,11 +22,11 @@ use quickwit_proto::metastore::{
     MetastoreServiceClient, serde_utils,
 };
 use serde_json::Value as JsonValue;
+use warp::Filter;
 use warp::reject::Rejection;
-use warp::{Filter, Reply};
 
 use crate::format::{extract_config_format, extract_format_from_qs};
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::rest_api_response::into_rest_api_response;
 use crate::with_arg;
 
@@ -43,16 +43,17 @@ use crate::with_arg;
 )]
 pub(crate) struct IndexTemplateApi;
 
-pub(crate) fn index_template_api_handlers(
-    metastore: MetastoreServiceClient,
-) -> impl Filter<Extract = (impl Reply,), Error = Rejection> + Clone {
-    create_index_template_handler(metastore.clone())
-        .or(get_index_template_handler(metastore.clone()))
-        .or(update_index_template_handler(metastore.clone()))
-        .or(delete_index_template_handler(metastore.clone()))
-        .or(list_index_templates_handler(metastore.clone()))
-        .recover(recover_fn)
-        .boxed()
+pub(crate) fn index_template_api_handlers(metastore: MetastoreServiceClient) -> BoxedRoute {
+    boxed_route(
+        combine_routes([
+            boxed_route(create_index_template_handler(metastore.clone())),
+            boxed_route(get_index_template_handler(metastore.clone())),
+            boxed_route(update_index_template_handler(metastore.clone())),
+            boxed_route(delete_index_template_handler(metastore.clone())),
+            boxed_route(list_index_templates_handler(metastore)),
+        ])
+        .recover(recover_fn),
+    )
 }
 
 fn create_index_template_handler(
@@ -62,6 +63,7 @@ fn create_index_template_handler(
         .and(warp::post())
         .and(warp::filters::body::bytes())
         .and(extract_config_format())
+        .boxed()
         .and(with_arg(metastore))
         .then(create_index_template)
         .and(extract_format_from_qs())
@@ -146,6 +148,7 @@ fn update_index_template_handler(
         .and(warp::put())
         .and(warp::filters::body::bytes())
         .and(extract_config_format())
+        .boxed()
         .and(with_arg(metastore))
         .then(update_index_template)
         .and(extract_format_from_qs())

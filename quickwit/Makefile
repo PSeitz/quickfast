@@ -13,9 +13,13 @@ fmt:
 	@echo "Checking log format"
 	@bash scripts/check_log_format.sh
 
+# All non-vendored workspace features. Avoids compiling vendored C libraries
+# (krb5-src, sasl2-sys, openssl-src) that have no distinct Rust code paths.
+CI_FEATURES = release-feature-set,jemalloc-profiled,tokio-console,ci-test,integration-testsuite,testsuite
+
 fix:
 	@echo "Running cargo clippy --fix"
-	@cargo clippy --workspace --all-features --tests --fix --allow-dirty --allow-staged
+	@cargo clippy --workspace --features $(CI_FEATURES) --tests --fix --allow-dirty --allow-staged
 	@$(MAKE) fmt
 	@$(MAKE) migrations-lint
 	@$(MAKE) unused-deps
@@ -51,7 +55,7 @@ test-all:
 	QW_S3_FORCE_PATH_STYLE_ACCESS=1 \
 	QW_TEST_DATABASE_URL=postgres://quickwit-dev:quickwit-dev@localhost:5432/quickwit-metastore-dev \
 	RUST_MIN_STACK=67108864 \
-	cargo nextest run --all-features --profile ci
+	cargo nextest run --features $(CI_FEATURES) --profile ci
 
 # TODO: to be replaced by https://github.com/quickwit-oss/quickwit/issues/237
 TARGET ?= x86_64-unknown-linux-gnu

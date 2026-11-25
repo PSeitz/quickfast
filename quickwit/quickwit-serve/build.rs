@@ -13,12 +13,19 @@
 // limitations under the License.
 
 use std::env;
+use std::path::Path;
 use std::process::Command;
 
 use time::OffsetDateTime;
 use time::macros::format_description;
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=QW_COMMIT_DATE");
+    println!("cargo:rerun-if-env-changed=QW_COMMIT_HASH");
+    println!("cargo:rerun-if-env-changed=QW_COMMIT_TAGS");
+    emit_git_rerun_hints();
+
     println!(
         "cargo:rustc-env=BUILD_DATE={}",
         OffsetDateTime::now_utc()
@@ -36,6 +43,34 @@ fn main() {
         env::var("TARGET").unwrap()
     );
     commit_info();
+}
+
+/// Emits `rerun-if-changed` directives for the current Git `HEAD` (and the
+/// ref it points to, if symbolic) so edits to Rust sources do not re-run this
+/// build script and invalidate downstream crates via a fresh `BUILD_DATE`.
+fn emit_git_rerun_hints() {
+    let Ok(output) = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .output()
+    else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    let git_dir_str = String::from_utf8_lossy(&output.stdout);
+    let git_dir = Path::new(git_dir_str.trim());
+    let head_path = git_dir.join("HEAD");
+    let Ok(head_contents) = std::fs::read_to_string(&head_path) else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={}", head_path.display());
+    if let Some(ref_rel) = head_contents.trim().strip_prefix("ref: ") {
+        let ref_path = git_dir.join(ref_rel);
+        if matches!(ref_path.try_exists(), Ok(true)) {
+            println!("cargo:rerun-if-changed={}", ref_path.display());
+        }
+    }
 }
 
 /// Extracts commit date, hash, and tags

@@ -21,7 +21,7 @@ use warp::hyper::StatusCode;
 use warp::reply::with_status;
 use warp::{Filter, Rejection};
 
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::with_arg;
 
 #[derive(utoipa::OpenApi)]
@@ -34,13 +34,15 @@ pub(crate) fn health_check_handlers(
     indexer_service_opt: Option<IndexingService>,
     janitor_service_opt: Option<JanitorService>,
     compactor_service_opt: Option<CompactorServiceHandle>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    liveness_handler(
-        indexer_service_opt,
-        janitor_service_opt,
-        compactor_service_opt,
-    )
-    .or(startup_handler(cluster))
+) -> BoxedRoute {
+    combine_routes([
+        boxed_route(liveness_handler(
+            indexer_service_opt,
+            janitor_service_opt,
+            compactor_service_opt,
+        )),
+        boxed_route(startup_handler(cluster)),
+    ])
 }
 
 fn liveness_handler(

@@ -38,10 +38,36 @@ use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
+use warp::filters::BoxedFilter;
 use warp::filters::log::Info;
 use warp::hyper::http::HeaderValue;
 use warp::hyper::{Method, StatusCode, http};
+use warp::reply::Response;
 use warp::{Filter, Rejection, Reply, redirect};
+
+/// Type-erased warp route returning a unified [`Response`].
+///
+/// Boxing individual routes and unifying replies into [`Response`] avoids
+/// deeply nested `Or<Or<...>>` / `Either<Either<...>>` filter types that cause
+/// severe monomorphization bloat in `quickwit-serve`.
+pub type BoxedRoute = BoxedFilter<(Response,)>;
+
+/// Converts any warp route filter into a [`BoxedRoute`].
+pub(crate) fn boxed_route<F, R>(filter: F) -> BoxedRoute
+where
+    F: Filter<Extract = (R,), Error = Rejection> + Send + Sync + 'static,
+    R: Reply + 'static,
+{
+    filter.map(Reply::into_response).boxed()
+}
+
+/// Combines multiple boxed routes in order while keeping the compiled type flat.
+pub(crate) fn combine_routes(routes: impl IntoIterator<Item = BoxedRoute>) -> BoxedRoute {
+    routes
+        .into_iter()
+        .reduce(|acc, route| acc.or(route).unify().boxed())
+        .expect("combine_routes requires at least one route")
+}
 
 use crate::body_limit::{BodyReadError, PayloadTooLarge};
 use crate::cluster_api::cluster_handler;
@@ -165,11 +191,12 @@ pub(crate) async fn start_rest_server(
         .inc();
     });
     // Docs routes
-    let api_doc = warp::path("openapi.json")
-        .and(warp::get())
-        .map(|| warp::reply::json(&crate::openapi::build_docs()))
-        .recover(recover_fn)
-        .boxed();
+    let api_doc = boxed_route(
+        warp::path("openapi.json")
+            .and(warp::get())
+            .map(|| warp::reply::json(&crate::openapi::build_docs()))
+            .recover(recover_fn),
+    );
 
     // `/health/*` routes.
     let health_check_routes = health_check_handlers(
@@ -177,15 +204,15 @@ pub(crate) async fn start_rest_server(
         quickwit_services.indexing_service_opt.clone(),
         quickwit_services.janitor_service_opt.clone(),
         quickwit_services.compactor_service_opt.clone(),
-    )
-    .boxed();
+    );
 
     // `/metrics` route.
-    let metrics_routes = warp::path("metrics")
-        .and(warp::get())
-        .map(metrics_handler)
-        .recover(recover_fn)
-        .boxed();
+    let metrics_routes = boxed_route(
+        warp::path("metrics")
+            .and(warp::get())
+            .map(metrics_handler)
+            .recover(recover_fn),
+    );
 
     // `/api/developer/*` route.
     let developer_routes = developer_api_routes(
@@ -199,11 +226,12 @@ pub(crate) async fn start_rest_server(
     // `/mcp` route.
     let mcp_route = mcp_routes(quickwit_services.clone());
 
-    let redirect_root_to_ui_route = warp::path::end()
-        .and(warp::get())
-        .map(|| redirect(http::Uri::from_static("/ui/search")))
-        .recover(recover_fn)
-        .boxed();
+    let redirect_root_to_ui_route = boxed_route(
+        warp::path::end()
+            .and(warp::get())
+            .map(|| redirect(http::Uri::from_static("/ui/search")))
+            .recover(recover_fn),
+    );
 
     let extra_headers = warp::reply::with::headers(
         quickwit_services
@@ -214,18 +242,21 @@ pub(crate) async fn start_rest_server(
     );
 
     // Combine all the routes together.
-    let rest_routes = api_v1_root_route
-        .or(mcp_route)
-        .or(api_doc)
-        .or(redirect_root_to_ui_route)
-        .or(ui_handler())
-        .or(health_check_routes)
-        .or(metrics_routes)
-        .or(developer_routes)
+    let rest_routes = boxed_route(
+        combine_routes([
+            api_v1_root_route,
+            mcp_route,
+            api_doc,
+            redirect_root_to_ui_route,
+            boxed_route(ui_handler()),
+            health_check_routes,
+            metrics_routes,
+            developer_routes,
+        ])
         .with(request_counter)
         .recover(recover_fn_final)
-        .with(extra_headers)
-        .boxed();
+        .with(extra_headers),
+    );
 
     let tls_acceptor_opt: Option<TlsAcceptor> = if let Some(tls_config) =
         &quickwit_services.node_config.rest_config.tls_config
@@ -274,14 +305,15 @@ pub(crate) async fn start_health_check_server(
     readiness_trigger: BoxFutureInfaillible<()>,
     shutdown_signal: BoxFutureInfaillible<()>,
 ) -> anyhow::Result<()> {
-    let health_check_routes = health_check_handlers(
-        quickwit_services.cluster.clone(),
-        quickwit_services.indexing_service_opt.clone(),
-        quickwit_services.janitor_service_opt.clone(),
-        quickwit_services.compactor_service_opt.clone(),
-    )
-    .recover(recover_fn_final)
-    .boxed();
+    let health_check_routes = boxed_route(
+        health_check_handlers(
+            quickwit_services.cluster.clone(),
+            quickwit_services.indexing_service_opt.clone(),
+            quickwit_services.janitor_service_opt.clone(),
+            quickwit_services.compactor_service_opt.clone(),
+        )
+        .recover(recover_fn_final),
+    );
     // No TLS: the whole point of this server is to offer a plaintext probe surface that bypasses
     // the mTLS configured on the main REST server.
     serve_warp_routes(
@@ -313,20 +345,16 @@ struct MaxConnectionAge {
 // `serve_warp_routes` wires together several independent concerns (routing, CORS, TLS, connection
 // lifetime, readiness, shutdown); bundling them further would not aid readability.
 #[allow(clippy::too_many_arguments)]
-async fn serve_warp_routes<F>(
+async fn serve_warp_routes(
     server_name: &str,
     tcp_listener: TcpListener,
-    routes: F,
+    routes: BoxedRoute,
     cors_allow_origins: Vec<String>,
     tls_acceptor_opt: Option<TlsAcceptor>,
     max_connection_age_opt: Option<MaxConnectionAge>,
     readiness_trigger: BoxFutureInfaillible<()>,
     shutdown_signal: BoxFutureInfaillible<()>,
-) -> anyhow::Result<()>
-where
-    F: Filter<Error = Rejection> + Clone + Send + Sync + 'static,
-    F::Extract: Reply,
-{
+) -> anyhow::Result<()> {
     let warp_service = warp::service(routes);
     let compression_predicate = CompressionPredicate::from_env().and(NotForContentType::IMAGES);
     let cors = build_cors(&cors_allow_origins);
@@ -478,23 +506,22 @@ async fn serve_connection<C>(
     }
 }
 
-fn search_routes(
-    search_service: Arc<dyn SearchService>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    search_get_handler(search_service.clone())
-        .or(search_post_handler(search_service.clone()))
-        .or(search_plan_get_handler(search_service.clone()))
-        .or(search_plan_post_handler(search_service.clone()))
-        .recover(recover_fn)
-        .boxed()
+fn search_routes(search_service: Arc<dyn SearchService>) -> BoxedRoute {
+    boxed_route(
+        combine_routes([
+            boxed_route(search_get_handler(search_service.clone())),
+            boxed_route(search_post_handler(search_service.clone())),
+            boxed_route(search_plan_get_handler(search_service.clone())),
+            boxed_route(search_plan_post_handler(search_service)),
+        ])
+        .recover(recover_fn),
+    )
 }
 
 /// `/mcp` route. MCP negotiates its protocol version in-band (`initialize` and the
 /// `MCP-Protocol-Version` header), so the endpoint is not nested under the versioned REST API.
-fn mcp_routes(
-    quickwit_services: Arc<QuickwitServices>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    crate::mcp_api::mcp_api_handlers(
+fn mcp_routes(quickwit_services: Arc<QuickwitServices>) -> BoxedRoute {
+    boxed_route(crate::mcp_api::mcp_api_handlers(
         quickwit_services.search_service.clone(),
         quickwit_services.metastore_client.clone(),
         quickwit_services
@@ -502,72 +529,55 @@ fn mcp_routes(
             .rest_config
             .cors_allow_origins
             .clone(),
-    )
-    .boxed()
+    ))
 }
 
-fn api_v1_routes(
-    quickwit_services: Arc<QuickwitServices>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
+fn api_v1_routes(quickwit_services: Arc<QuickwitServices>) -> BoxedRoute {
     let api_v1_root_url = warp::path!("api" / "v1" / ..);
-    api_v1_root_url.and(
-        elastic_api_handlers(
-            quickwit_services.cluster.clone(),
-            quickwit_services.node_config.clone(),
-            quickwit_services.search_service.clone(),
-            quickwit_services.ingest_router_service.clone(),
-            quickwit_services.metastore_client.clone(),
-            quickwit_services.index_manager.clone(),
-        )
-        .or(cluster_handler(quickwit_services.cluster.clone()))
-        .boxed()
-        .or(node_info_handler(
-            BuildInfo::get(),
-            RuntimeInfo::get(),
-            quickwit_services.node_config.clone(),
-        ))
-        .boxed()
-        .or(indexing_get_handler(
-            quickwit_services.indexing_service_opt.clone(),
-        ))
-        .boxed()
-        .or(search_routes(quickwit_services.search_service.clone()))
-        .boxed()
-        .or(ingest_api_handlers(
-            quickwit_services.ingest_router_service.clone(),
-            quickwit_services.node_config.ingest_api_config.clone(),
-        ))
-        .boxed()
-        .or(otlp_ingest_api_handlers(
-            quickwit_services.otlp_logs_service_opt.clone(),
-            quickwit_services.otlp_traces_service_opt.clone(),
-            quickwit_services
-                .node_config
-                .ingest_api_config
-                .max_body_size,
-            quickwit_services
-                .node_config
-                .ingest_api_config
-                .max_decompressed_body_size,
-        ))
-        .boxed()
-        .or(index_management_handlers(
-            quickwit_services.index_manager.clone(),
-            quickwit_services.node_config.clone(),
-        ))
-        .boxed()
-        .or(delete_task_api_handlers(
-            quickwit_services.metastore_client.clone(),
-        ))
-        .boxed()
-        .or(jaeger_api_handlers(
-            quickwit_services.jaeger_service_opt.clone(),
-        ))
-        .boxed()
-        .or(index_template_api_handlers(
-            quickwit_services.metastore_client.clone(),
-        ))
-        .boxed(),
+    boxed_route(
+        api_v1_root_url.and(combine_routes([
+            elastic_api_handlers(
+                quickwit_services.cluster.clone(),
+                quickwit_services.node_config.clone(),
+                quickwit_services.search_service.clone(),
+                quickwit_services.ingest_router_service.clone(),
+                quickwit_services.metastore_client.clone(),
+                quickwit_services.index_manager.clone(),
+            ),
+            boxed_route(cluster_handler(quickwit_services.cluster.clone())),
+            node_info_handler(
+                BuildInfo::get(),
+                RuntimeInfo::get(),
+                quickwit_services.node_config.clone(),
+            ),
+            boxed_route(indexing_get_handler(
+                quickwit_services.indexing_service_opt.clone(),
+            )),
+            search_routes(quickwit_services.search_service.clone()),
+            boxed_route(ingest_api_handlers(
+                quickwit_services.ingest_router_service.clone(),
+                quickwit_services.node_config.ingest_api_config.clone(),
+            )),
+            otlp_ingest_api_handlers(
+                quickwit_services.otlp_logs_service_opt.clone(),
+                quickwit_services.otlp_traces_service_opt.clone(),
+                quickwit_services
+                    .node_config
+                    .ingest_api_config
+                    .max_body_size,
+                quickwit_services
+                    .node_config
+                    .ingest_api_config
+                    .max_decompressed_body_size,
+            ),
+            index_management_handlers(
+                quickwit_services.index_manager.clone(),
+                quickwit_services.node_config.clone(),
+            ),
+            delete_task_api_handlers(quickwit_services.metastore_client.clone()),
+            jaeger_api_handlers(quickwit_services.jaeger_service_opt.clone()),
+            index_template_api_handlers(quickwit_services.metastore_client.clone()),
+        ])),
     )
 }
 

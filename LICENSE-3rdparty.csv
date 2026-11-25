@@ -511,14 +511,9 @@ plain,https://github.com/randomites/plain,MIT OR Apache-2.0,jzr
 plotters,https://github.com/plotters-rs/plotters,MIT,Hao Hou <haohou302@gmail.com>
 plotters-backend,https://github.com/plotters-rs/plotters,MIT,Hao Hou <haohou302@gmail.com>
 plotters-svg,https://github.com/plotters-rs/plotters,MIT,Hao Hou <haohou302@gmail.com>
-pnet,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,Robert Clipsham <robert@octarineparrot.com>
 pnet_base,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,"Robert Clipsham <robert@octarineparrot.com>, Linus Färnstrand <faern@faern.net>"
 pnet_datalink,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,"Robert Clipsham <robert@octarineparrot.com>, Linus Färnstrand <faern@faern.net>"
-pnet_macros,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,"Robert Clipsham <robert@octarineparrot.com>, Pierre Chifflier <chifflier@wzdftpd.net>"
-pnet_macros_support,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,Robert Clipsham <robert@octarineparrot.com>
-pnet_packet,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,Robert Clipsham <robert@octarineparrot.com>
 pnet_sys,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,"Robert Clipsham <robert@octarineparrot.com>, Linus Färnstrand <faern@faern.net>"
-pnet_transport,https://github.com/libpnet/libpnet,MIT OR Apache-2.0,Robert Clipsham <robert@octarineparrot.com>
 poly1305,https://github.com/RustCrypto/universal-hashes,Apache-2.0 OR MIT,RustCrypto Developers
 portable-atomic,https://github.com/taiki-e/portable-atomic,Apache-2.0 OR MIT,The portable-atomic Authors
 portable-atomic-util,https://github.com/taiki-e/portable-atomic-util,Apache-2.0 OR MIT,The portable-atomic-util Authors
@@ -635,7 +630,6 @@ schemars,https://github.com/GREsau/schemars,MIT,Graham Esau <gesau@hotmail.co.uk
 scoped-tls,https://github.com/alexcrichton/scoped-tls,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 scopeguard,https://github.com/bluss/scopeguard,MIT OR Apache-2.0,bluss
 scrypt,https://github.com/RustCrypto/password-hashes/tree/master/scrypt,MIT OR Apache-2.0,RustCrypto Developers
-sct,https://github.com/rustls/sct.rs,Apache-2.0 OR ISC OR MIT,Joseph Birr-Pixton <jpixton@gmail.com>
 sea-query,https://github.com/SeaQL/sea-query,MIT OR Apache-2.0,"Chris Tsang <chris.2y3@outlook.com>, Billy Chan <ccw.billy.123@gmail.com>, Ivan Krivosheev <py.krivosheev@gmail.com>"
 sea-query-derive,https://github.com/SeaQL/sea-query,MIT OR Apache-2.0,"Follpvosten <wolfi@karpador.xyz>, Rene Leveille <rene@nestingsafe.com>"
 sea-query-sqlx,https://github.com/SeaQL/sea-query,MIT OR Apache-2.0,"Valentin Tolmer <valentin@tolmer.fr>, Ivan Krivosheev <py.krivosheev@gmail.com>"

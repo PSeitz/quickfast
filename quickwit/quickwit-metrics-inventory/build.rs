@@ -13,6 +13,8 @@
 // limitations under the License.
 
 fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
     // Prevent the linker from stripping inventory-submitted statics that
     // live in dependency rlibs. Without this, the linker sees that the

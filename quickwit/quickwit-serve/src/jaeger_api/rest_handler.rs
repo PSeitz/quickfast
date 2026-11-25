@@ -35,7 +35,7 @@ use crate::jaeger_api::model::{
     DEFAULT_NUMBER_OF_TRACES, JaegerError, JaegerResponseBody, JaegerSpan, JaegerTrace,
     TracesSearchQueryParams,
 };
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::rest_api_response::RestApiResponse;
 use crate::search_api::extract_index_id_patterns;
 use crate::{BodyFormat, require};
@@ -54,23 +54,25 @@ pub(crate) struct JaegerApi;
 /// This is where all Jaeger handlers
 /// should be registered.
 /// Request are executed on the `otel-traces-v0_*` indexes.
-pub(crate) fn jaeger_api_handlers(
-    jaeger_service_opt: Option<JaegerService>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    jaeger_services_handler(jaeger_service_opt.clone())
-        .or(jaeger_service_operations_handler(
-            jaeger_service_opt.clone(),
-        ))
-        .or(jaeger_traces_search_handler(jaeger_service_opt.clone()))
-        .or(jaeger_traces_handler(jaeger_service_opt.clone()))
-        .recover(recover_fn)
-        .boxed()
+pub(crate) fn jaeger_api_handlers(jaeger_service_opt: Option<JaegerService>) -> BoxedRoute {
+    boxed_route(
+        combine_routes([
+            boxed_route(jaeger_services_handler(jaeger_service_opt.clone())),
+            boxed_route(jaeger_service_operations_handler(
+                jaeger_service_opt.clone(),
+            )),
+            boxed_route(jaeger_traces_search_handler(jaeger_service_opt.clone())),
+            boxed_route(jaeger_traces_handler(jaeger_service_opt)),
+        ])
+        .recover(recover_fn),
+    )
 }
 
-fn jaeger_api_path_filter() -> impl Filter<Extract = (Vec<String>,), Error = Rejection> + Clone {
+fn jaeger_api_path_filter() -> warp::filters::BoxedFilter<(Vec<String>,)> {
     warp::path!(String / "jaeger" / "api" / ..)
         .and(warp::get())
         .and_then(extract_index_id_patterns)
+        .boxed()
 }
 
 #[utoipa::path(

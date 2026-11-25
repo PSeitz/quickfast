@@ -18,7 +18,7 @@ use quickwit_config::NodeConfig;
 use serde_json::json;
 use warp::{Filter, Rejection};
 
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::{BuildInfo, RuntimeInfo, with_arg};
 
 #[derive(utoipa::OpenApi)]
@@ -29,11 +29,14 @@ pub fn node_info_handler(
     build_info: &'static BuildInfo,
     runtime_info: &'static RuntimeInfo,
     config: Arc<NodeConfig>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    node_version_handler(build_info, runtime_info)
-        .or(node_config_handler(config))
-        .recover(recover_fn)
-        .boxed()
+) -> BoxedRoute {
+    boxed_route(
+        combine_routes([
+            boxed_route(node_version_handler(build_info, runtime_info)),
+            boxed_route(node_config_handler(config)),
+        ])
+        .recover(recover_fn),
+    )
 }
 
 #[utoipa::path(get, tag = "Node Info", path = "/version")]

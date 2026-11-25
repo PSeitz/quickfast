@@ -27,12 +27,10 @@ use log_level::log_level_handler;
 use pprof::pprof_handlers;
 use quickwit_cluster::Cluster;
 pub(crate) use server::DeveloperApiServer;
-use warp::filters::BoxedFilter;
-use warp::reply::Response;
-use warp::{Filter, Reply};
+use warp::Filter;
 
 use crate::EnvFilterReloadFn;
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 
 #[derive(utoipa::OpenApi)]
 #[openapi(paths(debug::debug_handler, log_level::log_level_handler))]
@@ -41,22 +39,15 @@ pub struct DeveloperApi;
 pub(crate) fn developer_api_routes(
     cluster: Cluster,
     env_filter_reload_fn: EnvFilterReloadFn,
-) -> BoxedFilter<(Response,)> {
-    warp::path!("api" / "developer" / ..)
-        .and(
-            debug_handler(cluster.clone())
-                .map(Reply::into_response)
-                .boxed()
-                .or(log_level_handler(env_filter_reload_fn.clone())
-                    .map(Reply::into_response)
-                    .boxed())
-                .unify()
-                .or(pprof_handlers().map(Reply::into_response).boxed())
-                .unify()
-                .or(heap_prof_handlers().map(Reply::into_response).boxed())
-                .unify(),
-        )
-        .recover(recover_fn)
-        .map(Reply::into_response)
-        .boxed()
+) -> BoxedRoute {
+    boxed_route(
+        warp::path!("api" / "developer" / ..)
+            .and(combine_routes([
+                boxed_route(debug_handler(cluster)),
+                boxed_route(log_level_handler(env_filter_reload_fn)),
+                boxed_route(pprof_handlers()),
+                boxed_route(heap_prof_handlers()),
+            ]))
+            .recover(recover_fn),
+    )
 }

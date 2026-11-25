@@ -41,7 +41,10 @@ WORKDIR /quickwit
 
 RUN rustup toolchain install
 
-RUN echo "Building workspace with feature(s) '$CARGO_FEATURES' and profile '$CARGO_PROFILE'" \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/quickwit/target \
+    echo "Building workspace with feature(s) '$CARGO_FEATURES' and profile '$CARGO_PROFILE'" \
     && RUSTFLAGS="--cfg tokio_unstable" \
     cargo build \
     -p quickwit-cli \
@@ -50,7 +53,7 @@ RUN echo "Building workspace with feature(s) '$CARGO_FEATURES' and profile '$CAR
     $(test "$CARGO_PROFILE" = "release" && echo "--release") \
     && echo "Copying binaries to /quickwit/bin" \
     && mkdir -p /quickwit/bin \
-    && find target/$CARGO_PROFILE -maxdepth 1 -perm /a+x -type f -exec mv {} /quickwit/bin \;
+    && find target/$CARGO_PROFILE -maxdepth 1 -perm /a+x -type f -exec cp {} /quickwit/bin \;
 
 
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS quickwit

@@ -40,7 +40,7 @@ use super::split_resource::{
     mark_splits_for_deletion_handler,
 };
 use crate::format::extract_format_from_qs;
-use crate::rest::recover_fn;
+use crate::rest::{BoxedRoute, boxed_route, combine_routes, recover_fn};
 use crate::rest_api_response::into_rest_api_response;
 use crate::simple_list::from_simple_list;
 
@@ -76,44 +76,45 @@ pub fn log_failure<T, E: std::fmt::Display>(
     }
 }
 
-pub fn json_body<T: DeserializeOwned + Send>()
--> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone {
-    warp::body::content_length_limit(1024 * 1024).and(warp::body::json())
+pub fn json_body<T: DeserializeOwned + Send + 'static>() -> warp::filters::BoxedFilter<(T,)> {
+    warp::body::content_length_limit(1024 * 1024)
+        .and(warp::body::json())
+        .boxed()
 }
 
 pub fn index_management_handlers(
     index_service: IndexService,
     node_config: Arc<NodeConfig>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
-    // Indexes handlers.
-    get_index_metadata_handler(index_service.metastore())
-        .or(list_indexes_metadata_handler(index_service.metastore()))
-        .or(create_index_handler(
-            index_service.clone(),
-            node_config.clone(),
-        ))
-        .or(update_index_handler(index_service.clone(), node_config))
-        .or(clear_index_handler(index_service.clone()))
-        .or(delete_index_handler(index_service.clone()))
-        .boxed()
-        // Splits handlers
-        .or(list_splits_handler(index_service.metastore()))
-        .or(describe_index_handler(index_service.metastore()))
-        .or(mark_splits_for_deletion_handler(index_service.metastore()))
-        .boxed()
-        // Sources handlers
-        .or(create_source_handler(index_service.clone()))
-        .or(update_source_handler(index_service.clone()))
-        .or(get_source_handler(index_service.metastore()))
-        .or(toggle_source_handler(index_service.metastore()))
-        .or(delete_source_handler(index_service.metastore()))
-        .boxed()
-        // Tokenizer handlers.
-        .or(analyze_request_handler())
-        // Parse query into query AST handler.
-        .or(parse_query_request_handler())
-        .recover(recover_fn)
-        .boxed()
+) -> BoxedRoute {
+    boxed_route(
+        combine_routes([
+            // Indexes handlers.
+            boxed_route(get_index_metadata_handler(index_service.metastore())),
+            boxed_route(list_indexes_metadata_handler(index_service.metastore())),
+            boxed_route(create_index_handler(
+                index_service.clone(),
+                node_config.clone(),
+            )),
+            boxed_route(update_index_handler(index_service.clone(), node_config)),
+            boxed_route(clear_index_handler(index_service.clone())),
+            boxed_route(delete_index_handler(index_service.clone())),
+            // Splits handlers
+            boxed_route(list_splits_handler(index_service.metastore())),
+            boxed_route(describe_index_handler(index_service.metastore())),
+            boxed_route(mark_splits_for_deletion_handler(index_service.metastore())),
+            // Sources handlers
+            boxed_route(create_source_handler(index_service.clone())),
+            boxed_route(update_source_handler(index_service.clone())),
+            boxed_route(get_source_handler(index_service.metastore())),
+            boxed_route(toggle_source_handler(index_service.metastore())),
+            boxed_route(delete_source_handler(index_service.metastore())),
+            // Tokenizer handlers.
+            boxed_route(analyze_request_handler()),
+            // Parse query into query AST handler.
+            boxed_route(parse_query_request_handler()),
+        ])
+        .recover(recover_fn),
+    )
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams, utoipa::ToSchema)]

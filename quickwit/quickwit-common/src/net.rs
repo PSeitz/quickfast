@@ -20,9 +20,9 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use anyhow::{Context, bail};
+use ipnetwork::IpNetwork;
 use itertools::Itertools;
-use pnet::datalink::{self, NetworkInterface};
-use pnet::ipnetwork::IpNetwork;
+use pnet_datalink::{self as datalink, NetworkInterface};
 use serde::{Deserialize, Serialize, Serializer};
 use tokio::net::{ToSocketAddrs, lookup_host};
 
@@ -372,7 +372,7 @@ pub fn is_valid_hostname(hostname: &str) -> bool {
 mod tests {
     use std::net::Ipv6Addr;
 
-    use pnet::ipnetwork::{Ipv4Network, Ipv6Network};
+    use ipnetwork::{Ipv4Network, Ipv6Network};
     use serde_json::Value as JsonValue;
 
     use super::*;

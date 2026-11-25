@@ -26,11 +26,12 @@ http = { workspace = true }
 humantime = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true, optional = true }
+ipnetwork = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 opentelemetry = { workspace = true }
 pin-project = { workspace = true }
-pnet = { workspace = true }
+pnet_datalink = { workspace = true }
 prometheus = { workspace = true }
 quickwit-metrics = { workspace = true }
 rand = { workspace = true }
@@ -70,3 +71,6 @@ proptest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tokio_unstable)"] }
