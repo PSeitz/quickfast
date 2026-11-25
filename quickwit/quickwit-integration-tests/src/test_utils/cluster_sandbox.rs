@@ -21,7 +21,6 @@ use std::time::Duration;
 use anyhow::Context;
 use futures_util::future;
 use itertools::Itertools;
-use quickwit_actors::ActorExitStatus;
 use quickwit_cli::tool::{LocalIngestDocsArgs, local_ingest_docs_cli};
 use quickwit_common::new_coolid;
 use quickwit_common::runtimes::RuntimesConfig;
@@ -600,7 +599,7 @@ impl ClusterSandbox {
     pub async fn shutdown_services(
         &mut self,
         shutdown_services: impl IntoIterator<Item = QuickwitService>,
-    ) -> Result<Vec<HashMap<String, ActorExitStatus>>, anyhow::Error> {
+    ) -> Result<usize, anyhow::Error> {
         // We need to drop rest clients first because reqwest can hold connections open
         // preventing rest server's graceful shutdown.
         let mut indexer_shutdown_futures = Vec::new();
@@ -632,18 +631,21 @@ impl ClusterSandbox {
         // We must decommision the indexer nodes first and independently from the other nodes.
         let indexer_shutdown_results = future::join_all(indexer_shutdown_futures).await;
         let other_shutdown_results = future::join_all(other_shutdown_futures).await;
-        let exit_statuses = indexer_shutdown_results
+        let mut count = 0;
+        for res in indexer_shutdown_results
             .into_iter()
             .chain(other_shutdown_results)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(exit_statuses)
+        {
+            res?;
+            count += 1;
+        }
+        Ok(count)
     }
 
-    pub async fn shutdown(
-        mut self,
-    ) -> Result<Vec<HashMap<String, ActorExitStatus>>, anyhow::Error> {
+    pub async fn shutdown(mut self) -> Result<(), anyhow::Error> {
         self.shutdown_services(QuickwitService::supported_services())
-            .await
+            .await?;
+        Ok(())
     }
 
     /// Remove the node with the given id from the sandbox and return its shutdown handle, or

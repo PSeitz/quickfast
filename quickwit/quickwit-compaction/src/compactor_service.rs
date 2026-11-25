@@ -15,11 +15,9 @@
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
-use async_trait::async_trait;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Healthz, Mailbox};
 use quickwit_common::io::{self, Limiter};
 use quickwit_common::pretty::PrettyDisplay;
 use quickwit_common::pubsub::EventBroker;
@@ -41,7 +39,9 @@ use quickwit_proto::indexing::MergePipelineId;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_proto::types::NodeId;
 use quickwit_storage::StorageResolver;
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{Mutex, Semaphore, watch};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::compaction_pipeline::{CompactionPipeline, PipelineStatus, PipelineStatusUpdate};
@@ -56,12 +56,6 @@ const CHECK_PIPELINE_STATUSES_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_STATUS_CHECK_STALL: Duration =
     Duration::from_secs(CHECK_PIPELINE_STATUSES_INTERVAL.as_secs() * 5);
 
-#[derive(Debug)]
-struct CheckPipelineStatuses;
-
-#[derive(Debug)]
-pub struct Decommission;
-
 /// Lifecycle state of a `CompactorService`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactorStatus {
@@ -71,6 +65,78 @@ pub enum CompactorStatus {
     Decommissioning,
     /// All in-flight merges have completed; the compactor service can be torn down.
     Decommissioned,
+}
+
+/// Cloneable handle to a running [`CompactorService`] background task.
+#[derive(Clone)]
+pub struct CompactorServiceHandle {
+    decommission_tx: watch::Sender<bool>,
+    status_rx: watch::Receiver<CompactorStatus>,
+    last_status_check_at: Arc<std::sync::Mutex<Instant>>,
+    task_healthy: Arc<AtomicBool>,
+    shutdown: CancellationToken,
+    task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl std::fmt::Debug for CompactorServiceHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CompactorServiceHandle")
+            .field("status", &*self.status_rx.borrow())
+            .field("healthy", &self.is_healthy())
+            .finish()
+    }
+}
+
+impl CompactorServiceHandle {
+    pub fn is_healthy(&self) -> bool {
+        if !self.task_healthy.load(Ordering::Relaxed) {
+            return false;
+        }
+        if *self.status_rx.borrow() == CompactorStatus::Decommissioned {
+            return true;
+        }
+        let stall = self.last_status_check_at.lock().unwrap().elapsed();
+        if stall > MAX_STATUS_CHECK_STALL {
+            error!(
+                stall=%stall.pretty_display(),
+                "compactor service has not checked pipeline statuses recently"
+            );
+            return false;
+        }
+        true
+    }
+
+    pub fn decommission(&self) -> watch::Receiver<CompactorStatus> {
+        self.decommission_tx.send_replace(true);
+        self.status_rx.clone()
+    }
+
+    pub fn status_rx(&self) -> watch::Receiver<CompactorStatus> {
+        self.status_rx.clone()
+    }
+
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        let handle_opt = self.task_handle.lock().await.take();
+        if let Some(handle) = handle_opt {
+            let _ = handle.await;
+        }
+    }
+
+    #[cfg(any(test, feature = "testsuite"))]
+    pub fn for_test_unhealthy() -> Self {
+        let (decommission_tx, _) = watch::channel(false);
+        let (_, status_rx) = watch::channel(CompactorStatus::Ready);
+        Self {
+            decommission_tx,
+            status_rx,
+            last_status_check_at: Arc::new(std::sync::Mutex::new(Instant::now())),
+            task_healthy: Arc::new(AtomicBool::new(false)),
+            shutdown: CancellationToken::new(),
+            task_handle: Arc::new(Mutex::new(None)),
+        }
+    }
 }
 
 /// Manages a pool of `CompactionPipeline`s, each executing a single merge task.
@@ -86,7 +152,7 @@ pub struct CompactorService {
     // pipeline slots as permits, so half the pipelines can be doing IO while the other half hold a
     // permit.
     merge_execution_semaphore: Arc<Semaphore>,
-    // Shared resources distributed to pipelines when spawning actor chains.
+    // Shared resources distributed to pipelines when spawning tasks.
     io_throughput_limiter: Option<Limiter>,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
@@ -94,7 +160,7 @@ pub struct CompactorService {
     event_broker: EventBroker,
     // Scratch directory root (<data_dir>/compaction/).
     compaction_root_directory: TempDirectory,
-    last_status_check_at: Instant,
+    last_status_check_at: Arc<std::sync::Mutex<Instant>>,
 }
 
 impl CompactorService {
@@ -134,7 +200,63 @@ impl CompactorService {
             max_concurrent_split_uploads,
             event_broker,
             compaction_root_directory,
-            last_status_check_at: Instant::now(),
+            last_status_check_at: Arc::new(std::sync::Mutex::new(Instant::now())),
+        }
+    }
+
+    pub fn spawn(mut self) -> CompactorServiceHandle {
+        let (decommission_tx, mut decommission_rx) = watch::channel(false);
+        let status_rx = self.status_rx();
+        let last_status_check_at = self.last_status_check_at.clone();
+        let task_healthy = Arc::new(AtomicBool::new(true));
+        let shutdown = CancellationToken::new();
+
+        let task_shutdown = shutdown.clone();
+        let worker_handle = tokio::spawn(async move {
+            info!(
+                num_pipeline_slots=%self.pipelines.len(),
+                "compactor service started"
+            );
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = task_shutdown.cancelled() => break,
+                    Ok(()) = decommission_rx.changed(), if self.status() == CompactorStatus::Ready => {}
+                    _ = tokio::time::sleep(CHECK_PIPELINE_STATUSES_INTERVAL) => {}
+                }
+                if *decommission_rx.borrow() && self.status() == CompactorStatus::Ready {
+                    info!("decommissioning compactor");
+                    self.set_status(CompactorStatus::Decommissioning);
+                }
+                *self.last_status_check_at.lock().unwrap() = Instant::now();
+                self.report_status_and_maybe_finish().await;
+                if self.status() == CompactorStatus::Decommissioned {
+                    info!("compactor finished draining in-flight merges");
+                    break;
+                }
+            }
+        });
+
+        let monitor_shutdown = shutdown.clone();
+        let monitor_status_rx = status_rx.clone();
+        let monitor_healthy = task_healthy.clone();
+        let monitor_handle = tokio::spawn(async move {
+            let res = worker_handle.await;
+            let exited_cleanly = res.is_ok()
+                && (monitor_shutdown.is_cancelled()
+                    || *monitor_status_rx.borrow() == CompactorStatus::Decommissioned);
+            if !exited_cleanly {
+                monitor_healthy.store(false, Ordering::Relaxed);
+            }
+        });
+
+        CompactorServiceHandle {
+            decommission_tx,
+            status_rx,
+            last_status_check_at,
+            task_healthy,
+            shutdown,
+            task_handle: Arc::new(Mutex::new(Some(monitor_handle))),
         }
     }
 
@@ -164,7 +286,7 @@ impl CompactorService {
         }
     }
 
-    async fn report_status_and_maybe_finish(&mut self, _ctx: &ActorContext<Self>) {
+    async fn report_status_and_maybe_finish(&mut self) {
         let statuses = self.check_pipeline_statuses();
         let request = self.build_report_status_request(&statuses);
         match self.planner_client.report_status(request).await {
@@ -352,105 +474,11 @@ impl CompactorService {
     }
 }
 
-#[async_trait]
-impl Actor for CompactorService {
-    type ObservableState = ();
-
-    fn name(&self) -> String {
-        "CompactorService".to_string()
-    }
-
-    fn observable_state(&self) -> Self::ObservableState {}
-
-    async fn initialize(&mut self, ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        info!(
-            num_pipeline_slots=%self.pipelines.len(),
-            "compactor service started"
-        );
-        ctx.schedule_self_msg(CHECK_PIPELINE_STATUSES_INTERVAL, CheckPipelineStatuses);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<CheckPipelineStatuses> for CompactorService {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _msg: CheckPipelineStatuses,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        self.last_status_check_at = Instant::now();
-        self.report_status_and_maybe_finish(ctx).await;
-        if self.status() == CompactorStatus::Decommissioned {
-            // We stop the loop; the node is about to be torn down.
-            info!("compactor finished draining in-flight merges");
-            return Err(ActorExitStatus::Success);
-        }
-        ctx.schedule_self_msg(CHECK_PIPELINE_STATUSES_INTERVAL, CheckPipelineStatuses);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<Healthz> for CompactorService {
-    type Reply = bool;
-
-    async fn handle(
-        &mut self,
-        _msg: Healthz,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<bool, ActorExitStatus> {
-        if self.status() == CompactorStatus::Decommissioned {
-            return Ok(true);
-        }
-        let stall = self.last_status_check_at.elapsed();
-        if stall > MAX_STATUS_CHECK_STALL {
-            error!(
-                stall=%stall.pretty_display(),
-                "compactor service has not checked pipeline statuses recently"
-            );
-            return Ok(false);
-        }
-        Ok(true)
-    }
-}
-
-#[async_trait]
-impl Handler<Decommission> for CompactorService {
-    type Reply = watch::Receiver<CompactorStatus>;
-
-    async fn handle(
-        &mut self,
-        _msg: Decommission,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<watch::Receiver<CompactorStatus>, ActorExitStatus> {
-        if self.status() == CompactorStatus::Ready {
-            info!("decommissioning compactor");
-            self.set_status(CompactorStatus::Decommissioning);
-        }
-        Ok(self.status_rx())
-    }
-}
-
 /// Initiates compactor decommission if one is present, returning a receiver to await it.
-pub async fn notify_compactor_decommission(
-    compactor_mailbox_opt: Option<&Mailbox<CompactorService>>,
-) -> anyhow::Result<Option<watch::Receiver<CompactorStatus>>> {
-    let Some(compactor_mailbox) = compactor_mailbox_opt else {
-        return Ok(None);
-    };
-    let status_rx = async {
-        compactor_mailbox
-            .send_message_with_high_priority(Decommission)
-            .context("failed to initiate compactor decommission")?
-            .await
-            .context("compactor dropped decommission reply")
-    }
-    .await
-    .inspect_err(|_| DECOMMISSION_FAILED.inc())?;
-    Ok(Some(status_rx))
+pub fn notify_compactor_decommission(
+    compactor_opt: Option<&CompactorServiceHandle>,
+) -> Option<watch::Receiver<CompactorStatus>> {
+    compactor_opt.map(CompactorServiceHandle::decommission)
 }
 
 /// Waits for a compactor to finish draining its in-flight merges, if one is present.
@@ -510,7 +538,6 @@ mod tests {
     use std::collections::HashSet;
     use std::num::NonZeroUsize;
 
-    use quickwit_actors::Universe;
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_proto::compaction::{
         CompactionPlannerServiceClient, MockCompactionPlannerService,
@@ -896,8 +923,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_for_compactor_decommission_drains_when_idle() {
-        let universe = Universe::new();
-
         let mut mock = MockCompactionPlannerService::new();
         mock.expect_report_status().returning(|_req| {
             Ok(quickwit_proto::compaction::ReportStatusResponse {
@@ -908,7 +933,7 @@ mod tests {
         let client = CompactionPlannerServiceClient::from_mock(mock);
         let mut compactor_config = CompactorConfig::for_test();
         compactor_config.max_concurrent_merge_executions = NonZeroUsize::new(2).unwrap();
-        let compactor_service = CompactorService::new(
+        let compactor_handle = CompactorService::new(
             NodeId::from_str("test-node"),
             client,
             &compactor_config,
@@ -916,26 +941,25 @@ mod tests {
             StorageResolver::for_test(),
             EventBroker::default(),
             TempDirectory::for_test(),
-        );
-        let status_rx = compactor_service.status_rx();
-        let (mailbox, _handle) = universe.spawn_builder().spawn(compactor_service);
+        )
+        .spawn();
+        let status_rx = compactor_handle.status_rx();
 
-        let decommission_rx_opt = notify_compactor_decommission(Some(&mailbox)).await.unwrap();
+        let decommission_rx_opt = notify_compactor_decommission(Some(&compactor_handle));
         wait_for_compactor_decommission(decommission_rx_opt, Duration::from_secs(10))
             .await
             .unwrap();
 
         assert_eq!(*status_rx.borrow(), CompactorStatus::Decommissioned);
-        universe.assert_quit().await;
+        compactor_handle.shutdown().await;
     }
 
-    #[tokio::test]
-    async fn test_supervised_compactor_survives_planner_failures() {
+    #[tokio::test(start_paused = true)]
+    async fn test_compactor_survives_planner_failures() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         use quickwit_proto::compaction::CompactionError;
 
-        let universe = Universe::new();
         let report_count = Arc::new(AtomicUsize::new(0));
         let report_count_clone = report_count.clone();
         let mut mock = MockCompactionPlannerService::new();
@@ -947,26 +971,25 @@ mod tests {
         let client = CompactionPlannerServiceClient::from_mock(mock);
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
         let compactor_config = CompactorConfig::for_test();
-        let storage_resolver = StorageResolver::for_test();
-        let event_broker = EventBroker::default();
-        let compaction_root_directory = TempDirectory::for_test();
-        let (mailbox, _supervisor_handle) = universe.spawn_builder().supervise_fn(move || {
-            CompactorService::new(
-                NodeId::from_str("test-node"),
-                client.clone(),
-                &compactor_config,
-                metastore.clone(),
-                storage_resolver.clone(),
-                event_broker.clone(),
-                compaction_root_directory.clone(),
-            )
-        });
+        let compactor_handle = CompactorService::new(
+            NodeId::from_str("test-node"),
+            client,
+            &compactor_config,
+            metastore,
+            StorageResolver::for_test(),
+            EventBroker::default(),
+            TempDirectory::for_test(),
+        )
+        .spawn();
 
-        universe.sleep(CHECK_PIPELINE_STATUSES_INTERVAL * 3).await;
+        for _ in 0..3 {
+            tokio::time::advance(CHECK_PIPELINE_STATUSES_INTERVAL).await;
+            tokio::task::yield_now().await;
+        }
 
         assert!(report_count.load(Ordering::Relaxed) >= 2);
-        assert!(mailbox.ask(Healthz).await.unwrap());
+        assert!(compactor_handle.is_healthy());
 
-        universe.assert_quit().await;
+        compactor_handle.shutdown().await;
     }
 }

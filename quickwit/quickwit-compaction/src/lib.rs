@@ -22,9 +22,9 @@ pub mod planner;
 pub type TaskId = String;
 
 pub use compactor_service::{
-    CompactorService, notify_compactor_decommission, wait_for_compactor_decommission,
+    CompactorService, CompactorServiceHandle, notify_compactor_decommission,
+    wait_for_compactor_decommission,
 };
-use quickwit_actors::{Mailbox, Universe};
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::CompactorConfig;
@@ -41,7 +41,6 @@ pub fn source_uid_metrics_label(index_uid: &IndexUid, source_id: &SourceId) -> S
 
 #[allow(clippy::too_many_arguments)]
 pub async fn start_compactor_service(
-    universe: &Universe,
     node_id: NodeId,
     compaction_client: CompactionPlannerServiceClient,
     compactor_config: &CompactorConfig,
@@ -49,19 +48,16 @@ pub async fn start_compactor_service(
     storage_resolver: StorageResolver,
     event_broker: EventBroker,
     compaction_root_directory: TempDirectory,
-) -> anyhow::Result<Mailbox<CompactorService>> {
+) -> anyhow::Result<CompactorServiceHandle> {
     info!("starting compactor service");
-    let compactor_config = compactor_config.clone();
-    let (mailbox, _supervisor_handle) = universe.spawn_builder().supervise_fn(move || {
-        CompactorService::new(
-            node_id.clone(),
-            compaction_client.clone(),
-            &compactor_config,
-            metastore.clone(),
-            storage_resolver.clone(),
-            event_broker.clone(),
-            compaction_root_directory.clone(),
-        )
-    });
-    Ok(mailbox)
+    let compactor = CompactorService::new(
+        node_id,
+        compaction_client,
+        compactor_config,
+        metastore,
+        storage_resolver,
+        event_broker,
+        compaction_root_directory,
+    );
+    Ok(compactor.spawn())
 }

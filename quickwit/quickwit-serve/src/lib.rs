@@ -46,7 +46,7 @@ pub mod tcp_listener;
 mod template_api;
 mod ui_handler;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fs;
 use std::net::SocketAddr;
@@ -58,7 +58,6 @@ pub(crate) use decompression::Body;
 pub use format::BodyFormat;
 use futures::StreamExt;
 use itertools::Itertools;
-use quickwit_actors::{ActorExitStatus, ActorHandle, ActorState, Mailbox, Universe};
 use quickwit_cluster::{
     Cluster, ClusterChange, ClusterChangeStream, ClusterNode, start_cluster_service,
 };
@@ -68,9 +67,9 @@ use quickwit_common::tower::{
     BalanceChannel, BoxFutureInfaillible, Change, GrpcMetricsLayer, TimeoutLayer,
 };
 use quickwit_common::{get_bool_from_env, spawn_named_task};
-use quickwit_compaction::planner::CompactionPlanner;
+use quickwit_compaction::planner::{CompactionPlanner, CompactionPlannerHandle};
 use quickwit_compaction::{
-    CompactorService, notify_compactor_decommission, start_compactor_service,
+    CompactorServiceHandle, notify_compactor_decommission, start_compactor_service,
     wait_for_compactor_decommission,
 };
 use quickwit_config::NodeConfig;
@@ -142,7 +141,7 @@ struct QuickwitServices {
     ingesthree_service_opt: Option<quickwit_ingest::ingesthree::IngesthreeService>,
 
     pub compaction_service_client_opt: Option<CompactionPlannerServiceClient>,
-    pub compactor_service_opt: Option<Mailbox<CompactorService>>,
+    pub compactor_service_opt: Option<CompactorServiceHandle>,
     pub janitor_service_opt: Option<JanitorService>,
     pub jaeger_service_opt: Option<JaegerService>,
     pub otlp_logs_service_opt: Option<OtlpGrpcLogsService>,
@@ -208,22 +207,20 @@ async fn balance_channel_for_service(
     BalanceChannel::from_stream(service_change_stream)
 }
 
-/// Builds a `CompactionPlannerServiceClient` if standalone compactors are enabled
-/// and the node runs the janitor or compactor.
+/// Builds a `CompactionPlannerServiceClient` if the node runs the janitor or compactor.
 ///
-/// On janitor nodes, spawns a `CompactionPlanner` actor and builds the client from
-/// its mailbox. On compactor-only nodes, connects to a remote janitor via gRPC.
+/// On janitor nodes, spawns a `CompactionPlanner` background task and builds the client directly
+/// from its handle. On compactor-only nodes, connects to a remote janitor via gRPC.
 ///
-/// The second tuple element is the local planner's `ActorHandle`, returned only
-/// on janitor nodes so the caller can attach it to the janitor liveness probe.
+/// The second tuple element is the local planner handle, returned only on janitor nodes so the
+/// caller can attach it to the janitor liveness probe and shut it down cleanly.
 async fn get_compaction_planner_client_if_needed(
     node_config: &NodeConfig,
     cluster: &Cluster,
-    universe: &Universe,
     metastore_client: &MetastoreServiceClient,
 ) -> anyhow::Result<(
     Option<CompactionPlannerServiceClient>,
-    Option<ActorHandle<CompactionPlanner>>,
+    Option<CompactionPlannerHandle>,
 )> {
     let is_janitor = node_config.is_service_enabled(QuickwitService::Janitor);
     let is_compactor = node_config.is_service_enabled(QuickwitService::Compactor);
@@ -231,14 +228,13 @@ async fn get_compaction_planner_client_if_needed(
         return Ok((None, None));
     }
     if is_janitor {
-        let planner = CompactionPlanner::new(metastore_client.clone());
-        let (mailbox, handle) = universe.spawn_builder().spawn(planner);
-        info!("compaction planner actor started on janitor node");
+        let planner_handle = CompactionPlanner::new(metastore_client.clone()).spawn();
+        info!("compaction planner started on janitor node");
         let planner_client = CompactionPlannerServiceClient::tower()
             .stack_layer(COMPACTION_GRPC_SERVER_METRICS_LAYER.clone())
             .stack_layer(TimeoutLayer::new(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT))
-            .build_from_mailbox(mailbox);
-        return Ok((Some(planner_client), Some(handle)));
+            .build(planner_handle.clone());
+        return Ok((Some(planner_client), Some(planner_handle)));
     }
     // Compactor-only node: connect to the planner on a remote janitor.
     let balance_channel = balance_channel_for_service(cluster, QuickwitService::Janitor).await;
@@ -271,18 +267,18 @@ async fn get_compaction_planner_client_if_needed(
 async fn shutdown_signal_handler(
     shutdown_signal: BoxFutureInfaillible<()>,
     shutdown_token: CancellationToken,
-    universe: Universe,
     ingesthree_queue_opt: Option<quickwit_ingest::ingesthree::WriteQueue>,
     indexing_service_opt: Option<IndexingService>,
     ingester_decommission_timeout: Duration,
-    compactor_service_opt: Option<Mailbox<CompactorService>>,
+    compactor_service_opt: Option<CompactorServiceHandle>,
     compactor_decommission_timeout: Duration,
     janitor_service_opt: Option<JanitorService>,
+    compaction_planner_handle_opt: Option<CompactionPlannerHandle>,
     grpc_shutdown_trigger_tx: oneshot::Sender<()>,
     rest_shutdown_trigger_tx: oneshot::Sender<()>,
     health_shutdown_trigger_tx_opt: Option<oneshot::Sender<()>>,
     cluster: Cluster,
-) -> HashMap<String, ActorExitStatus> {
+) {
     tokio::select! {
         _ = shutdown_signal => {
             shutdown_token.cancel();
@@ -301,22 +297,22 @@ async fn shutdown_signal_handler(
     if let Some(indexing_service) = &indexing_service_opt {
         indexing_service.stop().await;
     }
-    let compactor_status_rx_opt = notify_compactor_decommission(compactor_service_opt.as_ref())
-        .await
-        .unwrap_or_else(|error| {
-            error!("failed to initiate compactor decommission: {:?}", error);
-            None
-        });
+    let compactor_status_rx_opt = notify_compactor_decommission(compactor_service_opt.as_ref());
     if let Err(error) =
         wait_for_compactor_decommission(compactor_status_rx_opt, compactor_decommission_timeout)
             .await
     {
         error!("failed to decommission compactor gracefully: {:?}", error);
     }
+    if let Some(compactor_service) = &compactor_service_opt {
+        compactor_service.shutdown().await;
+    }
     if let Some(janitor_service) = &janitor_service_opt {
         janitor_service.shutdown().await;
     }
-    let actor_exit_statuses = universe.quit().await;
+    if let Some(compaction_planner_handle) = &compaction_planner_handle_opt {
+        compaction_planner_handle.shutdown().await;
+    }
 
     if grpc_shutdown_trigger_tx.send(()).is_err() {
         debug!("gRPC server shutdown signal receiver was dropped");
@@ -332,7 +328,6 @@ async fn shutdown_signal_handler(
     if let Err(err) = cluster.initiate_shutdown().await {
         debug!("{err}");
     }
-    actor_exit_statuses
 }
 
 pub async fn serve_quickwit(
@@ -343,7 +338,7 @@ pub async fn serve_quickwit(
     tcp_listener_resolver: impl TcpListenerResolver,
     mut shutdown_signal: BoxFutureInfaillible<()>,
     env_filter_reload_fn: EnvFilterReloadFn,
-) -> anyhow::Result<HashMap<String, ActorExitStatus>> {
+) -> anyhow::Result<()> {
     let cluster = start_cluster_service(&node_config)
         .await
         .context("failed to start cluster service")?;
@@ -351,7 +346,6 @@ pub async fn serve_quickwit(
     let event_broker = EventBroker::default();
     let _ingesthree_metadata_subscriptions =
         ingesthree::publish_metadata_changes(&cluster, &event_broker);
-    let universe = Universe::new();
     let grpc_config = node_config.grpc_config.clone();
 
     // Instantiate the local metastore gRPC server for this node (the primary metastore, a
@@ -374,14 +368,9 @@ pub async fn serve_quickwit(
     .await?;
 
     let (compaction_service_client_opt, compaction_planner_handle_opt) =
-        get_compaction_planner_client_if_needed(
-            &node_config,
-            &cluster,
-            &universe,
-            &primary_metastore_client,
-        )
-        .await
-        .context("failed to initialize compaction service client")?;
+        get_compaction_planner_client_if_needed(&node_config, &cluster, &primary_metastore_client)
+            .await
+            .context("failed to initialize compaction service client")?;
 
     let router = quickwit_ingest::ingesthree::IngesthreeRouter::new(
         cluster.clone(),
@@ -418,8 +407,11 @@ pub async fn serve_quickwit(
                 if let Some(indexing_service) = &indexing_service_opt {
                     indexing_service.stop().await;
                 }
+                if let Some(compaction_planner_handle) = &compaction_planner_handle_opt {
+                    compaction_planner_handle.shutdown().await;
+                }
                 cluster.initiate_shutdown().await?;
-                return Ok(universe.quit().await);
+                return Ok(());
             }
         };
         queue.publish_initial_capacity(&cluster).await;
@@ -556,9 +548,8 @@ pub async fn serve_quickwit(
         };
 
     let janitor_service_opt = if node_config.is_service_enabled(QuickwitService::Janitor) {
-        let planner_health_check = compaction_planner_handle_opt.map(|handle| {
-            let check: quickwit_janitor::HealthCheckFn =
-                Arc::new(move || handle.state() != ActorState::Failure);
+        let planner_health_check = compaction_planner_handle_opt.clone().map(|handle| {
+            let check: quickwit_janitor::HealthCheckFn = Arc::new(move || handle.is_healthy());
             check
         });
         let janitor_service = start_janitor_service(
@@ -586,8 +577,7 @@ pub async fn serve_quickwit(
         let compaction_client = compaction_service_client_opt
             .clone()
             .expect("compactor service enabled but no compaction client available");
-        let compactor_mailbox = start_compactor_service(
-            &universe,
+        let compactor_handle = start_compactor_service(
             cluster.self_node_id(),
             compaction_client,
             &node_config.compactor_config,
@@ -598,7 +588,7 @@ pub async fn serve_quickwit(
         )
         .await
         .context("failed to start compactor service")?;
-        Some(compactor_mailbox)
+        Some(compactor_handle)
     } else {
         None
     };
@@ -758,13 +748,13 @@ pub async fn serve_quickwit(
     let shutdown_handle = tokio::spawn(shutdown_signal_handler(
         shutdown_signal,
         shutdown_token.clone(),
-        universe,
         ingesthree_queue_opt,
         indexing_service_opt,
         ingester_decommission_timeout,
         compactor_service_opt,
         compactor_decommission_timeout,
         janitor_service_opt,
+        compaction_planner_handle_opt,
         grpc_shutdown_trigger_tx,
         rest_shutdown_trigger_tx,
         health_shutdown_trigger_tx_opt,
@@ -812,10 +802,10 @@ pub async fn serve_quickwit(
         return Err(error);
     }
 
-    let actor_exit_statuses = shutdown_handle
+    shutdown_handle
         .await
         .context("failed to gracefully shutdown services")?;
-    Ok(actor_exit_statuses)
+    Ok(())
 }
 
 async fn setup_searcher(
@@ -1182,7 +1172,6 @@ mod tests {
             create_cluster_for_test(Vec::new(), &["janitor", "indexer"], &transport, true)
                 .await
                 .unwrap();
-        let universe = Universe::new();
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
 
         // Janitor + indexer: planner client is returned.
@@ -1190,11 +1179,12 @@ mod tests {
         node_config.enabled_services =
             HashSet::from([QuickwitService::Janitor, QuickwitService::Indexer]);
         let (client_opt, handle_opt) =
-            get_compaction_planner_client_if_needed(&node_config, &cluster, &universe, &metastore)
+            get_compaction_planner_client_if_needed(&node_config, &cluster, &metastore)
                 .await
                 .unwrap();
         assert!(client_opt.is_some());
-        assert!(handle_opt.is_some());
+        let handle = handle_opt.expect("planner handle should be returned");
+        handle.shutdown().await;
 
         // With compactor + janitor enabled, planner client is also returned.
         node_config.enabled_services = HashSet::from([
@@ -1203,22 +1193,21 @@ mod tests {
             QuickwitService::Compactor,
         ]);
         let (client_opt, handle_opt) =
-            get_compaction_planner_client_if_needed(&node_config, &cluster, &universe, &metastore)
+            get_compaction_planner_client_if_needed(&node_config, &cluster, &metastore)
                 .await
                 .unwrap();
         assert!(client_opt.is_some());
-        assert!(handle_opt.is_some());
+        let handle = handle_opt.expect("planner handle should be returned");
+        handle.shutdown().await;
 
         // Neither janitor nor compactor: no client, no handle.
         node_config.enabled_services = HashSet::from([QuickwitService::Indexer]);
         let (client_opt, handle_opt) =
-            get_compaction_planner_client_if_needed(&node_config, &cluster, &universe, &metastore)
+            get_compaction_planner_client_if_needed(&node_config, &cluster, &metastore)
                 .await
                 .unwrap();
         assert!(client_opt.is_none());
         assert!(handle_opt.is_none());
-
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
@@ -1226,14 +1215,26 @@ mod tests {
         use std::time::Instant;
 
         use quickwit_proto::compaction::{
-            CompactionError, CompactionPlannerService, ReportStatusRequest,
+            CompactionError, CompactionPlannerService, CompactionResult, ReportStatusRequest,
+            ReportStatusResponse,
         };
 
-        let universe = Universe::new();
-        let (planner_mailbox, _planner_inbox) = universe.create_test_mailbox::<CompactionPlanner>();
+        #[derive(Debug)]
+        struct HangingPlanner;
+
+        #[async_trait::async_trait]
+        impl CompactionPlannerService for HangingPlanner {
+            async fn report_status(
+                &self,
+                _request: ReportStatusRequest,
+            ) -> CompactionResult<ReportStatusResponse> {
+                std::future::pending().await
+            }
+        }
+
         let planner_client = CompactionPlannerServiceClient::tower()
             .stack_layer(TimeoutLayer::new(GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT))
-            .build_from_mailbox(planner_mailbox);
+            .build(HangingPlanner);
 
         let request = ReportStatusRequest {
             node_id: "test-node".to_string(),
@@ -1247,8 +1248,6 @@ mod tests {
         assert!(matches!(error, CompactionError::Timeout(_)));
         assert!(elapsed >= GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT);
         assert!(elapsed < GRPC_COMPACTION_PLANNER_SERVICE_TIMEOUT * 5);
-
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
@@ -1257,17 +1256,13 @@ mod tests {
         let cluster = create_cluster_for_test(Vec::new(), &["indexer"], &transport, false)
             .await
             .unwrap();
-        let universe = Universe::new();
         let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new());
 
         let mut node_config = NodeConfig::for_test();
         node_config.enabled_services =
             HashSet::from([QuickwitService::Indexer, QuickwitService::Compactor]);
         let result =
-            get_compaction_planner_client_if_needed(&node_config, &cluster, &universe, &metastore)
-                .await;
+            get_compaction_planner_client_if_needed(&node_config, &cluster, &metastore).await;
         assert!(result.is_err());
-
-        universe.assert_quit().await;
     }
 }

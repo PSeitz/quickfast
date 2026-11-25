@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
-use quickwit_actors::{Actor, Handler, Healthz, Mailbox};
 use quickwit_cluster::Cluster;
-use quickwit_compaction::CompactorService;
+use quickwit_compaction::CompactorServiceHandle;
 use quickwit_indexing::IndexingService;
 use quickwit_janitor::JanitorService;
-use tokio::time::timeout;
 use tracing::error;
 use warp::hyper::StatusCode;
 use warp::reply::with_status;
@@ -27,12 +23,6 @@ use warp::{Filter, Rejection};
 
 use crate::rest::recover_fn;
 use crate::with_arg;
-
-const HEALTH_CHECK_ASK_TIMEOUT: Duration = if cfg!(any(test, feature = "testsuite")) {
-    Duration::from_secs(1)
-} else {
-    Duration::from_secs(5)
-};
 
 #[derive(utoipa::OpenApi)]
 #[openapi(paths(get_liveness, get_startup))]
@@ -43,7 +33,7 @@ pub(crate) fn health_check_handlers(
     cluster: Cluster,
     indexer_service_opt: Option<IndexingService>,
     janitor_service_opt: Option<JanitorService>,
-    compactor_service_opt: Option<Mailbox<CompactorService>>,
+    compactor_service_opt: Option<CompactorServiceHandle>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     liveness_handler(
         indexer_service_opt,
@@ -56,7 +46,7 @@ pub(crate) fn health_check_handlers(
 fn liveness_handler(
     indexer_service_opt: Option<IndexingService>,
     janitor_service_opt: Option<JanitorService>,
-    compactor_service_opt: Option<Mailbox<CompactorService>>,
+    compactor_service_opt: Option<CompactorServiceHandle>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     warp::path!("health" / "livez")
         .and(warp::get())
@@ -65,17 +55,6 @@ fn liveness_handler(
         .and(with_arg(compactor_service_opt))
         .then(get_liveness)
         .recover(recover_fn)
-}
-
-async fn is_actor_unhealthy<A>(mailbox_opt: Option<Mailbox<A>>) -> bool
-where A: Actor + Handler<Healthz, Reply = bool> {
-    let Some(mailbox) = mailbox_opt else {
-        return false;
-    };
-    match timeout(HEALTH_CHECK_ASK_TIMEOUT, mailbox.ask(Healthz)).await {
-        Ok(healthz_result) => !healthz_result.unwrap_or(false),
-        Err(_elapsed) => true,
-    }
 }
 
 fn startup_handler(
@@ -103,7 +82,7 @@ fn startup_handler(
 async fn get_liveness(
     indexer_service_opt: Option<IndexingService>,
     janitor_service_opt: Option<JanitorService>,
-    compactor_service_opt: Option<Mailbox<CompactorService>>,
+    compactor_service_opt: Option<CompactorServiceHandle>,
 ) -> impl warp::Reply {
     let mut is_live = true;
 
@@ -121,7 +100,10 @@ async fn get_liveness(
         error!("janitor service is unhealthy");
         is_live = false;
     }
-    if is_actor_unhealthy(compactor_service_opt).await {
+    if compactor_service_opt
+        .as_ref()
+        .is_some_and(|service| !service.is_healthy())
+    {
         error!("compactor service is unhealthy");
         is_live = false;
     }
@@ -155,10 +137,8 @@ async fn get_startup(cluster: Cluster) -> impl warp::Reply {
 
 #[cfg(test)]
 mod tests {
-
-    use quickwit_actors::Universe;
     use quickwit_cluster::{ChitchatTransport, create_cluster_for_test};
-    use quickwit_compaction::CompactorService;
+    use quickwit_compaction::CompactorServiceHandle;
 
     #[tokio::test]
     async fn test_rest_search_api_health_checks() {
@@ -192,28 +172,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_liveness_reports_unresponsive_and_dead_compactor() {
+    async fn test_liveness_reports_unhealthy_compactor() {
         let transport = ChitchatTransport::default();
         let cluster = create_cluster_for_test(Vec::new(), &[], &transport, false)
             .await
             .unwrap();
-        let universe = Universe::new();
-        let (compactor_mailbox, compactor_inbox) =
-            universe.create_test_mailbox::<CompactorService>();
+        let unhealthy_compactor = CompactorServiceHandle::for_test_unhealthy();
 
-        let health_check_handler = super::health_check_handlers(
-            cluster.clone(),
-            None,
-            None,
-            Some(compactor_mailbox.clone()),
-        );
-        let resp = warp::test::request()
-            .path("/health/livez")
-            .reply(&health_check_handler)
-            .await;
-        assert_eq!(resp.status(), 503);
-
-        drop(compactor_inbox);
+        let health_check_handler =
+            super::health_check_handlers(cluster.clone(), None, None, Some(unhealthy_compactor));
         let resp = warp::test::request()
             .path("/health/livez")
             .reply(&health_check_handler)

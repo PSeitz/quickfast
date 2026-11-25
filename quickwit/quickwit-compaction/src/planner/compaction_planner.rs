@@ -13,23 +13,28 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use itertools::Itertools;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler};
 use quickwit_common::pretty::PrettyDisplay;
 use quickwit_metastore::{
     ListSplitsQuery, ListSplitsRequestExt, MetastoreServiceStreamSplitsExt, Split, SplitState,
 };
 use quickwit_metrics::{counter, label_values};
 use quickwit_proto::compaction::{
-    CompactionResult, MergeTaskAssignment, ReportStatusRequest, ReportStatusResponse,
+    CompactionError, CompactionPlannerService, CompactionResult, MergeTaskAssignment,
+    ReportStatusRequest, ReportStatusResponse,
 };
 use quickwit_proto::metastore::{ListSplitsRequest, MetastoreService, MetastoreServiceClient};
 use quickwit_proto::types::NodeId;
 use time::OffsetDateTime;
+use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use ulid::Ulid;
 
@@ -60,62 +65,61 @@ const SCAN_AND_PLAN_INTERVAL: Duration = Duration::from_secs(5);
 /// their progress, preventing us from frivolously rescheduling work.
 const INITIAL_SCAN_AND_PLAN_INTERVAL: Duration = SCAN_AND_PLAN_INTERVAL.saturating_mul(2);
 
-#[derive(Debug)]
-struct ScanAndPlan;
+const PLANNER_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
-#[async_trait]
-impl Actor for CompactionPlanner {
-    type ObservableState = ();
+type ReportStatusEnvelope = (
+    ReportStatusRequest,
+    oneshot::Sender<CompactionResult<ReportStatusResponse>>,
+);
 
-    fn name(&self) -> String {
-        "CompactionPlanner".to_string()
-    }
+/// Cloneable handle to a running [`CompactionPlanner`] background task.
+#[derive(Clone)]
+pub struct CompactionPlannerHandle {
+    request_tx: mpsc::Sender<ReportStatusEnvelope>,
+    shutdown: CancellationToken,
+    healthy: Arc<AtomicBool>,
+    task_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
 
-    fn observable_state(&self) -> Self::ObservableState {}
-
-    async fn initialize(&mut self, ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        info!(
-            "initializing compaction planner, starting scan loop in {}",
-            INITIAL_SCAN_AND_PLAN_INTERVAL.pretty_display()
-        );
-        ctx.schedule_self_msg(INITIAL_SCAN_AND_PLAN_INTERVAL, ScanAndPlan);
-        Ok(())
+impl Debug for CompactionPlannerHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CompactionPlannerHandle")
+            .field("healthy", &self.is_healthy())
+            .finish()
     }
 }
 
-#[async_trait]
-impl Handler<ScanAndPlan> for CompactionPlanner {
-    type Reply = ();
+impl CompactionPlannerHandle {
+    pub fn is_healthy(&self) -> bool {
+        self.healthy.load(Ordering::Relaxed)
+    }
 
-    async fn handle(
-        &mut self,
-        _msg: ScanAndPlan,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        if let Err(error) = ctx.protect_future(self.scan_and_plan()).await {
-            error!(%error, "failed to scan metastore and/or plan merges");
+    pub async fn shutdown(&self) {
+        self.shutdown.cancel();
+        let handle_opt = self.task_handle.lock().await.take();
+        if let Some(handle) = handle_opt {
+            let _ = handle.await;
         }
-        self.state.check_heartbeat_timeouts();
-        ctx.schedule_self_msg(SCAN_AND_PLAN_INTERVAL, ScanAndPlan);
-        Ok(())
     }
 }
 
 #[async_trait]
-impl Handler<ReportStatusRequest> for CompactionPlanner {
-    type Reply = CompactionResult<ReportStatusResponse>;
-
-    async fn handle(
-        &mut self,
-        msg: ReportStatusRequest,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<CompactionResult<ReportStatusResponse>, ActorExitStatus> {
-        let node_id = NodeId::from_str(msg.node_id.as_str());
-        self.state.process_successes(&msg.successes);
-        self.state.process_failures(&msg.failures);
-        self.state.update_heartbeats(&node_id, &msg.in_progress);
-        let new_tasks = self.assign_tasks(&node_id, msg.available_slots);
-        Ok(Ok(ReportStatusResponse { new_tasks }))
+impl CompactionPlannerService for CompactionPlannerHandle {
+    async fn report_status(
+        &self,
+        request: ReportStatusRequest,
+    ) -> CompactionResult<ReportStatusResponse> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.request_tx
+            .send((request, reply_tx))
+            .await
+            .map_err(|_| {
+                CompactionError::Unavailable("compaction planner task is not running".to_string())
+            })?;
+        reply_rx.await.map_err(|_| {
+            CompactionError::Unavailable("compaction planner dropped response".to_string())
+        })?
     }
 }
 
@@ -126,6 +130,70 @@ impl CompactionPlanner {
             index_config_metastore: IndexConfigMetastore::new(metastore.clone()),
             metastore,
         }
+    }
+
+    pub fn spawn(mut self) -> CompactionPlannerHandle {
+        let (request_tx, mut request_rx) =
+            mpsc::channel::<ReportStatusEnvelope>(PLANNER_REQUEST_CHANNEL_CAPACITY);
+        let shutdown = CancellationToken::new();
+        let healthy = Arc::new(AtomicBool::new(true));
+
+        let task_shutdown = shutdown.clone();
+        let worker_handle = tokio::spawn(async move {
+            info!(
+                "initializing compaction planner, starting scan loop in {}",
+                INITIAL_SCAN_AND_PLAN_INTERVAL.pretty_display()
+            );
+            let mut next_scan_at = tokio::time::Instant::now() + INITIAL_SCAN_AND_PLAN_INTERVAL;
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = task_shutdown.cancelled() => break,
+                    maybe_request = request_rx.recv() => {
+                        let Some((request, reply_tx)) = maybe_request else {
+                            break;
+                        };
+                        let response = self.handle_report_status(request);
+                        let _ = reply_tx.send(response);
+                    }
+                    _ = tokio::time::sleep_until(next_scan_at) => {
+                        if let Err(error) = self.scan_and_plan().await {
+                            error!(%error, "failed to scan metastore and/or plan merges");
+                        }
+                        self.state.check_heartbeat_timeouts();
+                        next_scan_at = tokio::time::Instant::now() + SCAN_AND_PLAN_INTERVAL;
+                    }
+                }
+            }
+        });
+
+        let monitor_shutdown = shutdown.clone();
+        let monitor_healthy = healthy.clone();
+        let monitor_handle = tokio::spawn(async move {
+            let res = worker_handle.await;
+            if res.is_err() || !monitor_shutdown.is_cancelled() {
+                monitor_healthy.store(false, Ordering::Relaxed);
+            }
+        });
+
+        CompactionPlannerHandle {
+            request_tx,
+            shutdown,
+            healthy,
+            task_handle: Arc::new(Mutex::new(Some(monitor_handle))),
+        }
+    }
+
+    fn handle_report_status(
+        &mut self,
+        msg: ReportStatusRequest,
+    ) -> CompactionResult<ReportStatusResponse> {
+        let node_id = NodeId::from_str(msg.node_id.as_str());
+        self.state.process_successes(&msg.successes);
+        self.state.process_failures(&msg.failures);
+        self.state.update_heartbeats(&node_id, &msg.in_progress);
+        let new_tasks = self.assign_tasks(&node_id, msg.available_slots);
+        Ok(ReportStatusResponse { new_tasks })
     }
 
     async fn ingest_splits(&mut self, splits: Vec<Split>) {
