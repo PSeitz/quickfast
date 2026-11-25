@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use anyhow::{Context, ensure};
-use async_trait::async_trait;
 use bytesize::ByteSize;
-use quickwit_actors::{ActorContext, ActorExitStatus, Handler};
 use quickwit_common::temp_dir;
 use quickwit_config::INGEST_V2_SOURCE_ID;
 
 use super::IndexingService;
-use crate::ingesthree::{S3Indexer, S3IndexerSupervisor, StopS3Indexers};
+use crate::ingesthree::{S3Indexer, S3IndexerSupervisor};
 
 /// Reads the target total input bytes for one indexer batch.
 fn indexer_batch_bytes() -> anyhow::Result<u64> {
@@ -57,50 +55,27 @@ fn indexer_max_wait_secs() -> anyhow::Result<u32> {
 }
 
 impl IndexingService {
-    pub(super) fn start_s3_indexers(&mut self) -> anyhow::Result<()> {
+    pub(super) fn spawn_s3_indexers(&self) -> anyhow::Result<Vec<S3IndexerSupervisor>> {
         let max_num_bytes = indexer_batch_bytes()?;
         let max_wait_secs = indexer_max_wait_secs()?;
         let num_workers = quickwit_common::num_cpus();
         ensure!(num_workers > 0, "S3 indexing requires at least one CPU");
         let scratch_directory = temp_dir::Builder::default()
             .join("ingesthree")
-            .tempdir_in(&self.indexing_root_directory)?;
+            .tempdir_in(&self.inner.indexing_root_directory)?;
         let worker = S3Indexer {
-            node_id: self.node_id.clone(),
+            node_id: self.inner.node_id.clone(),
             source_id: INGEST_V2_SOURCE_ID.to_string(),
-            metastore: self.metastore.clone(),
-            storage_resolver: self.storage_resolver.clone(),
+            metastore: self.inner.metastore.clone(),
+            storage_resolver: self.inner.storage_resolver.clone(),
             scratch_directory,
-            max_concurrent_split_uploads: self.max_concurrent_split_uploads,
-            indexing_io_throughput_limiter: self.indexing_io_throughput_limiter_opt.clone(),
-            clustering_config: self.clustering_config.clone(),
+            max_concurrent_split_uploads: self.inner.max_concurrent_split_uploads,
+            indexing_io_throughput_limiter: self.inner.indexing_io_throughput_limiter_opt.clone(),
+            clustering_config: self.inner.clustering_config.clone(),
         };
-        self.s3_indexers = (0..num_workers)
+        Ok((0..num_workers)
             .map(|_| S3IndexerSupervisor::spawn(worker.clone(), max_num_bytes, max_wait_secs))
-            .collect();
-        Ok(())
-    }
-
-    pub(super) async fn stop_s3_indexers(&mut self) {
-        futures::future::join_all(self.s3_indexers.drain(..).map(S3IndexerSupervisor::stop)).await;
-    }
-}
-
-#[async_trait]
-impl Handler<StopS3Indexers> for IndexingService {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: StopS3Indexers,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        ctx.protect_future(async {
-            self.stop_source_forwarders().await;
-            self.stop_s3_indexers().await;
-        })
-        .await;
-        Ok(())
+            .collect())
     }
 }
 
@@ -110,7 +85,6 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
-    use quickwit_actors::{ActorHandle, Mailbox, Universe};
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_common::uri::Uri;
     use quickwit_config::merge_policy_config::{MergePolicyConfig, StableLogMergePolicyConfig};
@@ -128,7 +102,7 @@ mod tests {
     use quickwit_storage::RamStorage;
 
     use super::super::*;
-    use crate::ingesthree::{S3Indexer, StopS3Indexers};
+    use crate::ingesthree::S3Indexer;
 
     const DOC: &[u8] = br#"{"timestamp":"2024-01-01T00:00:00Z","body":"hello","owner":"alice"}"#;
 
@@ -198,8 +172,8 @@ mod tests {
             .unwrap();
     }
 
-    async fn new_service(directory: &Path, worker: &S3Indexer) -> IndexingService {
-        IndexingService::new(
+    async fn start_service(directory: &Path, worker: &S3Indexer) -> IndexingService {
+        IndexingService::start(
             worker.node_id.clone(),
             directory.to_path_buf(),
             IndexerConfig::for_test().unwrap(),
@@ -210,31 +184,6 @@ mod tests {
         )
         .await
         .unwrap()
-    }
-
-    async fn spawn_service(
-        directory: &Path,
-        universe: &Universe,
-        worker: &S3Indexer,
-    ) -> (Mailbox<IndexingService>, ActorHandle<IndexingService>) {
-        let service = new_service(directory, worker).await;
-        universe.spawn_builder().spawn(service)
-    }
-
-    #[derive(Debug)]
-    struct InspectS3Indexers;
-
-    #[async_trait]
-    impl Handler<InspectS3Indexers> for IndexingService {
-        type Reply = usize;
-
-        async fn handle(
-            &mut self,
-            _: InspectS3Indexers,
-            _: &ActorContext<Self>,
-        ) -> Result<Self::Reply, ActorExitStatus> {
-            Ok(self.s3_indexers.len())
-        }
     }
 
     async fn published_splits(worker: &mut S3Indexer, index_uid: &IndexUid) -> Vec<SplitMetadata> {
@@ -273,15 +222,13 @@ mod tests {
         let (mut worker, index_uid) = fixture().await;
         register(&mut worker, &index_uid).await;
         let directory = tempfile::tempdir().unwrap();
-        let universe = Universe::new();
-        let (service, _) = spawn_service(directory.path(), &universe, &worker).await;
-        assert!(service.ask(InspectS3Indexers).await.unwrap() >= 1);
+        let service = start_service(directory.path(), &worker).await;
+        assert!(service.counters().await.num_running_s3_indexers >= 1);
         let splits = wait_for_publications(&mut worker, &index_uid, 1).await;
         assert_eq!(splits[0].num_docs, 1);
-        service.ask(StopS3Indexers).await.unwrap();
-        service.ask(StopS3Indexers).await.unwrap();
-        assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
-        universe.assert_quit().await;
+        service.stop().await;
+        service.stop().await;
+        assert_eq!(service.counters().await.num_running_s3_indexers, 0);
     }
 
     #[tokio::test]
@@ -299,14 +246,12 @@ mod tests {
             });
         worker.metastore = MetastoreServiceClient::from_mock(mock);
         let directory = tempfile::tempdir().unwrap();
-        let universe = Universe::new();
-        let (service, _) = spawn_service(directory.path(), &universe, &worker).await;
+        let service = start_service(directory.path(), &worker).await;
         tokio::time::timeout(Duration::from_secs(5), entered_rx)
             .await
             .unwrap()
             .unwrap();
-        service.ask(StopS3Indexers).await.unwrap();
-        assert_eq!(service.ask(InspectS3Indexers).await.unwrap(), 0);
-        universe.assert_quit().await;
+        service.stop().await;
+        assert_eq!(service.counters().await.num_running_s3_indexers, 0);
     }
 }

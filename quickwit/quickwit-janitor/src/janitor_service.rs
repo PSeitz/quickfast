@@ -12,79 +12,88 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
-use quickwit_actors::{
-    Actor, ActorContext, ActorExitStatus, ActorHandle, ActorState, Handler, Healthz,
-};
-use quickwit_compaction::planner::CompactionPlanner;
-use serde_json::{Value as JsonValue, json};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::actors::{DeleteTaskService, GarbageCollector, RetentionPolicyExecutor};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
+pub type HealthCheckFn = Arc<dyn Fn() -> bool + Send + Sync>;
+
+struct JanitorServiceInner {
+    shutdown: CancellationToken,
+    tasks: Mutex<Vec<JoinHandle<()>>>,
+    task_health_flags: Vec<Arc<AtomicBool>>,
+    extra_health_check: Option<HealthCheckFn>,
+}
+
+/// Manages background janitor tasks (GC, retention policy, delete task service)
+/// and reports combined liveness.
+#[derive(Clone)]
 pub struct JanitorService {
-    delete_task_service_handle: Option<ActorHandle<DeleteTaskService>>,
-    garbage_collector_handle: ActorHandle<GarbageCollector>,
-    retention_policy_executor_handle: ActorHandle<RetentionPolicyExecutor>,
-    compaction_planner_handle: Option<ActorHandle<CompactionPlanner>>,
+    inner: Arc<JanitorServiceInner>,
 }
 
 impl JanitorService {
     pub fn new(
-        delete_task_service_handle: Option<ActorHandle<DeleteTaskService>>,
-        garbage_collector_handle: ActorHandle<GarbageCollector>,
-        retention_policy_executor_handle: ActorHandle<RetentionPolicyExecutor>,
-        compaction_planner_handle: Option<ActorHandle<CompactionPlanner>>,
+        shutdown: CancellationToken,
+        tasks: Vec<(JoinHandle<()>, Arc<AtomicBool>)>,
+        extra_health_check: Option<HealthCheckFn>,
     ) -> Self {
+        let mut join_handles = Vec::with_capacity(tasks.len());
+        let mut task_health_flags = Vec::with_capacity(tasks.len());
+        for (handle, healthy_flag) in tasks {
+            join_handles.push(handle);
+            task_health_flags.push(healthy_flag);
+        }
         Self {
-            delete_task_service_handle,
-            garbage_collector_handle,
-            retention_policy_executor_handle,
-            compaction_planner_handle,
+            inner: Arc::new(JanitorServiceInner {
+                shutdown,
+                tasks: Mutex::new(join_handles),
+                task_health_flags,
+                extra_health_check,
+            }),
         }
     }
 
-    fn is_healthy(&self) -> bool {
-        let delete_task_is_not_failure: bool =
-            if let Some(delete_task_service_handle) = &self.delete_task_service_handle {
-                delete_task_service_handle.state() != ActorState::Failure
-            } else {
-                true
-            };
-        let compaction_planner_is_not_failure: bool =
-            if let Some(compaction_planner_handle) = &self.compaction_planner_handle {
-                compaction_planner_handle.state() != ActorState::Failure
-            } else {
-                true
-            };
-        delete_task_is_not_failure
-            && self.garbage_collector_handle.state() != ActorState::Failure
-            && self.retention_policy_executor_handle.state() != ActorState::Failure
-            && compaction_planner_is_not_failure
+    pub fn is_healthy(&self) -> bool {
+        let tasks_healthy = self
+            .inner
+            .task_health_flags
+            .iter()
+            .all(|flag| flag.load(Ordering::Relaxed));
+        let extra_healthy = self
+            .inner
+            .extra_health_check
+            .as_ref()
+            .is_none_or(|check| check());
+        tasks_healthy && extra_healthy
+    }
+
+    /// Cancels all janitor background tasks and waits for them to exit. Idempotent.
+    pub async fn shutdown(&self) {
+        self.inner.shutdown.cancel();
+        let handles = std::mem::take(&mut *self.inner.tasks.lock().await);
+        for handle in handles {
+            let _ = handle.await;
+        }
     }
 }
 
-#[async_trait]
-impl Actor for JanitorService {
-    type ObservableState = JsonValue;
-
-    fn name(&self) -> String {
-        "JanitorService".to_string()
-    }
-
-    fn observable_state(&self) -> Self::ObservableState {
-        json!({})
-    }
-}
-
-#[async_trait]
-impl Handler<Healthz> for JanitorService {
-    type Reply = bool;
-
-    async fn handle(
-        &mut self,
-        _message: Healthz,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<Self::Reply, ActorExitStatus> {
-        Ok(self.is_healthy())
-    }
+/// Wraps a background task handle so any early exit or panic before `shutdown` is
+/// cancelled flips the returned health flag to `false`.
+pub(crate) fn monitor_task(
+    handle: JoinHandle<()>,
+    shutdown: CancellationToken,
+) -> (JoinHandle<()>, Arc<AtomicBool>) {
+    let healthy = Arc::new(AtomicBool::new(true));
+    let healthy_clone = healthy.clone();
+    let monitor = tokio::spawn(async move {
+        let res = handle.await;
+        if res.is_err() || !shutdown.is_cancelled() {
+            healthy_clone.store(false, Ordering::Relaxed);
+        }
+    });
+    (monitor, healthy)
 }

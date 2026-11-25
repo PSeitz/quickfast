@@ -15,9 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use itertools::Itertools;
-use quickwit_actors::{Actor, ActorContext, Handler};
 use quickwit_config::IndexConfig;
 use quickwit_metastore::ListIndexesMetadataResponseExt;
 use quickwit_proto::metastore::{
@@ -25,6 +23,10 @@ use quickwit_proto::metastore::{
 };
 use quickwit_proto::types::IndexUid;
 use serde::Serialize;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::retention_policy_execution::run_execute_retention_policy;
@@ -43,36 +45,81 @@ pub struct RetentionPolicyExecutorCounters {
     pub num_expired_splits: usize,
 }
 
-#[derive(Debug)]
-struct Loop;
-
-#[derive(Debug)]
-struct Execute {
-    index_uid: IndexUid,
+struct ScheduledIndex {
+    index_config: IndexConfig,
+    next_evaluation_at: Instant,
 }
 
-/// An actor for scheduling retention policy execution on all indexes.
-/// It keeps a list of indexes that have retention policy configured
-/// in a cache and periodically update this list.
+/// Schedules retention policy execution on all indexes.
+/// Keeps a cache of indexes with a retention policy configured and periodically refreshes it.
 pub struct RetentionPolicyExecutor {
     metastore: MetastoreServiceClient,
-    /// Caches retention configs by index UID to distinguish recreated indexes.
-    index_configs: HashMap<IndexUid, IndexConfig>,
+    /// Caches retention configs and next scheduled evaluation time by index UID to distinguish
+    /// recreated indexes.
+    scheduled_indexes: HashMap<IndexUid, ScheduledIndex>,
     counters: RetentionPolicyExecutorCounters,
+    counters_tx: watch::Sender<RetentionPolicyExecutorCounters>,
 }
 
 impl RetentionPolicyExecutor {
     pub fn new(metastore: MetastoreServiceClient) -> Self {
+        let counters = RetentionPolicyExecutorCounters::default();
+        let (counters_tx, _) = watch::channel(counters.clone());
         Self {
             metastore,
-            index_configs: HashMap::new(),
-            counters: RetentionPolicyExecutorCounters::default(),
+            scheduled_indexes: HashMap::new(),
+            counters,
+            counters_tx,
         }
     }
 
-    /// Indexes refresh Loop handler logic.
-    /// Should not return an error to prevent the actor from crashing.
-    async fn handle_refresh_loop(&mut self, ctx: &ActorContext<Self>) {
+    #[cfg(test)]
+    fn subscribe_counters(&self) -> watch::Receiver<RetentionPolicyExecutorCounters> {
+        self.counters_tx.subscribe()
+    }
+
+    pub fn spawn(mut self, shutdown: CancellationToken) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            self.refresh_index_configs().await;
+            let mut next_refresh_at = Instant::now() + RUN_INTERVAL;
+            loop {
+                let next_deadline = self
+                    .scheduled_indexes
+                    .values()
+                    .map(|entry| entry.next_evaluation_at)
+                    .min()
+                    .map_or(next_refresh_at, |eval_at| eval_at.min(next_refresh_at));
+
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => break,
+                    _ = tokio::time::sleep_until(next_deadline) => {}
+                }
+
+                let now = Instant::now();
+                if now >= next_refresh_at {
+                    self.refresh_index_configs().await;
+                    next_refresh_at = Instant::now() + RUN_INTERVAL;
+                }
+
+                let due_index_uids: Vec<IndexUid> = self
+                    .scheduled_indexes
+                    .iter()
+                    .filter(|(_, entry)| entry.next_evaluation_at <= now)
+                    .map(|(index_uid, _)| index_uid.clone())
+                    .collect();
+                for index_uid in due_index_uids {
+                    if shutdown.is_cancelled() {
+                        return;
+                    }
+                    self.execute_retention_policy(&index_uid).await;
+                }
+            }
+        })
+    }
+
+    /// Refreshes the cached index retention policies from the metastore.
+    async fn refresh_index_configs(&mut self) {
         debug!("loading indexes from the metastore");
         self.counters.num_refresh_passes += 1;
 
@@ -84,6 +131,7 @@ impl RetentionPolicyExecutor {
             Ok(response) => response,
             Err(error) => {
                 error!(%error, "failed to list indexes from the metastore");
+                let _ = self.counters_tx.send(self.counters.clone());
                 return;
             }
         };
@@ -91,13 +139,14 @@ impl RetentionPolicyExecutor {
             Ok(indexes) => indexes,
             Err(error) => {
                 error!(%error, "failed to deserialize indexes metadata");
+                let _ = self.counters_tx.send(self.counters.clone());
                 return;
             }
         };
         info!("loaded {} indexes from the metastore", indexes.len());
 
         let deleted_indexes = compute_deleted_indexes(
-            self.index_configs.keys(),
+            self.scheduled_indexes.keys(),
             indexes
                 .iter()
                 .map(|index_metadata| &index_metadata.index_uid),
@@ -105,132 +154,83 @@ impl RetentionPolicyExecutor {
         if !deleted_indexes.is_empty() {
             debug!(index_uids=%deleted_indexes.iter().join(", "), "deleting indexes from cache");
             for deleted_index_uid in deleted_indexes {
-                self.index_configs.remove(&deleted_index_uid);
+                self.scheduled_indexes.remove(&deleted_index_uid);
             }
         }
+        let now = Instant::now();
         for index_metadata in indexes {
             let index_uid = index_metadata.index_uid.clone();
             let index_config = index_metadata.into_index_config();
-            // We only care about indexes with a retention policy configured.
             let retention_policy = match &index_config.retention_policy_opt {
                 Some(policy) => policy,
                 None => {
-                    // Remove the index from the cache if it exist.
-                    // In case where the retention policy was removed this index might have
-                    // been inserted in the cache from a previous iteration.
-                    self.index_configs.remove(&index_uid);
+                    self.scheduled_indexes.remove(&index_uid);
                     continue;
                 }
             };
 
-            // Insert or update the index in the cache.
-            if let Some(value) = self.index_configs.get_mut(&index_uid) {
-                // Update the cache index entry in case the retention policy was updated.
-                *value = index_config;
+            if let Some(entry) = self.scheduled_indexes.get_mut(&index_uid) {
+                entry.index_config = index_config;
                 continue;
             }
 
             if let Ok(next_interval) = retention_policy.duration_until_next_evaluation() {
-                let message = Execute {
-                    index_uid: index_uid.clone(),
-                };
                 info!(index_id=?index_config.index_id, scheduled_in=?next_interval, "retention-policy-schedule-operation");
-                // Inserts & schedule the index's first retention policy execution.
-                self.index_configs.insert(index_uid, index_config);
-                ctx.schedule_self_msg(next_interval, message);
+                self.scheduled_indexes.insert(
+                    index_uid,
+                    ScheduledIndex {
+                        index_config,
+                        next_evaluation_at: now + next_interval,
+                    },
+                );
             } else {
-                error!(index_id=%index_config.index_id, "Couldn't extract the index next schedule time.")
+                error!(index_id=%index_config.index_id, "couldn't extract the index next schedule time");
             }
         }
-    }
-}
-
-#[async_trait]
-impl Actor for RetentionPolicyExecutor {
-    type ObservableState = RetentionPolicyExecutorCounters;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        self.counters.clone()
+        let _ = self.counters_tx.send(self.counters.clone());
     }
 
-    fn name(&self) -> String {
-        "RetentionPolicyExecutor".to_string()
-    }
-
-    async fn initialize(
-        &mut self,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), quickwit_actors::ActorExitStatus> {
-        self.handle(Loop, ctx).await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<Loop> for RetentionPolicyExecutor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: Loop,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), quickwit_actors::ActorExitStatus> {
-        self.handle_refresh_loop(ctx).await;
-        ctx.schedule_self_msg(RUN_INTERVAL, Loop);
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<Execute> for RetentionPolicyExecutor {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        message: Execute,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), quickwit_actors::ActorExitStatus> {
-        info!(index_id=%message.index_uid.index_id, "retention-policy-execute-operation");
+    async fn execute_retention_policy(&mut self, index_uid: &IndexUid) {
+        info!(index_id=%index_uid.index_id, "retention-policy-execute-operation");
         self.counters.num_execution_passes += 1;
 
-        let index_config = match self.index_configs.get(&message.index_uid) {
-            Some(config) => config,
-            None => {
-                debug!(index_uid=%message.index_uid, "the index was deleted, recreated, or no longer has a retention policy");
-                return Ok(());
-            }
+        let Some(entry) = self.scheduled_indexes.get(index_uid) else {
+            debug!(index_uid=%index_uid, "the index was deleted, recreated, or no longer has a retention policy");
+            let _ = self.counters_tx.send(self.counters.clone());
+            return;
         };
 
-        let retention_policy = index_config
+        let retention_policy = entry
+            .index_config
             .retention_policy_opt
             .as_ref()
-            .expect("Expected index to have retention policy configure.");
+            .expect("Expected index to have retention policy configured.")
+            .clone();
+        let index_id = entry.index_config.index_id.clone();
 
         let execution_result = run_execute_retention_policy(
-            message.index_uid.clone(),
+            index_uid.clone(),
             self.metastore.clone(),
-            retention_policy,
-            ctx,
+            &retention_policy,
         )
         .await;
         match execution_result {
             Ok(splits) => self.counters.num_expired_splits += splits.len(),
             Err(error) => {
-                error!(index_id=%message.index_uid.index_id, error=?error, "Failed to execute the retention policy on the index.")
+                error!(index_id=%index_uid.index_id, error=?error, "failed to execute the retention policy on the index");
             }
         }
 
         if let Ok(next_interval) = retention_policy.duration_until_next_evaluation() {
-            info!(index_id=?index_config.index_id, scheduled_in=?next_interval, "retention-policy-schedule-operation");
-            ctx.schedule_self_msg(next_interval, message);
+            info!(index_id=?index_id, scheduled_in=?next_interval, "retention-policy-schedule-operation");
+            if let Some(entry) = self.scheduled_indexes.get_mut(index_uid) {
+                entry.next_evaluation_at = Instant::now() + next_interval;
+            }
         } else {
-            // Since we have failed to schedule next execution for this index,
-            // we remove it from the cache for it to be retried next time it gets
-            // added back by the RetentionPolicyExecutor cache refresh loop.
-            self.index_configs.remove(&message.index_uid);
-            error!(index_id=%message.index_uid.index_id, "couldn't extract the index next schedule interval");
+            self.scheduled_indexes.remove(index_uid);
+            error!(index_id=%index_uid.index_id, "couldn't extract the index next schedule interval");
         }
-        Ok(())
+        let _ = self.counters_tx.send(self.counters.clone());
     }
 }
 
@@ -249,7 +249,6 @@ mod tests {
     use std::ops::RangeInclusive;
 
     use mockall::Sequence;
-    use quickwit_actors::Universe;
     use quickwit_common::ServiceStream;
     use quickwit_config::{HumanDuration, RetentionPolicy};
     use quickwit_metastore::{
@@ -262,38 +261,33 @@ mod tests {
 
     use super::*;
 
-    #[derive(Debug)]
-    struct AssertState(Vec<(&'static str, Option<&'static str>)>);
+    fn assert_scheduled_indexes(
+        executor: &RetentionPolicyExecutor,
+        expected: &[(&'static str, Option<&'static str>)],
+    ) {
+        let indexes_set: HashSet<_> = executor
+            .scheduled_indexes
+            .values()
+            .map(|entry| {
+                (
+                    &entry.index_config.index_id,
+                    &entry.index_config.retention_policy_opt,
+                )
+            })
+            .collect();
 
-    #[async_trait]
-    impl Handler<AssertState> for RetentionPolicyExecutor {
-        type Reply = ();
-
-        async fn handle(
-            &mut self,
-            message: AssertState,
-            _ctx: &ActorContext<Self>,
-        ) -> Result<Self::Reply, quickwit_actors::ActorExitStatus> {
-            let indexes_set: HashSet<_> = self
-                .index_configs
-                .values()
-                .map(|im| (&im.index_id, &im.retention_policy_opt))
-                .collect();
-
-            let expected_indexes: Vec<IndexConfig> = make_indexes(&message.0)
-                .into_iter()
-                .map(IndexMetadata::into_index_config)
-                .collect();
-            let expected_indexes_set: HashSet<_> = expected_indexes
-                .iter()
-                .map(|im| (&im.index_id, &im.retention_policy_opt))
-                .collect();
-            assert_eq!(
-                indexes_set, expected_indexes_set,
-                "Mismatch set of indexes."
-            );
-            Ok(())
-        }
+        let expected_indexes: Vec<IndexConfig> = make_indexes(expected)
+            .into_iter()
+            .map(IndexMetadata::into_index_config)
+            .collect();
+        let expected_indexes_set: HashSet<_> = expected_indexes
+            .iter()
+            .map(|im| (&im.index_id, &im.retention_policy_opt))
+            .collect();
+        assert_eq!(
+            indexes_set, expected_indexes_set,
+            "Mismatch set of indexes."
+        );
     }
 
     const EVALUATION_SCHEDULE: &str = "hourly";
@@ -394,41 +388,33 @@ mod tests {
                 Ok(ListIndexesMetadataResponse::for_test(indexes_metadata))
             });
 
-        let retention_policy_executor =
+        let mut retention_policy_executor =
             RetentionPolicyExecutor::new(MetastoreServiceClient::from_mock(mock_metastore));
-        let universe = Universe::with_accelerated_time();
-        let (mailbox, handle) = universe.spawn_builder().spawn(retention_policy_executor);
 
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_refresh_passes, 1);
-        mailbox
-            .ask(AssertState(vec![
-                ("index-1", Some("1 hour")),
-                ("index-2", Some("1 hour")),
-            ]))
-            .await?;
+        retention_policy_executor.refresh_index_configs().await;
+        assert_eq!(retention_policy_executor.counters.num_refresh_passes, 1);
+        assert_scheduled_indexes(
+            &retention_policy_executor,
+            &[("index-1", Some("1 hour")), ("index-2", Some("1 hour"))],
+        );
 
-        universe.sleep(RUN_INTERVAL + Duration::from_secs(5)).await;
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_refresh_passes, 2);
-        mailbox
-            .ask(AssertState(vec![
+        retention_policy_executor.refresh_index_configs().await;
+        assert_eq!(retention_policy_executor.counters.num_refresh_passes, 2);
+        assert_scheduled_indexes(
+            &retention_policy_executor,
+            &[
                 ("index-1", Some("1 hour")),
                 ("index-2", Some("2 hour")),
                 ("index-3", Some("1 hour")),
-            ]))
-            .await?;
+            ],
+        );
 
-        universe.sleep(RUN_INTERVAL + Duration::from_secs(5)).await;
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_refresh_passes, 3);
-        mailbox
-            .ask(AssertState(vec![
-                ("index-2", Some("1 hour")),
-                ("index-4", Some("1 hour")),
-            ]))
-            .await?;
-        universe.assert_quit().await;
+        retention_policy_executor.refresh_index_configs().await;
+        assert_eq!(retention_policy_executor.counters.num_refresh_passes, 3);
+        assert_scheduled_indexes(
+            &retention_policy_executor,
+            &[("index-2", Some("1 hour")), ("index-4", Some("1 hour"))],
+        );
 
         Ok(())
     }
@@ -473,35 +459,28 @@ mod tests {
         mock_metastore.expect_list_splits().times(0);
         mock_metastore.expect_mark_splits_for_deletion().times(0);
 
-        let retention_policy_executor =
+        let mut retention_policy_executor =
             RetentionPolicyExecutor::new(MetastoreServiceClient::from_mock(mock_metastore));
-        let universe = Universe::with_accelerated_time();
-        let (mailbox, handle) = universe.spawn_builder().spawn(retention_policy_executor);
 
         // First refresh: the index exists with its original UID.
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_refresh_passes, 1);
+        retention_policy_executor.refresh_index_configs().await;
+        assert_eq!(retention_policy_executor.counters.num_refresh_passes, 1);
 
         // The index is deleted and recreated under the same ID, so the next refresh sees a new UID.
-        mailbox.send_message(Loop).await?;
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_refresh_passes, 2);
+        retention_policy_executor.refresh_index_configs().await;
+        assert_eq!(retention_policy_executor.counters.num_refresh_passes, 2);
 
-        // The execution scheduled before the recreation still carries the previous UID.
-        mailbox
-            .send_message(Execute {
-                index_uid: previous_index_uid,
-            })
-            .await?;
-        let counters = handle.process_pending_and_observe().await.state;
-        assert_eq!(counters.num_execution_passes, 1);
-        assert_eq!(counters.num_expired_splits, 0);
+        // An execution targeting the previous UID is ignored.
+        retention_policy_executor
+            .execute_retention_policy(&previous_index_uid)
+            .await;
+        assert_eq!(retention_policy_executor.counters.num_execution_passes, 1);
+        assert_eq!(retention_policy_executor.counters.num_expired_splits, 0);
 
-        universe.assert_quit().await;
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_retention_policy_execution_calls_dependencies() -> anyhow::Result<()> {
         let mut mock_metastore = MockMetastoreService::new();
         mock_metastore
@@ -552,18 +531,28 @@ mod tests {
 
         let retention_policy_executor =
             RetentionPolicyExecutor::new(MetastoreServiceClient::from_mock(mock_metastore));
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handle) = universe.spawn_builder().spawn(retention_policy_executor);
+        let mut counters_rx = retention_policy_executor.subscribe_counters();
+        let shutdown = CancellationToken::new();
+        let handle = retention_policy_executor.spawn(shutdown.clone());
 
-        let counters = handle.process_pending_and_observe().await.state;
+        let counters = counters_rx
+            .wait_for(|counters| counters.num_refresh_passes >= 1)
+            .await
+            .unwrap()
+            .clone();
         assert_eq!(counters.num_execution_passes, 0);
         assert_eq!(counters.num_expired_splits, 0);
 
-        universe.sleep(shift_time_by()).await;
-        let counters = handle.process_pending_and_observe().await.state;
+        tokio::time::advance(shift_time_by()).await;
+        let counters = counters_rx
+            .wait_for(|counters| counters.num_execution_passes >= 2)
+            .await
+            .unwrap()
+            .clone();
         assert_eq!(counters.num_execution_passes, 2);
         assert_eq!(counters.num_expired_splits, 2);
-        universe.assert_quit().await;
+        shutdown.cancel();
+        handle.await.unwrap();
 
         Ok(())
     }

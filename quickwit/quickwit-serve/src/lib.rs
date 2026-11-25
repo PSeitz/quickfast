@@ -58,7 +58,7 @@ pub(crate) use decompression::Body;
 pub use format::BodyFormat;
 use futures::StreamExt;
 use itertools::Itertools;
-use quickwit_actors::{ActorExitStatus, ActorHandle, Mailbox, Universe};
+use quickwit_actors::{ActorExitStatus, ActorHandle, ActorState, Mailbox, Universe};
 use quickwit_cluster::{
     Cluster, ClusterChange, ClusterChangeStream, ClusterNode, start_cluster_service,
 };
@@ -137,13 +137,13 @@ struct QuickwitServices {
     pub metastore_server_opt: Option<MetastoreServiceClient>,
     pub metastore_client: MetastoreServiceClient,
     pub index_manager: IndexManager,
-    pub indexing_service_opt: Option<Mailbox<IndexingService>>,
+    pub indexing_service_opt: Option<IndexingService>,
     pub ingest_router_service: IngestRouterClient,
     ingesthree_service_opt: Option<quickwit_ingest::ingesthree::IngesthreeService>,
 
     pub compaction_service_client_opt: Option<CompactionPlannerServiceClient>,
     pub compactor_service_opt: Option<Mailbox<CompactorService>>,
-    pub janitor_service_opt: Option<Mailbox<JanitorService>>,
+    pub janitor_service_opt: Option<JanitorService>,
     pub jaeger_service_opt: Option<JaegerService>,
     pub otlp_logs_service_opt: Option<OtlpGrpcLogsService>,
 
@@ -273,10 +273,11 @@ async fn shutdown_signal_handler(
     shutdown_token: CancellationToken,
     universe: Universe,
     ingesthree_queue_opt: Option<quickwit_ingest::ingesthree::WriteQueue>,
-    indexing_service_opt: Option<Mailbox<IndexingService>>,
+    indexing_service_opt: Option<IndexingService>,
     ingester_decommission_timeout: Duration,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
     compactor_decommission_timeout: Duration,
+    janitor_service_opt: Option<JanitorService>,
     grpc_shutdown_trigger_tx: oneshot::Sender<()>,
     rest_shutdown_trigger_tx: oneshot::Sender<()>,
     health_shutdown_trigger_tx_opt: Option<oneshot::Sender<()>>,
@@ -297,6 +298,9 @@ async fn shutdown_signal_handler(
             .expect("file intake starts only alongside the indexing service");
         ingesthree::shutdown(queue, indexing_service, ingester_decommission_timeout).await;
     }
+    if let Some(indexing_service) = &indexing_service_opt {
+        indexing_service.stop().await;
+    }
     let compactor_status_rx_opt = notify_compactor_decommission(compactor_service_opt.as_ref())
         .await
         .unwrap_or_else(|error| {
@@ -308,6 +312,9 @@ async fn shutdown_signal_handler(
             .await
     {
         error!("failed to decommission compactor gracefully: {:?}", error);
+    }
+    if let Some(janitor_service) = &janitor_service_opt {
+        janitor_service.shutdown().await;
     }
     let actor_exit_statuses = universe.quit().await;
 
@@ -385,7 +392,6 @@ pub async fn serve_quickwit(
 
     let indexing_service_opt = if node_config.is_service_enabled(QuickwitService::Indexer) {
         let indexing_service = start_indexing_service(
-            &universe,
             &node_config,
             primary_metastore_client.clone(),
             storage_resolver.clone(),
@@ -409,6 +415,9 @@ pub async fn serve_quickwit(
                 &storage_resolver,
             ) => result?,
             _ = &mut shutdown_signal => {
+                if let Some(indexing_service) = &indexing_service_opt {
+                    indexing_service.stop().await;
+                }
                 cluster.initiate_shutdown().await?;
                 return Ok(universe.quit().await);
             }
@@ -547,15 +556,19 @@ pub async fn serve_quickwit(
         };
 
     let janitor_service_opt = if node_config.is_service_enabled(QuickwitService::Janitor) {
+        let planner_health_check = compaction_planner_handle_opt.map(|handle| {
+            let check: quickwit_janitor::HealthCheckFn =
+                Arc::new(move || handle.state() != ActorState::Failure);
+            check
+        });
         let janitor_service = start_janitor_service(
-            &universe,
             &node_config,
             primary_metastore_client.clone(),
             search_job_placer,
             storage_resolver.clone(),
             event_broker.clone(),
             !get_bool_from_env(DISABLE_DELETE_TASK_SERVICE_ENV_KEY, false),
-            compaction_planner_handle_opt,
+            planner_health_check,
         )
         .await
         .context("failed to start janitor service")?;
@@ -647,7 +660,7 @@ pub async fn serve_quickwit(
         },
         compaction_service_client_opt,
         compactor_service_opt: compactor_service_opt.clone(),
-        janitor_service_opt,
+        janitor_service_opt: janitor_service_opt.clone(),
         jaeger_service_opt,
         otlp_logs_service_opt,
         otlp_traces_service_opt,
@@ -751,6 +764,7 @@ pub async fn serve_quickwit(
         ingester_decommission_timeout,
         compactor_service_opt,
         compactor_decommission_timeout,
+        janitor_service_opt,
         grpc_shutdown_trigger_tx,
         rest_shutdown_trigger_tx,
         health_shutdown_trigger_tx_opt,

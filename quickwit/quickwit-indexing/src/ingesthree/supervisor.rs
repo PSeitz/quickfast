@@ -31,12 +31,6 @@ const IDLE_MAX: Duration = Duration::from_secs(5);
 const RESTART_MIN: Duration = Duration::from_secs(1);
 const RESTART_MAX: Duration = Duration::from_secs(30);
 
-/// Stops file polling and waits for all worker tasks to exit. Send with `Mailbox::ask`
-/// before shutting down the actor universe. In-flight assignments remain retryable.
-/// Blocking indexing work observes cancellation between operations and retains its scratch root.
-#[derive(Debug)]
-pub struct StopS3Indexers;
-
 /// Owns the polling task, including its restart loop. Aborting this task cancels both
 /// indexing and restart delays. Dropping the service also stops the worker.
 pub(crate) struct S3IndexerSupervisor {

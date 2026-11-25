@@ -17,12 +17,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
-use quickwit_actors::Mailbox;
 use quickwit_cluster::Cluster;
 use quickwit_common::pubsub::{Event, EventBroker, EventSubscriber, EventSubscriptionHandle};
 use quickwit_config::NodeConfig;
 use quickwit_indexing::actors::IndexingService;
-use quickwit_indexing::ingesthree::StopS3Indexers;
 use quickwit_ingest::ingesthree::{Uploader, WriteQueue};
 use quickwit_proto::metastore::{
     AddSourceRequest, CreateIndexRequest, DeleteIndexRequest, DeleteSourceRequest,
@@ -115,17 +113,15 @@ pub(crate) async fn watch_writer(
 /// eligible for another indexer. A drain timeout retains local inputs for recovery.
 pub(crate) async fn shutdown(
     queue: &WriteQueue,
-    indexing_service: &Mailbox<IndexingService>,
+    indexing_service: &IndexingService,
     timeout: Duration,
 ) {
     let (worker_result, drain_result) = tokio::join!(
-        tokio::time::timeout(timeout, indexing_service.ask(StopS3Indexers)),
+        tokio::time::timeout(timeout, indexing_service.stop()),
         tokio::time::timeout(timeout, queue.drain()),
     );
-    match worker_result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => error!(?error, "failed to stop ingesthree indexing worker"),
-        Err(error) => error!(?error, "timed out stopping ingesthree indexing worker"),
+    if let Err(error) = worker_result {
+        error!(?error, "timed out stopping ingesthree indexing worker");
     }
     match drain_result {
         Ok(Ok(())) => info!("ingesthree intake drained"),

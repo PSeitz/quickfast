@@ -15,17 +15,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
-use async_trait::async_trait;
-use quickwit_actors::{
-    Actor, ActorContext, ActorExitStatus, ActorHandle, Handler, Supervisor, SupervisorState,
-};
-use quickwit_common::KillSwitch;
 use quickwit_common::io::IoControls;
 use quickwit_common::pubsub::EventBroker;
-use quickwit_common::temp_dir::{self};
 use quickwit_common::uri::Uri;
+use quickwit_common::{KillSwitch, temp_dir};
 use quickwit_config::build_doc_mapper;
 use quickwit_indexing::IndexingSplitStore;
 use quickwit_indexing::actors::{MergeExecutionContext, execute_merge_operation};
@@ -36,33 +30,53 @@ use quickwit_proto::metastore::{IndexMetadataRequest, MetastoreService, Metastor
 use quickwit_proto::types::{IndexUid, NodeId};
 use quickwit_search::SearchJobPlacer;
 use quickwit_storage::Storage;
-use serde::Serialize;
 use tantivy::TrackedObject;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use super::delete_task_planner::DeleteTaskPlanner;
-use crate::actors::delete_task_planner::DeleteTaskPlannerState;
 
-const OBSERVE_PIPELINE_INTERVAL: Duration = if cfg!(any(test, feature = "testsuite")) {
-    Duration::from_millis(500)
-} else {
-    Duration::from_mins(1)
-};
-
-struct DeletePipelineHandle {
-    delete_task_planner: ActorHandle<Supervisor<DeleteTaskPlanner>>,
-    worker_handle: JoinHandle<()>,
+pub struct DeleteTaskPipelineHandle {
+    shutdown: CancellationToken,
     kill_switch: KillSwitch,
+    planner_handle: JoinHandle<()>,
+    worker_handle: JoinHandle<()>,
+    #[cfg(test)]
+    num_planner_errors: Arc<AtomicU64>,
+    #[cfg(test)]
     num_execution_errors: Arc<AtomicU64>,
 }
 
-/// Statistical state for a delete task pipeline.
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct DeleteTaskPipelineState {
-    pub delete_task_planner: SupervisorState<DeleteTaskPlannerState>,
-    pub num_execution_errors: u64,
+impl DeleteTaskPipelineHandle {
+    /// Stops the planner and drains any already-queued delete operations.
+    #[cfg(test)]
+    pub async fn stop_gracefully(self) {
+        self.shutdown.cancel();
+        let _ = self.planner_handle.await;
+        let _ = self.worker_handle.await;
+    }
+
+    /// Cancels in-flight delete operations immediately and awaits task teardown.
+    pub async fn kill(self) {
+        self.kill_switch.kill();
+        self.shutdown.cancel();
+        self.planner_handle.abort();
+        self.worker_handle.abort();
+        let _ = self.planner_handle.await;
+        let _ = self.worker_handle.await;
+    }
+
+    #[cfg(test)]
+    pub fn num_planner_errors(&self) -> u64 {
+        self.num_planner_errors.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub fn num_execution_errors(&self) -> u64 {
+        self.num_execution_errors.load(Ordering::Relaxed)
+    }
 }
 
 pub struct DeleteTaskPipeline {
@@ -71,44 +85,9 @@ pub struct DeleteTaskPipeline {
     search_job_placer: SearchJobPlacer,
     index_storage: Arc<dyn Storage>,
     delete_service_task_dir: PathBuf,
-    handles: Option<DeletePipelineHandle>,
     max_concurrent_split_uploads: usize,
-    state: DeleteTaskPipelineState,
     delete_execution_semaphore: Arc<Semaphore>,
     event_broker: EventBroker,
-}
-
-#[async_trait]
-impl Actor for DeleteTaskPipeline {
-    type ObservableState = DeleteTaskPipelineState;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        self.state.clone()
-    }
-
-    fn name(&self) -> String {
-        "DeleteTaskPipeline".to_string()
-    }
-
-    async fn initialize(&mut self, ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        self.spawn_pipeline(ctx).await?;
-        self.handle(Observe, ctx).await?;
-        Ok(())
-    }
-
-    async fn finalize(
-        &mut self,
-        _exit_status: &ActorExitStatus,
-        _ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<()> {
-        if let Some(handles) = self.handles.take() {
-            handles.kill_switch.kill();
-            handles.delete_task_planner.quit().await;
-            handles.worker_handle.abort();
-            let _ = handles.worker_handle.await;
-        }
-        Ok(())
-    }
 }
 
 impl DeleteTaskPipeline {
@@ -129,15 +108,16 @@ impl DeleteTaskPipeline {
             search_job_placer,
             index_storage,
             delete_service_task_dir,
-            handles: Default::default(),
             max_concurrent_split_uploads,
-            state: DeleteTaskPipelineState::default(),
             delete_execution_semaphore,
             event_broker,
         }
     }
 
-    pub async fn spawn_pipeline(&mut self, ctx: &ActorContext<Self>) -> anyhow::Result<()> {
+    pub async fn spawn(
+        self,
+        parent_shutdown: &CancellationToken,
+    ) -> anyhow::Result<DeleteTaskPipelineHandle> {
         info!(
             index_uid=%self.index_uid,
             root_dir=%self.delete_service_task_dir.to_str().unwrap(),
@@ -201,14 +181,20 @@ impl DeleteTaskPipeline {
             self.search_job_placer.clone(),
             delete_op_tx,
         );
-        let (_, task_planner_supervisor_handler) = ctx.spawn_actor().supervise(task_planner);
-        self.handles = Some(DeletePipelineHandle {
-            delete_task_planner: task_planner_supervisor_handler,
-            worker_handle,
+        let shutdown = parent_shutdown.child_token();
+        let num_planner_errors = Arc::new(AtomicU64::new(0));
+        let planner_handle =
+            tokio::spawn(task_planner.run(shutdown.clone(), num_planner_errors.clone()));
+        Ok(DeleteTaskPipelineHandle {
+            shutdown,
             kill_switch,
+            planner_handle,
+            worker_handle,
+            #[cfg(test)]
+            num_planner_errors,
+            #[cfg(test)]
             num_execution_errors,
-        });
-        Ok(())
+        })
     }
 }
 
@@ -233,36 +219,11 @@ async fn run_delete_worker(
     }
 }
 
-#[derive(Debug)]
-struct Observe;
-
-#[async_trait]
-impl Handler<Observe> for DeleteTaskPipeline {
-    type Reply = ();
-    async fn handle(
-        &mut self,
-        _: Observe,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        if let Some(handles) = &self.handles {
-            handles.delete_task_planner.refresh_observe();
-            self.state = DeleteTaskPipelineState {
-                delete_task_planner: handles.delete_task_planner.last_observation().clone(),
-                num_execution_errors: handles.num_execution_errors.load(Ordering::Relaxed),
-            }
-        }
-        ctx.schedule_self_msg(OBSERVE_PIPELINE_INTERVAL, Observe);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use async_trait::async_trait;
-    use quickwit_actors::{Handler, Universe};
     use quickwit_common::pubsub::EventBroker;
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_common::test_utils::wait_until_predicate;
@@ -274,27 +235,9 @@ mod tests {
         MockSearchService, SearchError, SearchJobPlacer, searcher_pool_for_test,
     };
     use tokio::sync::Semaphore;
+    use tokio_util::sync::CancellationToken;
 
-    use super::{ActorContext, ActorExitStatus, DeleteTaskPipeline, OBSERVE_PIPELINE_INTERVAL};
-
-    #[derive(Debug)]
-    struct GracefulShutdown;
-
-    #[async_trait]
-    impl Handler<GracefulShutdown> for DeleteTaskPipeline {
-        type Reply = ();
-        async fn handle(
-            &mut self,
-            _: GracefulShutdown,
-            _: &ActorContext<Self>,
-        ) -> Result<(), ActorExitStatus> {
-            if let Some(handles) = self.handles.take() {
-                handles.delete_task_planner.quit().await;
-                let _ = handles.worker_handle.await;
-            }
-            Err(ActorExitStatus::Success)
-        }
-    }
+    use super::DeleteTaskPipeline;
 
     #[tokio::test]
     async fn test_delete_pipeline_simple() -> anyhow::Result<()> {
@@ -320,7 +263,6 @@ mod tests {
         )
         .await
         .unwrap();
-        let universe: &Universe = test_sandbox.universe();
         let index_uid = test_sandbox.index_uid();
         let docs = vec![
             serde_json::json!({"body": "info", "ts": 0 }),
@@ -364,6 +306,7 @@ mod tests {
         let searcher_pool = searcher_pool_for_test([("127.0.0.1:1001", mock_search_service)]);
         let search_job_placer = SearchJobPlacer::new(searcher_pool);
         let delete_service_task_dir = TempDirectory::for_test();
+        let shutdown = CancellationToken::new();
         let pipeline = DeleteTaskPipeline::new(
             test_sandbox.index_uid(),
             metastore.clone(),
@@ -373,10 +316,10 @@ mod tests {
             4,
             Arc::new(Semaphore::new(3)),
             EventBroker::default(),
-        );
+        )
+        .spawn(&shutdown)
+        .await?;
 
-        let (pipeline_mailbox, pipeline_handler) = universe.spawn_builder().spawn(pipeline);
-        let _ = pipeline_handler.process_pending_and_observe().await.state;
         wait_until_predicate(
             || {
                 let metastore = metastore.clone();
@@ -402,11 +345,9 @@ mod tests {
         )
         .await
         .expect("the split with the delete applied should be published");
-        universe.sleep(OBSERVE_PIPELINE_INTERVAL * 2).await;
-        let pipeline_state = pipeline_handler.process_pending_and_observe().await.state;
-        assert_eq!(pipeline_state.delete_task_planner.metrics.num_errors, 1);
-        assert_eq!(pipeline_state.num_execution_errors, 0);
-        let _ = pipeline_mailbox.ask(GracefulShutdown).await;
+        assert_eq!(pipeline.num_planner_errors(), 1);
+        assert_eq!(pipeline.num_execution_errors(), 0);
+        pipeline.stop_gracefully().await;
 
         let splits = metastore
             .list_splits(ListSplitsRequest::try_from_index_uid(index_uid).unwrap())
@@ -421,7 +362,6 @@ mod tests {
             .find(|split| split.split_state == SplitState::Published)
             .unwrap();
         assert_eq!(published_split.split_metadata.delete_opstamp, 1);
-        test_sandbox.assert_quit().await;
         Ok(())
     }
 
@@ -440,7 +380,6 @@ mod tests {
         let test_sandbox = TestSandbox::create(index_id, doc_mapping_yaml, "{}", &["body"])
             .await
             .unwrap();
-        let universe: &Universe = test_sandbox.universe();
         let metastore = test_sandbox.metastore();
         let mut mock_search_service = MockSearchService::new();
         mock_search_service
@@ -462,6 +401,7 @@ mod tests {
         let searcher_pool = searcher_pool_for_test([("127.0.0.1:1001", mock_search_service)]);
         let search_job_placer = SearchJobPlacer::new(searcher_pool);
         let delete_service_task_dir = TempDirectory::for_test();
+        let shutdown = CancellationToken::new();
         let pipeline = DeleteTaskPipeline::new(
             test_sandbox.index_uid(),
             metastore.clone(),
@@ -471,15 +411,11 @@ mod tests {
             4,
             Arc::new(Semaphore::new(3)),
             EventBroker::default(),
-        );
+        )
+        .spawn(&shutdown)
+        .await?;
 
-        let (_pipeline_mailbox, pipeline_handler) = universe.spawn_builder().spawn(pipeline);
-        pipeline_handler.quit().await;
-        let observations = universe.observe(OBSERVE_PIPELINE_INTERVAL).await;
-        assert!(observations.into_iter().all(
-            |observation| observation.type_name != std::any::type_name::<DeleteTaskPipeline>()
-        ));
-        test_sandbox.assert_quit().await;
+        pipeline.kill().await;
         Ok(())
     }
 }

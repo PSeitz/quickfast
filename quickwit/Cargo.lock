@@ -7118,7 +7118,6 @@ dependencies = [
  "percent-encoding",
  "proptest",
  "prost 0.14.4",
- "quickwit-actors",
  "quickwit-aws",
  "quickwit-cluster",
  "quickwit-common",
@@ -7272,13 +7271,10 @@ name = "quickwit-janitor"
 version = "0.9.3"
 dependencies = [
  "anyhow",
- "async-trait",
  "futures",
  "itertools 0.15.0",
  "mockall",
- "quickwit-actors",
  "quickwit-common",
- "quickwit-compaction",
  "quickwit-config",
  "quickwit-doc-mapper",
  "quickwit-index-management",
@@ -7296,6 +7292,7 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "tokio-util",
  "tracing",
  "utoipa",
 ]

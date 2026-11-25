@@ -17,10 +17,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, ActorHandle, Handler};
 use quickwit_common::pubsub::EventBroker;
-use quickwit_common::temp_dir::{self};
+use quickwit_common::temp_dir;
 use quickwit_config::IndexConfig;
 use quickwit_metastore::{IndexMetadataResponseExt, ListIndexesMetadataResponseExt};
 use quickwit_proto::metastore::{
@@ -30,10 +28,12 @@ use quickwit_proto::types::IndexUid;
 use quickwit_search::SearchJobPlacer;
 use quickwit_storage::StorageResolver;
 use serde::Serialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, watch};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use super::delete_task_pipeline::DeleteTaskPipeline;
+use super::delete_task_pipeline::{DeleteTaskPipeline, DeleteTaskPipelineHandle};
 
 pub const DELETE_SERVICE_TASK_DIR_NAME: &str = "delete_task_service";
 
@@ -45,7 +45,7 @@ const UPDATE_PIPELINES_INTERVAL: Duration = if cfg!(any(test, feature = "testsui
     Duration::from_secs(30)
 };
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct DeleteTaskServiceState {
     pub num_running_pipelines: usize,
 }
@@ -55,10 +55,11 @@ pub struct DeleteTaskService {
     search_job_placer: SearchJobPlacer,
     storage_resolver: StorageResolver,
     delete_service_task_dir: PathBuf,
-    pipeline_handles_by_index_uid: HashMap<IndexUid, ActorHandle<DeleteTaskPipeline>>,
+    pipeline_handles_by_index_uid: HashMap<IndexUid, DeleteTaskPipelineHandle>,
     max_concurrent_split_uploads: usize,
     event_broker: EventBroker,
     delete_execution_semaphore: Arc<Semaphore>,
+    state_tx: watch::Sender<DeleteTaskServiceState>,
 }
 
 impl DeleteTaskService {
@@ -74,6 +75,7 @@ impl DeleteTaskService {
         let delete_service_task_path = data_dir_path.join(DELETE_SERVICE_TASK_DIR_NAME);
         let delete_service_task_dir =
             temp_dir::create_or_purge_directory(delete_service_task_path.as_path()).await?;
+        let (state_tx, _) = watch::channel(DeleteTaskServiceState::default());
         Ok(Self {
             metastore,
             search_job_placer,
@@ -83,34 +85,39 @@ impl DeleteTaskService {
             max_concurrent_split_uploads,
             delete_execution_semaphore,
             event_broker,
+            state_tx,
         })
     }
-}
 
-#[async_trait]
-impl Actor for DeleteTaskService {
-    type ObservableState = DeleteTaskServiceState;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        DeleteTaskServiceState {
-            num_running_pipelines: self.pipeline_handles_by_index_uid.len(),
-        }
+    #[cfg(test)]
+    fn subscribe_state(&self) -> watch::Receiver<DeleteTaskServiceState> {
+        self.state_tx.subscribe()
     }
 
-    fn name(&self) -> String {
-        "DeleteTaskService".to_string()
+    pub fn spawn(mut self, shutdown: CancellationToken) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                if let Err(error) = self.update_pipeline_handles(&shutdown).await {
+                    error!(error=%error, "delete task pipelines update failed");
+                }
+                let _ = self.state_tx.send(DeleteTaskServiceState {
+                    num_running_pipelines: self.pipeline_handles_by_index_uid.len(),
+                });
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => break,
+                    _ = tokio::time::sleep(UPDATE_PIPELINES_INTERVAL) => {}
+                }
+            }
+            for (_, pipeline_handle) in self.pipeline_handles_by_index_uid.drain() {
+                pipeline_handle.kill().await;
+            }
+        })
     }
 
-    async fn initialize(&mut self, ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        self.handle(UpdatePipelines, ctx).await?;
-        Ok(())
-    }
-}
-
-impl DeleteTaskService {
     pub async fn update_pipeline_handles(
         &mut self,
-        ctx: &ActorContext<Self>,
+        shutdown: &CancellationToken,
     ) -> anyhow::Result<()> {
         let mut index_config_by_index_id: HashMap<IndexUid, IndexConfig> = self
             .metastore
@@ -140,7 +147,7 @@ impl DeleteTaskService {
                 .pipeline_handles_by_index_uid
                 .remove(deleted_index_uid)
                 .expect("Handle must be present.");
-            // Kill the pipeline, this avoids to wait a long time for a delete operation to finish.
+            // Kill the pipeline to avoid waiting for a long delete operation on a deleted index.
             pipeline_handle.kill().await;
         }
 
@@ -149,7 +156,7 @@ impl DeleteTaskService {
             let index_config = index_config_by_index_id
                 .remove(index_uid)
                 .expect("index metadata should be present");
-            if self.spawn_pipeline(index_config, ctx).await.is_err() {
+            if self.spawn_pipeline(index_config, shutdown).await.is_err() {
                 warn!("failed to spawn delete pipeline for {}", index_uid.index_id);
             }
         }
@@ -160,7 +167,7 @@ impl DeleteTaskService {
     pub async fn spawn_pipeline(
         &mut self,
         index_config: IndexConfig,
-        ctx: &ActorContext<Self>,
+        shutdown: &CancellationToken,
     ) -> anyhow::Result<()> {
         let index_uri = index_config.index_uri.clone();
         let index_storage = self.storage_resolver.resolve(&index_uri).await?;
@@ -171,7 +178,7 @@ impl DeleteTaskService {
             .index_metadata(index_metadata_request)
             .await?
             .deserialize_index_metadata()?;
-        let pipeline = DeleteTaskPipeline::new(
+        let pipeline_handle = DeleteTaskPipeline::new(
             index_metadata.index_uid.clone(),
             self.metastore.clone(),
             self.search_job_placer.clone(),
@@ -180,38 +187,17 @@ impl DeleteTaskService {
             self.max_concurrent_split_uploads,
             self.delete_execution_semaphore.clone(),
             self.event_broker.clone(),
-        );
-        let (_pipeline_mailbox, pipeline_handler) = ctx.spawn_actor().spawn(pipeline);
+        )
+        .spawn(shutdown)
+        .await?;
         self.pipeline_handles_by_index_uid
-            .insert(index_metadata.index_uid, pipeline_handler);
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct UpdatePipelines;
-
-#[async_trait]
-impl Handler<UpdatePipelines> for DeleteTaskService {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: UpdatePipelines,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        let result = self.update_pipeline_handles(ctx).await;
-        if let Err(error) = result {
-            error!(error=%error, "delete task pipelines update failed");
-        }
-        ctx.schedule_self_msg(UPDATE_PIPELINES_INTERVAL, UpdatePipelines);
+            .insert(index_metadata.index_uid, pipeline_handle);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use quickwit_actors::Universe;
     use quickwit_common::pubsub::EventBroker;
     use quickwit_indexing::TestSandbox;
     use quickwit_proto::metastore::{
@@ -219,8 +205,9 @@ mod tests {
     };
     use quickwit_search::{MockSearchService, SearchJobPlacer, searcher_pool_for_test};
     use quickwit_storage::StorageResolver;
+    use tokio_util::sync::CancellationToken;
 
-    use super::{DeleteTaskService, UPDATE_PIPELINES_INTERVAL};
+    use super::DeleteTaskService;
 
     #[tokio::test]
     async fn test_delete_task_service() -> anyhow::Result<()> {
@@ -242,7 +229,6 @@ mod tests {
         let search_job_placer = SearchJobPlacer::new(searcher_pool);
         let temp_dir = tempfile::tempdir().unwrap();
         let data_dir_path = temp_dir.path().to_path_buf();
-        let universe: &Universe = test_sandbox.universe();
         let delete_task_service = DeleteTaskService::new(
             metastore.clone(),
             search_job_placer,
@@ -254,11 +240,14 @@ mod tests {
         )
         .await
         .unwrap();
-        let (_delete_task_service_mailbox, delete_task_service_handler) =
-            universe.spawn_builder().spawn(delete_task_service);
-        let state = delete_task_service_handler
-            .process_pending_and_observe()
-            .await;
+        let mut state_rx = delete_task_service.subscribe_state();
+        let shutdown = CancellationToken::new();
+        let handle = delete_task_service.spawn(shutdown.clone());
+        let state = state_rx
+            .wait_for(|state| state.num_running_pipelines == 1)
+            .await
+            .unwrap()
+            .clone();
         assert_eq!(state.num_running_pipelines, 1);
         let delete_query = DeleteQuery {
             index_uid: Some(index_uid.clone()),
@@ -283,21 +272,14 @@ mod tests {
             })
             .await
             .unwrap();
-        universe.sleep(UPDATE_PIPELINES_INTERVAL * 2).await;
-        let state_after_deletion = delete_task_service_handler
-            .process_pending_and_observe()
-            .await;
+        let state_after_deletion = state_rx
+            .wait_for(|state| state.num_running_pipelines == 0)
+            .await
+            .unwrap()
+            .clone();
         assert_eq!(state_after_deletion.num_running_pipelines, 0);
-        assert!(universe.get_one::<DeleteTaskService>().is_some());
-        let actors_observations = universe.observe(UPDATE_PIPELINES_INTERVAL).await;
-        assert!(
-            actors_observations
-                .into_iter()
-                .any(|observation| observation.type_name
-                    == std::any::type_name::<DeleteTaskService>())
-        );
-        assert!(universe.get_one::<DeleteTaskService>().is_some());
-        test_sandbox.assert_quit().await;
+        shutdown.cancel();
+        handle.await.unwrap();
         Ok(())
     }
 }

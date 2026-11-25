@@ -21,7 +21,6 @@ mod indexing;
 mod metrics;
 mod supervisor;
 pub(crate) use supervisor::S3IndexerSupervisor;
-pub use supervisor::StopS3Indexers;
 #[cfg(test)]
 mod tests;
 

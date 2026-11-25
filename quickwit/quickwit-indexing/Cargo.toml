@@ -45,7 +45,6 @@ utoipa = { workspace = true }
 vrl = { workspace = true, optional = true }
 
 
-quickwit-actors = { workspace = true }
 quickwit-aws = { workspace = true }
 quickwit-cluster = { workspace = true }
 quickwit-common = { workspace = true }
@@ -78,7 +77,6 @@ vendored-kafka = [
 ]
 vendored-kafka-macos = ["kafka", "libz-sys/static", "openssl/vendored"]
 testsuite = [
-  "quickwit-actors/testsuite",
   "quickwit-cluster/testsuite",
   "quickwit-common/testsuite",
   "quickwit-config/testsuite",
@@ -102,7 +100,6 @@ tempfile = { workspace = true }
 tower = { workspace = true }
 unicode-segmentation = { workspace = true }
 
-quickwit-actors = { workspace = true, features = ["testsuite"] }
 quickwit-cluster = { workspace = true, features = ["testsuite"] }
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }

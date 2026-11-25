@@ -41,8 +41,8 @@ pub struct HealthCheckApi;
 /// Health check handlers.
 pub(crate) fn health_check_handlers(
     cluster: Cluster,
-    indexer_service_opt: Option<Mailbox<IndexingService>>,
-    janitor_service_opt: Option<Mailbox<JanitorService>>,
+    indexer_service_opt: Option<IndexingService>,
+    janitor_service_opt: Option<JanitorService>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     liveness_handler(
@@ -54,8 +54,8 @@ pub(crate) fn health_check_handlers(
 }
 
 fn liveness_handler(
-    indexer_service_opt: Option<Mailbox<IndexingService>>,
-    janitor_service_opt: Option<Mailbox<JanitorService>>,
+    indexer_service_opt: Option<IndexingService>,
+    janitor_service_opt: Option<JanitorService>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Rejection> + Clone {
     warp::path!("health" / "livez")
@@ -101,17 +101,23 @@ fn startup_handler(
 )]
 /// Get Node Liveliness
 async fn get_liveness(
-    indexer_service_opt: Option<Mailbox<IndexingService>>,
-    janitor_service_opt: Option<Mailbox<JanitorService>>,
+    indexer_service_opt: Option<IndexingService>,
+    janitor_service_opt: Option<JanitorService>,
     compactor_service_opt: Option<Mailbox<CompactorService>>,
 ) -> impl warp::Reply {
     let mut is_live = true;
 
-    if is_actor_unhealthy(indexer_service_opt).await {
+    if indexer_service_opt
+        .as_ref()
+        .is_some_and(|service| !service.is_healthy())
+    {
         error!("indexer service is unhealthy");
         is_live = false;
     }
-    if is_actor_unhealthy(janitor_service_opt).await {
+    if janitor_service_opt
+        .as_ref()
+        .is_some_and(|service| !service.is_healthy())
+    {
         error!("janitor service is unhealthy");
         is_live = false;
     }

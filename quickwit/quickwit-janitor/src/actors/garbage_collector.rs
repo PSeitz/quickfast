@@ -16,9 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use futures::{StreamExt, stream};
-use quickwit_actors::{Actor, ActorContext, Handler};
+use quickwit_common::Progress;
 use quickwit_common::shared_consts::split_deletion_grace_period;
 use quickwit_index_management::{GcMetrics, run_garbage_collect};
 use quickwit_metastore::ListIndexesMetadataResponseExt;
@@ -29,6 +28,9 @@ use quickwit_proto::metastore::{
 use quickwit_proto::types::IndexUid;
 use quickwit_storage::{Storage, StorageResolver};
 use serde::Serialize;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 use crate::metrics::{GC_DELETED_BYTES, GC_DELETED_SPLITS, GC_RUNS, GC_SECONDS_TOTAL};
@@ -77,28 +79,65 @@ pub struct GarbageCollectorCounters {
     pub num_failed_splits: usize,
 }
 
-#[derive(Debug)]
-struct Loop;
-
-/// An actor for collecting garbage periodically from an index.
+/// Periodically collects garbage splits and completed input files.
 pub struct GarbageCollector {
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
     counters: GarbageCollectorCounters,
+    counters_tx: watch::Sender<GarbageCollectorCounters>,
 }
 
 impl GarbageCollector {
     pub fn new(metastore: MetastoreServiceClient, storage_resolver: StorageResolver) -> Self {
+        let counters = GarbageCollectorCounters::default();
+        let (counters_tx, _) = watch::channel(counters.clone());
         Self {
             metastore,
             storage_resolver,
-            counters: GarbageCollectorCounters::default(),
+            counters,
+            counters_tx,
         }
     }
 
-    /// Gc Loop handler logic.
-    /// Should not return an error to prevent the actor from crashing.
-    async fn handle_inner(&mut self, ctx: &ActorContext<Self>) {
+    #[cfg(test)]
+    fn subscribe_counters(&self) -> watch::Receiver<GarbageCollectorCounters> {
+        self.counters_tx.subscribe()
+    }
+
+    pub fn spawn(mut self, shutdown: CancellationToken) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                self.run_once().await;
+                tokio::select! {
+                    biased;
+                    _ = shutdown.cancelled() => break,
+                    _ = tokio::time::sleep(RUN_INTERVAL) => {}
+                }
+            }
+        })
+    }
+
+    pub async fn run_once(&mut self) {
+        let progress = Progress::default();
+        self.handle_inner(&progress).await;
+        if let Err(error) = crate::completed_file_cleanup::cleanup_completed_files(
+            &self.metastore,
+            &self.storage_resolver,
+            &progress,
+        )
+        .await
+        {
+            error!(
+                ?error,
+                "failed to clean up completed inputs; retrying next GC pass"
+            );
+        }
+        let _ = self.counters_tx.send(self.counters.clone());
+    }
+
+    /// Runs one GC pass across all indexes. Errors are logged rather than returned so
+    /// the background loop continues running.
+    async fn handle_inner(&mut self, progress: &Progress) {
         debug!("loading indexes from the metastore");
         self.counters.num_passes += 1;
 
@@ -155,7 +194,7 @@ impl GarbageCollector {
             STAGED_GRACE_PERIOD,
             split_deletion_grace_period(),
             false,
-            Some(ctx.progress()),
+            Some(progress),
             Some(gc_metrics()),
         )
         .await;
@@ -203,54 +242,6 @@ impl GarbageCollector {
     }
 }
 
-#[async_trait]
-impl Actor for GarbageCollector {
-    type ObservableState = GarbageCollectorCounters;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        self.counters.clone()
-    }
-
-    fn name(&self) -> String {
-        "GarbageCollector".to_string()
-    }
-
-    async fn initialize(
-        &mut self,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), quickwit_actors::ActorExitStatus> {
-        self.handle(Loop, ctx).await?;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<Loop> for GarbageCollector {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: Loop,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), quickwit_actors::ActorExitStatus> {
-        self.handle_inner(ctx).await;
-        if let Err(error) = crate::completed_file_cleanup::cleanup_completed_files(
-            &self.metastore,
-            &self.storage_resolver,
-            ctx.progress(),
-        )
-        .await
-        {
-            error!(
-                ?error,
-                "failed to clean up completed inputs; retrying next GC pass"
-            );
-        }
-        ctx.schedule_self_msg(RUN_INTERVAL, Loop);
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -258,7 +249,6 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use quickwit_actors::{ActorHandle, ObservationType, Universe};
     use quickwit_common::ServiceStream;
     use quickwit_common::shared_consts::split_deletion_grace_period;
     use quickwit_metastore::{
@@ -283,17 +273,15 @@ mod tests {
         metastore
     }
 
-    async fn observe_after_pass(
-        handle: &ActorHandle<GarbageCollector>,
+    async fn wait_for_pass(
+        counters_rx: &mut watch::Receiver<GarbageCollectorCounters>,
+        expected_passes: usize,
     ) -> GarbageCollectorCounters {
-        loop {
-            let observation = handle.process_pending_and_observe().await;
-            match observation.obs_type {
-                ObservationType::Alive => return observation.state,
-                ObservationType::Timeout => continue,
-                ObservationType::PostMortem => panic!("the garbage collector exited"),
-            }
-        }
+        counters_rx
+            .wait_for(|counters| counters.num_passes >= expected_passes)
+            .await
+            .unwrap()
+            .clone()
     }
 
     fn hashmap<K: Eq + std::hash::Hash, V>(key: K, value: V) -> HashMap<K, V> {
@@ -487,28 +475,25 @@ mod tests {
                 Ok(EmptyResponse {})
             });
 
-        let garbage_collect_actor = GarbageCollector::new(
+        let mut garbage_collector = GarbageCollector::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             storage_resolver,
         );
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handler) = universe.spawn_builder().spawn(garbage_collect_actor);
+        garbage_collector.run_once().await;
 
-        let state_after_initialization = handler.process_pending_and_observe().await.state;
-        assert_eq!(state_after_initialization.num_passes, 1);
-        assert_eq!(state_after_initialization.num_deleted_files, 3);
-        assert_eq!(state_after_initialization.num_deleted_bytes, 60);
-        assert_eq!(state_after_initialization.num_failed_splits, 0);
-        universe.assert_quit().await;
+        assert_eq!(garbage_collector.counters.num_passes, 1);
+        assert_eq!(garbage_collector.counters.num_deleted_files, 3);
+        assert_eq!(garbage_collector.counters.num_deleted_bytes, 60);
+        assert_eq!(garbage_collector.counters.num_failed_splits, 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_garbage_collect_get_calls_repeatedly() {
         let storage_resolver = StorageResolver::unconfigured();
         let mut mock_metastore = mock_metastore();
         mock_metastore
             .expect_list_indexes_metadata()
-            .times(3)
+            .times(2)
             .returning(|_list_indexes_metadata| {
                 let indexes_metadata = vec![IndexMetadata::for_test(
                     "test-index",
@@ -518,7 +503,7 @@ mod tests {
             });
         mock_metastore
             .expect_list_splits()
-            .times(6)
+            .times(4)
             .returning(|list_splits_request| {
                 let query = list_splits_request.deserialize_list_splits_query().unwrap();
                 let splits = match query.split_states[0] {
@@ -537,7 +522,7 @@ mod tests {
             });
         mock_metastore
             .expect_mark_splits_for_deletion()
-            .times(3)
+            .times(2)
             .returning(|mark_splits_for_deletion_request| {
                 let index_uid: IndexUid = mark_splits_for_deletion_request.index_uid().clone();
                 assert_eq!(&index_uid.index_id, "test-index");
@@ -546,7 +531,7 @@ mod tests {
             });
         mock_metastore
             .expect_delete_splits()
-            .times(3)
+            .times(2)
             .returning(|delete_splits_request| {
                 let index_uid: IndexUid = delete_splits_request.index_uid().clone();
                 assert_eq!(&index_uid.index_id, "test-index");
@@ -563,14 +548,15 @@ mod tests {
                 Ok(EmptyResponse {})
             });
 
-        let garbage_collect_actor = GarbageCollector::new(
+        let garbage_collector = GarbageCollector::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             storage_resolver,
         );
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handle) = universe.spawn_builder().spawn(garbage_collect_actor);
+        let mut counters_rx = garbage_collector.subscribe_counters();
+        let shutdown = CancellationToken::new();
+        let handle = garbage_collector.spawn(shutdown.clone());
 
-        let counters = handle.process_pending_and_observe().await.state;
+        let counters = wait_for_pass(&mut counters_rx, 1).await;
         assert_eq!(counters.num_passes, 1);
         assert_eq!(counters.num_deleted_files, 2);
         assert_eq!(counters.num_deleted_bytes, 40);
@@ -579,9 +565,10 @@ mod tests {
         assert_eq!(counters.num_failed_gc_run, 0);
         assert_eq!(counters.num_failed_splits, 0);
 
-        // 30 secs later
-        universe.sleep(Duration::from_secs(30)).await;
-        let counters = handle.process_pending_and_observe().await.state;
+        // 30 secs later: still on pass 1.
+        tokio::time::advance(Duration::from_secs(30)).await;
+        tokio::task::yield_now().await;
+        let counters = counters_rx.borrow().clone();
         assert_eq!(counters.num_passes, 1);
         assert_eq!(counters.num_deleted_files, 2);
         assert_eq!(counters.num_deleted_bytes, 40);
@@ -590,9 +577,9 @@ mod tests {
         assert_eq!(counters.num_failed_gc_run, 0);
         assert_eq!(counters.num_failed_splits, 0);
 
-        // 60 secs later
-        universe.sleep(RUN_INTERVAL).await;
-        let counters = handle.process_pending_and_observe().await.state;
+        // RUN_INTERVAL later: pass 2 completes.
+        tokio::time::advance(RUN_INTERVAL).await;
+        let counters = wait_for_pass(&mut counters_rx, 2).await;
         assert_eq!(counters.num_passes, 2);
         assert_eq!(counters.num_deleted_files, 4);
         assert_eq!(counters.num_deleted_bytes, 80);
@@ -600,16 +587,17 @@ mod tests {
         assert_eq!(counters.num_failed_storage_resolution, 0);
         assert_eq!(counters.num_failed_gc_run, 0);
         assert_eq!(counters.num_failed_splits, 0);
-        universe.assert_quit().await;
+        shutdown.cancel();
+        handle.await.unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_garbage_collect_get_called_repeatedly_on_failure() {
         let storage_resolver = StorageResolver::unconfigured();
         let mut mock_metastore = MockMetastoreService::new();
         mock_metastore
             .expect_list_completed_files()
-            .times(4)
+            .times(3)
             .returning(|_| {
                 Err(MetastoreError::Db {
                     message: "fail to list completed inputs".to_string(),
@@ -617,31 +605,33 @@ mod tests {
             });
         mock_metastore
             .expect_list_indexes_metadata()
-            .times(4)
+            .times(3)
             .returning(|_list_indexes_request| {
                 Err(MetastoreError::Db {
                     message: "fail to list indexes".to_string(),
                 })
             });
 
-        let garbage_collect_actor = GarbageCollector::new(
+        let garbage_collector = GarbageCollector::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             storage_resolver,
         );
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handle) = universe.spawn_builder().spawn(garbage_collect_actor);
+        let mut counters_rx = garbage_collector.subscribe_counters();
+        let shutdown = CancellationToken::new();
+        let handle = garbage_collector.spawn(shutdown.clone());
 
-        let counters = handle.process_pending_and_observe().await.state;
+        let counters = wait_for_pass(&mut counters_rx, 1).await;
         assert_eq!(counters.num_passes, 1);
 
-        universe.sleep(RUN_INTERVAL).await;
-        let counters = handle.process_pending_and_observe().await.state;
+        tokio::time::advance(RUN_INTERVAL).await;
+        let counters = wait_for_pass(&mut counters_rx, 2).await;
         assert_eq!(counters.num_passes, 2);
 
-        universe.sleep(RUN_INTERVAL).await;
-        let counters = handle.process_pending_and_observe().await.state;
+        tokio::time::advance(RUN_INTERVAL).await;
+        let counters = wait_for_pass(&mut counters_rx, 3).await;
         assert_eq!(counters.num_passes, 3);
-        universe.assert_quit().await;
+        shutdown.cancel();
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -659,14 +649,13 @@ mod tests {
                 Ok(ListIndexesMetadataResponse::for_test(indexes_metadata))
             });
 
-        let garbage_collect_actor = GarbageCollector::new(
+        let mut garbage_collector = GarbageCollector::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             storage_resolver,
         );
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handle) = universe.spawn_builder().spawn(garbage_collect_actor);
+        garbage_collector.run_once().await;
 
-        let counters = handle.process_pending_and_observe().await.state;
+        let counters = &garbage_collector.counters;
         assert_eq!(counters.num_passes, 1);
         assert_eq!(counters.num_deleted_files, 0);
         assert_eq!(counters.num_deleted_bytes, 0);
@@ -674,7 +663,6 @@ mod tests {
         assert_eq!(counters.num_failed_storage_resolution, 1);
         assert_eq!(counters.num_failed_gc_run, 0);
         assert_eq!(counters.num_failed_splits, 0);
-        universe.assert_quit().await;
     }
 
     #[tokio::test]
@@ -796,14 +784,13 @@ mod tests {
                 }
             });
 
-        let garbage_collect_actor = GarbageCollector::new(
+        let mut garbage_collector = GarbageCollector::new(
             MetastoreServiceClient::from_mock(mock_metastore),
             storage_resolver,
         );
-        let universe = Universe::with_accelerated_time();
-        let (_mailbox, handle) = universe.spawn_builder().spawn(garbage_collect_actor);
+        garbage_collector.run_once().await;
 
-        let counters = observe_after_pass(&handle).await;
+        let counters = &garbage_collector.counters;
         assert_eq!(counters.num_passes, 1);
         assert_eq!(counters.num_deleted_files, 14000);
         assert_eq!(counters.num_deleted_bytes, 20 * 14000);
@@ -811,6 +798,5 @@ mod tests {
         assert_eq!(counters.num_failed_storage_resolution, 0);
         assert_eq!(counters.num_failed_gc_run, 0);
         assert_eq!(counters.num_failed_splits, 2000);
-        universe.assert_quit().await;
     }
 }

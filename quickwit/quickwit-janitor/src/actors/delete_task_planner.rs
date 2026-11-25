@@ -14,12 +14,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
-use async_trait::async_trait;
 use itertools::Itertools;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, QueueCapacity};
 use quickwit_common::extract_time_range;
 use quickwit_common::uri::Uri;
 use quickwit_doc_mapper::tag_pruning::extract_tags_from_query;
@@ -36,14 +36,20 @@ use quickwit_search::{
     IndexMetasForLeafSearch, SearchJob, SearchJobPlacer, compute_query_complexity_factor,
     jobs_to_leaf_request,
 };
-use serde::Serialize;
 use tantivy::{Inventory, TrackedObject};
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info};
 
 use crate::metrics::ONGOING_NUM_DELETE_OPERATIONS_TOTAL;
 
 const PLANNER_REFRESH_INTERVAL: Duration = Duration::from_mins(1);
+const PLANNER_ERROR_BACKOFF_MIN: Duration = if cfg!(any(test, feature = "testsuite")) {
+    Duration::from_millis(50)
+} else {
+    Duration::from_secs(1)
+};
+const PLANNER_ERROR_BACKOFF_MAX: Duration = Duration::from_mins(1);
 const NUM_STALE_SPLITS_TO_FETCH: usize = 1000;
 
 /// The `DeleteTaskPlanner` plans delete operations on splits for a given index.
@@ -89,35 +95,6 @@ pub struct DeleteTaskPlanner {
     ongoing_delete_operations_inventory: Inventory<MergeOperation>,
 }
 
-#[async_trait]
-impl Actor for DeleteTaskPlanner {
-    type ObservableState = DeleteTaskPlannerState;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        let ongoing_delete_operations = self
-            .ongoing_delete_operations_inventory
-            .list()
-            .iter()
-            .map(|tracked_operation| tracked_operation.as_ref().clone())
-            .collect_vec();
-        DeleteTaskPlannerState {
-            ongoing_delete_operations,
-        }
-    }
-
-    fn name(&self) -> String {
-        "DeleteTaskPlanner".to_string()
-    }
-
-    fn queue_capacity(&self) -> QueueCapacity {
-        QueueCapacity::Bounded(0)
-    }
-
-    async fn initialize(&mut self, ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        self.handle(PlanDeleteLoop, ctx).await
-    }
-}
-
 impl DeleteTaskPlanner {
     pub fn new(
         index_uid: IndexUid,
@@ -138,8 +115,45 @@ impl DeleteTaskPlanner {
         }
     }
 
+    #[cfg(test)]
+    pub fn ongoing_delete_operations_inventory(&self) -> Inventory<MergeOperation> {
+        self.ongoing_delete_operations_inventory.clone()
+    }
+
+    pub async fn run(mut self, shutdown: CancellationToken, num_errors: Arc<AtomicU64>) {
+        let mut error_backoff = PLANNER_ERROR_BACKOFF_MIN;
+        loop {
+            let sleep_duration = match self.send_delete_operations().await {
+                Ok(()) => {
+                    error_backoff = PLANNER_ERROR_BACKOFF_MIN;
+                    PLANNER_REFRESH_INTERVAL
+                }
+                Err(error) => {
+                    if shutdown.is_cancelled() {
+                        break;
+                    }
+                    num_errors.fetch_add(1, Ordering::Relaxed);
+                    error!(
+                        index_uid = %self.index_uid,
+                        ?error,
+                        retry_in = ?error_backoff,
+                        "delete task planner pass failed"
+                    );
+                    let delay = error_backoff;
+                    error_backoff = (error_backoff * 2).min(PLANNER_ERROR_BACKOFF_MAX);
+                    delay
+                }
+            };
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                _ = tokio::time::sleep(sleep_duration) => {}
+            }
+        }
+    }
+
     /// Send delete operations for a given `index_id`.
-    async fn send_delete_operations(&mut self, ctx: &ActorContext<Self>) -> anyhow::Result<()> {
+    pub async fn send_delete_operations(&mut self) -> anyhow::Result<()> {
         // Loop until there is no more stale splits.
         loop {
             let last_delete_opstamp_request = LastDeleteOpstampRequest {
@@ -151,9 +165,8 @@ impl DeleteTaskPlanner {
                 .await?
                 .last_delete_opstamp;
             let stale_splits = self
-                .get_relevant_stale_splits(self.index_uid.clone(), last_delete_opstamp, ctx)
+                .get_relevant_stale_splits(self.index_uid.clone(), last_delete_opstamp)
                 .await?;
-            ctx.record_progress();
             debug!(
                 index_id = self.index_uid.index_id,
                 last_delete_opstamp = last_delete_opstamp,
@@ -165,14 +178,13 @@ impl DeleteTaskPlanner {
             }
 
             let (splits_with_deletes, splits_without_deletes) =
-                self.partition_splits_by_deletes(&stale_splits, ctx).await?;
+                self.partition_splits_by_deletes(&stale_splits).await?;
 
             info!(
                 "{} splits with deletes, {} splits without deletes.",
                 splits_with_deletes.len(),
                 splits_without_deletes.len()
             );
-            ctx.record_progress();
 
             // Updates `delete_opstamp` of splits that won't undergo delete operations.
             let split_ids_without_delete = splits_without_deletes
@@ -184,11 +196,9 @@ impl DeleteTaskPlanner {
                 split_ids: split_ids_without_delete.clone(),
                 delete_opstamp: last_delete_opstamp,
             };
-            ctx.protect_future(
-                self.metastore
-                    .update_splits_delete_opstamp(update_splits_delete_opstamp_request),
-            )
-            .await?;
+            self.metastore
+                .update_splits_delete_opstamp(update_splits_delete_opstamp_request)
+                .await?;
 
             // Sends delete operations.
             for split_with_deletes in splits_with_deletes {
@@ -221,7 +231,6 @@ impl DeleteTaskPlanner {
     async fn partition_splits_by_deletes(
         &mut self,
         stale_splits: &[Split],
-        ctx: &ActorContext<Self>,
     ) -> anyhow::Result<(Vec<Split>, Vec<Split>)> {
         let mut splits_without_deletes: Vec<Split> = Vec::new();
         let mut splits_with_deletes: Vec<Split> = Vec::new();
@@ -231,8 +240,9 @@ impl DeleteTaskPlanner {
                 self.index_uid.clone(),
                 stale_split.split_metadata.delete_opstamp,
             );
-            let pending_tasks = ctx
-                .protect_future(self.metastore.list_delete_tasks(list_delete_tasks_request))
+            let pending_tasks = self
+                .metastore
+                .list_delete_tasks(list_delete_tasks_request)
                 .await?
                 .delete_tasks;
 
@@ -270,10 +280,8 @@ impl DeleteTaskPlanner {
                     &pending_and_matching_metadata_tasks,
                     &self.doc_mapper_str,
                     self.index_uri.as_str(),
-                    ctx,
                 )
                 .await?;
-            ctx.record_progress();
 
             if has_split_docs_to_delete {
                 splits_with_deletes.push(stale_split.clone());
@@ -293,7 +301,6 @@ impl DeleteTaskPlanner {
         delete_tasks: &[DeleteTask],
         doc_mapper_str: &str,
         index_uri: &str,
-        ctx: &ActorContext<Self>,
     ) -> anyhow::Result<bool> {
         for delete_task in delete_tasks {
             let delete_query = delete_task
@@ -326,7 +333,6 @@ impl DeleteTaskPlanner {
             let leaf_search_request =
                 jobs_to_leaf_request(&search_request, &search_indexes_metas, vec![search_job])?;
             let response = search_client.leaf_search(leaf_search_request).await?;
-            ctx.record_progress();
             if response.num_hits > 0 {
                 return Ok(true);
             }
@@ -340,15 +346,15 @@ impl DeleteTaskPlanner {
         &mut self,
         index_uid: IndexUid,
         last_delete_opstamp: u64,
-        ctx: &ActorContext<Self>,
     ) -> MetastoreResult<Vec<Split>> {
         let list_stale_splits_request = ListStaleSplitsRequest {
             index_uid: Some(index_uid.clone()),
             delete_opstamp: last_delete_opstamp,
             num_splits: NUM_STALE_SPLITS_TO_FETCH as u64,
         };
-        let stale_splits = ctx
-            .protect_future(self.metastore.list_stale_splits(list_stale_splits_request))
+        let stale_splits = self
+            .metastore
+            .list_stale_splits(list_stale_splits_request)
             .await?
             .deserialize_splits()
             .await?;
@@ -372,46 +378,6 @@ impl DeleteTaskPlanner {
             })
             .collect_vec();
         Ok(filtered_splits)
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct DeleteTaskPlannerState {
-    ongoing_delete_operations: Vec<MergeOperation>,
-}
-
-#[derive(Debug)]
-struct PlanDeleteOperations;
-
-#[async_trait]
-impl Handler<PlanDeleteOperations> for DeleteTaskPlanner {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: PlanDeleteOperations,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        self.send_delete_operations(ctx).await?;
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct PlanDeleteLoop;
-
-#[async_trait]
-impl Handler<PlanDeleteLoop> for DeleteTaskPlanner {
-    type Reply = ();
-
-    async fn handle(
-        &mut self,
-        _: PlanDeleteLoop,
-        ctx: &ActorContext<Self>,
-    ) -> Result<(), ActorExitStatus> {
-        self.handle(PlanDeleteOperations, ctx).await?;
-        ctx.schedule_self_msg(PLANNER_REFRESH_INTERVAL, PlanDeleteLoop);
-        Ok(())
     }
 }
 
@@ -531,7 +497,7 @@ mod tests {
         let searcher_pool = searcher_pool_for_test([("127.0.0.1:1000", mock_search_service)]);
         let search_job_placer = SearchJobPlacer::new(searcher_pool);
         let (delete_op_tx, mut delete_op_rx) = mpsc::unbounded_channel();
-        let delete_planner = DeleteTaskPlanner::new(
+        let mut delete_planner = DeleteTaskPlanner::new(
             index_uid.clone(),
             index_config.index_uri.clone(),
             doc_mapper_str,
@@ -539,53 +505,39 @@ mod tests {
             search_job_placer,
             delete_op_tx,
         );
-        let (delete_planner_mailbox, delete_planner_handle) = test_sandbox
-            .universe()
-            .spawn_builder()
-            .spawn(delete_planner);
-        delete_planner_handle.process_pending_and_observe().await;
+        delete_planner.send_delete_operations().await?;
         let first_op = delete_op_rx
             .try_recv()
             .expect("expected one planned delete operation");
         assert!(delete_op_rx.try_recv().is_err());
         // The last split will undergo a delete operation.
         assert_eq!(first_op.splits[0].split_id(), split_metas[2].split_id());
-        // Check planner state is inline.
-        let delete_planner_state = delete_planner_handle.observe().await;
-        assert_eq!(
-            delete_planner_state.ongoing_delete_operations[0].splits[0].split_id(),
-            split_metas[2].split_id()
-        );
+        // Check planner inventory tracks the ongoing operation.
+        {
+            let ongoing = delete_planner.ongoing_delete_operations_inventory().list();
+            assert_eq!(ongoing[0].splits[0].split_id(), split_metas[2].split_id());
+        }
         // Trigger new plan evaluation and check that we don't have new merge operation.
-        delete_planner_mailbox
-            .ask(PlanDeleteOperations)
-            .await
-            .unwrap();
+        delete_planner.send_delete_operations().await?;
         assert!(delete_op_rx.try_recv().is_err());
         // Now drop the current merge operation and check that the planner will plan a new
         // operation.
         drop(first_op);
-        // Check planner state is inline.
         assert!(
-            delete_planner_handle
-                .observe()
-                .await
-                .ongoing_delete_operations
+            delete_planner
+                .ongoing_delete_operations_inventory()
+                .list()
                 .is_empty()
         );
 
         // Trigger operations planning.
-        delete_planner_mailbox
-            .ask(PlanDeleteOperations)
-            .await
-            .unwrap();
+        delete_planner.send_delete_operations().await?;
         let second_op = delete_op_rx
             .try_recv()
             .expect("expected second planned delete operation");
         assert!(delete_op_rx.try_recv().is_err());
         assert_eq!(second_op.splits[0].split_id(), split_metas[2].split_id());
-        // The other splits has just their delete opstamps updated to the last opstamps which is 2
-        // as there are 2 delete tasks. The last split
+        // The other splits have their delete opstamps updated to the last opstamp (2).
         let all_splits = metastore
             .list_splits(ListSplitsRequest::try_from_index_uid(index_uid).unwrap())
             .await
@@ -595,9 +547,8 @@ mod tests {
             .unwrap();
         assert_eq!(all_splits[0].delete_opstamp, 2);
         assert_eq!(all_splits[1].delete_opstamp, 2);
-        // The last split has not yet its delete opstamp updated.
+        // The last split has not yet had its delete opstamp updated.
         assert_eq!(all_splits[2].delete_opstamp, 0);
-        test_sandbox.assert_quit().await;
         Ok(())
     }
 }

@@ -17,7 +17,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use quickwit_actors::Universe;
 use quickwit_common::Progress;
 use quickwit_common::io::IoControls;
 use quickwit_common::rand::append_random_suffix;
@@ -59,7 +58,6 @@ pub struct TestSandbox {
     storage_resolver: StorageResolver,
     storage: Arc<dyn Storage>,
     split_store: IndexingSplitStore,
-    universe: Universe,
     _temp_dir: tempfile::TempDir,
 }
 
@@ -109,7 +107,6 @@ impl TestSandbox {
         let temp_dir = tempfile::tempdir()?;
         let storage = storage_resolver.resolve(&index_uri).await?;
         let split_store = IndexingSplitStore::new(storage.clone());
-        let universe = Universe::with_accelerated_time();
         Ok(TestSandbox {
             node_id,
             index_uid,
@@ -121,7 +118,6 @@ impl TestSandbox {
             storage_resolver,
             storage,
             split_store,
-            universe,
             _temp_dir: temp_dir,
         })
     }
@@ -271,14 +267,8 @@ impl TestSandbox {
         self.source_id.clone()
     }
 
-    pub fn universe(&self) -> &Universe {
-        &self.universe
-    }
-
     #[cfg(any(test, feature = "testsuite"))]
-    pub async fn assert_quit(self) {
-        self.universe.assert_quit().await
-    }
+    pub async fn assert_quit(self) {}
 }
 
 /// Mock split builder.

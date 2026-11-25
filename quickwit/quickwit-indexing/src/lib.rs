@@ -14,7 +14,6 @@
 
 #![deny(clippy::disallowed_methods)]
 
-use quickwit_actors::{Mailbox, Universe};
 use quickwit_config::NodeConfig;
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_proto::metastore::MetastoreServiceClient;
@@ -53,14 +52,13 @@ pub use self::source::check_source_connectivity;
 pub struct IndexingApiSchemas;
 
 pub async fn start_indexing_service(
-    universe: &Universe,
     config: &NodeConfig,
     metastore: MetastoreServiceClient,
     storage_resolver: StorageResolver,
     ingest_router: IngestRouterClient,
-) -> anyhow::Result<Mailbox<IndexingService>> {
+) -> anyhow::Result<IndexingService> {
     info!("starting indexer service");
-    let indexing_service = IndexingService::new(
+    IndexingService::start(
         config.node_id.clone(),
         config.data_dir_path.to_path_buf(),
         config.indexer_config.clone(),
@@ -69,7 +67,5 @@ pub async fn start_indexing_service(
         config.docs_clustering_config.clone(),
         Some(ingest_router),
     )
-    .await?;
-    let (indexing_service, _) = universe.spawn_builder().spawn(indexing_service);
-    Ok(indexing_service)
+    .await
 }

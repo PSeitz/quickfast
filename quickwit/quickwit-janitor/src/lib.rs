@@ -16,15 +16,14 @@
 
 use std::sync::Arc;
 
-use quickwit_actors::{ActorHandle, Mailbox, Universe};
 use quickwit_common::pubsub::EventBroker;
-use quickwit_compaction::planner::CompactionPlanner;
 use quickwit_config::NodeConfig;
 use quickwit_metastore::SplitInfo;
 use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_search::SearchJobPlacer;
 use quickwit_storage::StorageResolver;
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 pub mod actors;
@@ -34,9 +33,10 @@ mod janitor_service;
 mod metrics;
 mod retention_policy_execution;
 
-pub use janitor_service::JanitorService;
+pub use janitor_service::{HealthCheckFn, JanitorService};
 
 use crate::actors::{DeleteTaskService, GarbageCollector, RetentionPolicyExecutor};
+use crate::janitor_service::monitor_task;
 
 #[derive(utoipa::OpenApi)]
 #[openapi(components(schemas(SplitInfo)))]
@@ -45,23 +45,31 @@ pub struct JanitorApiSchemas;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn start_janitor_service(
-    universe: &Universe,
     config: &NodeConfig,
     metastore: MetastoreServiceClient,
     search_job_placer: SearchJobPlacer,
     storage_resolver: StorageResolver,
     event_broker: EventBroker,
     run_delete_task_service: bool,
-    compaction_planner_handle: Option<ActorHandle<CompactionPlanner>>,
-) -> anyhow::Result<Mailbox<JanitorService>> {
+    extra_health_check: Option<HealthCheckFn>,
+) -> anyhow::Result<JanitorService> {
     info!("starting janitor service");
+    let shutdown = CancellationToken::new();
+    let mut tasks = Vec::new();
+
     let garbage_collector = GarbageCollector::new(metastore.clone(), storage_resolver.clone());
-    let (_, garbage_collector_handle) = universe.spawn_builder().spawn(garbage_collector);
+    tasks.push(monitor_task(
+        garbage_collector.spawn(shutdown.clone()),
+        shutdown.clone(),
+    ));
 
     let retention_policy_executor = RetentionPolicyExecutor::new(metastore.clone());
-    let (_, retention_policy_executor_handle) =
-        universe.spawn_builder().spawn(retention_policy_executor);
-    let delete_task_service_handle = if run_delete_task_service {
+    tasks.push(monitor_task(
+        retention_policy_executor.spawn(shutdown.clone()),
+        shutdown.clone(),
+    ));
+
+    if run_delete_task_service {
         const DEFAULT_DELETE_CONCURRENCY: usize = 3;
         let delete_task_service = DeleteTaskService::new(
             metastore,
@@ -73,20 +81,13 @@ pub async fn start_janitor_service(
             event_broker,
         )
         .await?;
-        let (_, delete_task_service_handle) = universe.spawn_builder().spawn(delete_task_service);
-        Some(delete_task_service_handle)
+        tasks.push(monitor_task(
+            delete_task_service.spawn(shutdown.clone()),
+            shutdown.clone(),
+        ));
     } else {
         tracing::warn!("delete task service is disabled: delete queries will not be processed");
-        None
-    };
+    }
 
-    let janitor_service = JanitorService::new(
-        delete_task_service_handle,
-        garbage_collector_handle,
-        retention_policy_executor_handle,
-        compaction_planner_handle,
-    );
-    let (janitor_service_mailbox, _janitor_service_handle) =
-        universe.spawn_builder().spawn(janitor_service);
-    Ok(janitor_service_mailbox)
+    Ok(JanitorService::new(shutdown, tasks, extra_health_check))
 }

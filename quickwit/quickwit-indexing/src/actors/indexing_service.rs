@@ -17,9 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
-use async_trait::async_trait;
 use bytesize::ByteSize;
-use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Healthz};
 use quickwit_common::{get_from_env_opt, io};
 use quickwit_config::{DocsClusteringConfig, IndexerConfig};
 use quickwit_ingest::router_client::IngestRouterClient;
@@ -27,6 +25,7 @@ use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_proto::types::NodeId;
 use quickwit_storage::StorageResolver;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::ingesthree::S3IndexerSupervisor;
@@ -51,8 +50,12 @@ pub struct IndexingServiceCounters {
     pub source_forwarder_running: bool,
 }
 
-/// Runs `ingesthree` S3 indexer workers and thin pull-source forwarders (`Source → Ingest API`).
-pub struct IndexingService {
+struct IndexingServiceState {
+    s3_indexers: Vec<S3IndexerSupervisor>,
+    source_forwarder_manager_opt: Option<SourceForwarderManager>,
+}
+
+struct IndexingServiceInner {
     node_id: NodeId,
     indexing_root_directory: PathBuf,
     metastore: MetastoreServiceClient,
@@ -60,24 +63,27 @@ pub struct IndexingService {
     max_concurrent_split_uploads: usize,
     indexing_io_throughput_limiter_opt: Option<io::Limiter>,
     clustering_config: Option<DocsClusteringConfig>,
-    ingest_router_opt: Option<IngestRouterClient>,
-    s3_indexers: Vec<S3IndexerSupervisor>,
-    source_forwarder_manager_opt: Option<SourceForwarderManager>,
+    state: Mutex<IndexingServiceState>,
+}
+
+/// Runs `ingesthree` S3 indexer workers and thin pull-source forwarders (`Source → Ingest API`).
+#[derive(Clone)]
+pub struct IndexingService {
+    inner: Arc<IndexingServiceInner>,
 }
 
 impl Debug for IndexingService {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("IndexingService")
-            .field("node_id", &self.node_id)
-            .field("num_s3_indexers", &self.s3_indexers.len())
+            .field("node_id", &self.inner.node_id)
             .finish()
     }
 }
 
 impl IndexingService {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
+    pub async fn start(
         node_id: NodeId,
         data_dir_path: PathBuf,
         indexer_config: IndexerConfig,
@@ -105,79 +111,63 @@ impl IndexingService {
                     indexing_root_directory.display()
                 )
             })?;
-        Ok(Self {
-            node_id,
-            indexing_root_directory,
-            metastore,
-            storage_resolver,
-            max_concurrent_split_uploads: indexer_config.max_concurrent_split_uploads,
-            indexing_io_throughput_limiter_opt: INDEXING_IO_THROUGHPUT_LIMITER.clone(),
-            clustering_config,
-            ingest_router_opt,
-            s3_indexers: Vec::new(),
-            source_forwarder_manager_opt: None,
-        })
+        info!(node_id = %node_id, "initializing indexing service");
+        let service = Self {
+            inner: Arc::new(IndexingServiceInner {
+                node_id,
+                indexing_root_directory,
+                metastore,
+                storage_resolver,
+                max_concurrent_split_uploads: indexer_config.max_concurrent_split_uploads,
+                indexing_io_throughput_limiter_opt: INDEXING_IO_THROUGHPUT_LIMITER.clone(),
+                clustering_config,
+                state: Mutex::new(IndexingServiceState {
+                    s3_indexers: Vec::new(),
+                    source_forwarder_manager_opt: None,
+                }),
+            }),
+        };
+        let s3_indexers = service.spawn_s3_indexers()?;
+        let source_forwarder_manager_opt = ingest_router_opt.map(|router| {
+            let sink = Arc::new(IngestRouterSink::new(router));
+            SourceForwarderManager::spawn(
+                service.inner.metastore.clone(),
+                service.inner.storage_resolver.clone(),
+                sink,
+            )
+        });
+        {
+            let mut state = service.inner.state.lock().await;
+            state.s3_indexers = s3_indexers;
+            state.source_forwarder_manager_opt = source_forwarder_manager_opt;
+        }
+        Ok(service)
     }
 
-    fn start_source_forwarders(&mut self) {
-        if let Some(router) = self.ingest_router_opt.clone() {
-            let sink = Arc::new(IngestRouterSink::new(router));
-            self.source_forwarder_manager_opt = Some(SourceForwarderManager::spawn(
-                self.metastore.clone(),
-                self.storage_resolver.clone(),
-                sink,
-            ));
+    pub async fn counters(&self) -> IndexingServiceCounters {
+        let state = self.inner.state.lock().await;
+        IndexingServiceCounters {
+            num_running_s3_indexers: state.s3_indexers.len(),
+            source_forwarder_running: state.source_forwarder_manager_opt.is_some(),
         }
     }
 
-    async fn stop_source_forwarders(&mut self) {
-        if let Some(manager) = self.source_forwarder_manager_opt.take() {
+    pub fn is_healthy(&self) -> bool {
+        true
+    }
+
+    /// Stops pull-source forwarders and S3 indexers. Idempotent.
+    pub async fn stop(&self) {
+        let (forwarder_opt, s3_indexers) = {
+            let mut state = self.inner.state.lock().await;
+            (
+                state.source_forwarder_manager_opt.take(),
+                std::mem::take(&mut state.s3_indexers),
+            )
+        };
+        if let Some(manager) = forwarder_opt {
             manager.stop().await;
         }
-    }
-}
-
-#[async_trait]
-impl Actor for IndexingService {
-    type ObservableState = IndexingServiceCounters;
-
-    fn observable_state(&self) -> Self::ObservableState {
-        IndexingServiceCounters {
-            num_running_s3_indexers: self.s3_indexers.len(),
-            source_forwarder_running: self.source_forwarder_manager_opt.is_some(),
-        }
-    }
-
-    async fn initialize(&mut self, _ctx: &ActorContext<Self>) -> Result<(), ActorExitStatus> {
-        info!(node_id = %self.node_id, "initializing indexing service");
-        self.start_s3_indexers()?;
-        self.start_source_forwarders();
-        Ok(())
-    }
-
-    async fn finalize(
-        &mut self,
-        _exit_status: &ActorExitStatus,
-        ctx: &ActorContext<Self>,
-    ) -> anyhow::Result<()> {
-        ctx.protect_future(async {
-            self.stop_source_forwarders().await;
-            self.stop_s3_indexers().await;
-        })
-        .await;
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Handler<Healthz> for IndexingService {
-    type Reply = bool;
-
-    async fn handle(
-        &mut self,
-        _: Healthz,
-        _ctx: &ActorContext<Self>,
-    ) -> Result<bool, ActorExitStatus> {
-        Ok(true)
+        futures::future::join_all(s3_indexers.into_iter().map(S3IndexerSupervisor::stop)).await;
     }
 }
