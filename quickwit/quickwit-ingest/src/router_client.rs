@@ -16,7 +16,9 @@
 
 use std::sync::Arc;
 
-use quickwit_proto::ingest::router::{self, IngestRequestV2, IngestResponseV2, IngestSuccess};
+use quickwit_proto::ingest::{
+    IngestFailure as ProtoIngestFailure, IngestRequestV2, IngestResponseV2, IngestSuccess,
+};
 
 use crate::IngestServiceError;
 use crate::ingesthree::IngesthreeRouter;
@@ -78,54 +80,49 @@ impl From<IngestResponseV2> for IngestResponse {
     fn from(response: IngestResponseV2) -> Self {
         Self {
             successes: response.successes,
-            failures: response
-                .failures
-                .into_iter()
-                .map(IngestFailure::V2)
-                .collect(),
+            failures: response.failures.into_iter().map(Into::into).collect(),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum IngestFailure {
-    V2(router::IngestFailure),
-    Ingesthree {
-        subrequest_id: u32,
-        index_id: String,
-        error: IngestServiceError,
-    },
+pub struct IngestFailure {
+    pub subrequest_id: u32,
+    pub index_id: String,
+    pub error: IngestServiceError,
 }
 
 impl IngestFailure {
     pub fn subrequest_id(&self) -> u32 {
-        match self {
-            Self::V2(failure) => failure.subrequest_id,
-            Self::Ingesthree { subrequest_id, .. } => *subrequest_id,
-        }
+        self.subrequest_id
     }
 
     pub fn index_id(&self) -> &str {
-        match self {
-            Self::V2(failure) => &failure.index_id,
-            Self::Ingesthree { index_id, .. } => index_id,
+        &self.index_id
+    }
+}
+
+impl From<ProtoIngestFailure> for IngestFailure {
+    fn from(failure: ProtoIngestFailure) -> Self {
+        let subrequest_id = failure.subrequest_id;
+        let index_id = failure.index_id.clone();
+        Self {
+            subrequest_id,
+            index_id,
+            error: failure.into(),
         }
     }
 }
 
 impl From<IngestFailure> for IngestServiceError {
     fn from(failure: IngestFailure) -> Self {
-        match failure {
-            IngestFailure::V2(failure) => failure.into(),
-            IngestFailure::Ingesthree { error, .. } => error,
-        }
+        failure.error
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use quickwit_proto::ingest::RateLimitingCause;
-    use quickwit_proto::ingest::router::IngestFailureReason;
+    use quickwit_proto::ingest::{IngestFailureReason, RateLimitingCause};
     use quickwit_proto::{ServiceError, ServiceErrorCode};
 
     use super::*;
@@ -151,7 +148,7 @@ mod tests {
                 error.error_code().http_status_code(),
                 code.http_status_code()
             );
-            let failure = IngestFailure::Ingesthree {
+            let failure = IngestFailure {
                 subrequest_id: 7,
                 index_id: "logs".into(),
                 error,
@@ -174,7 +171,7 @@ mod tests {
                 subrequest_id: 1,
                 ..Default::default()
             }],
-            failures: vec![router::IngestFailure {
+            failures: vec![ProtoIngestFailure {
                 subrequest_id: 2,
                 index_id: "logs".into(),
                 reason: IngestFailureReason::IndexNotFound as i32,

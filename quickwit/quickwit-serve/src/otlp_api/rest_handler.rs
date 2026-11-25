@@ -297,8 +297,7 @@ mod tests {
     use quickwit_opentelemetry::otlp::{
         OtlpGrpcLogsService, OtlpGrpcTracesService, make_resource_spans_for_test,
     };
-    use quickwit_proto::ingest::CommitTypeV2;
-    use quickwit_proto::ingest::router::IngestSuccess;
+    use quickwit_proto::ingest::{CommitTypeV2, IngestSuccess};
     use quickwit_proto::opentelemetry::proto::collector::logs::v1::{
         ExportLogsServiceRequest, ExportLogsServiceResponse,
     };

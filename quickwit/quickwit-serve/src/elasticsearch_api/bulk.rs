@@ -18,13 +18,10 @@ use std::time::Instant;
 use bytesize::ByteSize;
 use quickwit_common::rate_limited_error;
 use quickwit_config::{INGEST_V2_SOURCE_ID, validate_identifier};
-use quickwit_ingest::router_client::{
-    IngestFailure as RouterFailure, IngestResponse as RouterResponse, IngestRouterClient,
-};
+use quickwit_ingest::router_client::{IngestResponse as RouterResponse, IngestRouterClient};
 use quickwit_ingest::{IngestRequestV2Builder, IngestServiceError, split_ndjson_lines};
 use quickwit_proto::ServiceError;
 use quickwit_proto::ingest::CommitTypeV2;
-use quickwit_proto::ingest::router::IngestFailureReason;
 use quickwit_proto::types::{DocUid, IndexId};
 use serde::{Deserialize, Serialize};
 use warp::hyper::StatusCode;
@@ -302,49 +299,37 @@ fn make_elastic_bulk_response_v2(
                 })?;
 
         // Populate the response items with one error per doc handle.
-        let (exception, reason, status) = match &failure {
-            RouterFailure::Ingesthree { error, .. } => {
-                let exception = match error {
-                    IngestServiceError::BadRequest(_) => ElasticException::IllegalArgument,
-                    IngestServiceError::RateLimited(_) => ElasticException::RateLimited,
-                    _ => ElasticException::Internal,
-                };
-                (
-                    exception,
-                    error.to_string(),
-                    error.error_code().http_status_code(),
-                )
-            }
-            RouterFailure::V2(failure) => match failure.reason() {
-                IngestFailureReason::IndexNotFound => (
-                    ElasticException::IndexNotFound,
-                    format!("no such index [{}]", failure.index_id),
-                    StatusCode::NOT_FOUND,
-                ),
-                IngestFailureReason::SourceNotFound => (
-                    ElasticException::SourceNotFound,
-                    format!("no such source [{}]", failure.index_id),
-                    StatusCode::NOT_FOUND,
-                ),
-                IngestFailureReason::Timeout => (
-                    ElasticException::Timeout,
-                    format!("timeout [{}]", failure.index_id),
-                    StatusCode::REQUEST_TIMEOUT,
-                ),
-                reason => {
-                    let pretty_reason = reason
-                        .as_str_name()
-                        .strip_prefix("INGEST_FAILURE_REASON_")
-                        .unwrap_or("")
-                        .replace('_', " ")
-                        .to_ascii_lowercase();
-                    (
-                        ElasticException::Internal,
-                        format!("{} error [{}]", pretty_reason, failure.index_id),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    )
-                }
-            },
+        let (exception, reason, status) = match &failure.error {
+            IngestServiceError::IndexNotFound { index_id } => (
+                ElasticException::IndexNotFound,
+                format!("no such index [{index_id}]"),
+                StatusCode::NOT_FOUND,
+            ),
+            IngestServiceError::SourceNotFound { index_id } => (
+                ElasticException::SourceNotFound,
+                format!("no such source [{index_id}]"),
+                StatusCode::NOT_FOUND,
+            ),
+            IngestServiceError::Timeout => (
+                ElasticException::Timeout,
+                format!("timeout [{}]", failure.index_id),
+                StatusCode::REQUEST_TIMEOUT,
+            ),
+            IngestServiceError::BadRequest(_) => (
+                ElasticException::IllegalArgument,
+                failure.error.to_string(),
+                failure.error.error_code().http_status_code(),
+            ),
+            IngestServiceError::RateLimited(_) => (
+                ElasticException::RateLimited,
+                failure.error.to_string(),
+                failure.error.error_code().http_status_code(),
+            ),
+            error => (
+                ElasticException::Internal,
+                error.to_string(),
+                error.error_code().http_status_code(),
+            ),
         };
         for mut doc_handle in doc_handles {
             let error = ElasticBulkError {
@@ -427,10 +412,10 @@ fn make_invalid_index_id_item(index_id: String, es_doc_id: Option<String>) -> El
 mod tests {
     use bytesize::ByteSize;
     use quickwit_ingest::router_client::MockIngestRouter;
-    use quickwit_proto::ingest::router::{
-        IngestFailure, IngestFailureReason, IngestResponseV2, IngestSuccess,
+    use quickwit_proto::ingest::{
+        IngestFailure, IngestFailureReason, IngestResponseV2, IngestSuccess, ParseFailure,
+        ParseFailureReason,
     };
-    use quickwit_proto::ingest::{ParseFailure, ParseFailureReason};
     use quickwit_proto::types::IndexUid;
     use warp::{Filter, Rejection, Reply};
 
@@ -786,11 +771,13 @@ mod tests {
         ]
         .into_iter()
         .enumerate()
-        .map(|(index, error)| RouterFailure::Ingesthree {
-            subrequest_id: index as u32 + 1,
-            index_id: "test-index".into(),
-            error,
-        })
+        .map(
+            |(index, error)| quickwit_ingest::router_client::IngestFailure {
+                subrequest_id: index as u32 + 1,
+                index_id: "test-index".into(),
+                error,
+            },
+        )
         .collect();
         let handles = (0..4)
             .map(|index| {

@@ -18,7 +18,7 @@ mod transport;
 use std::pin::Pin;
 
 use futures::Future;
-pub use metrics::{GrpcMetrics, GrpcMetricsLayer, GrpcStatusCode, RpcName};
+pub use metrics::{GrpcMetricsLayer, GrpcStatusCode};
 pub use transport::{BalanceChannel, Change, warmup_channel};
 
 pub type BoxFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'static>>;

@@ -17,8 +17,7 @@ use std::collections::hash_map::Entry;
 
 use bytes::buf::Writer;
 use bytes::{BufMut, BytesMut};
-use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
-use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2, IngestRequestV2, IngestSubrequest};
 use quickwit_proto::types::{DocUid, DocUidGenerator, IndexId, SubrequestId};
 use serde::Serialize;
 

@@ -18,8 +18,7 @@ use quickwit_common::rate_limited_warn;
 use quickwit_config::{INGEST_V2_SOURCE_ID, validate_identifier, validate_index_id_pattern};
 use quickwit_ingest::IngestServiceError;
 use quickwit_ingest::router_client::IngestRouterClient;
-use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
-use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2, IngestRequestV2, IngestSubrequest};
 use quickwit_proto::opentelemetry::proto::common::v1::any_value::Value as OtlpValue;
 use quickwit_proto::opentelemetry::proto::common::v1::{
     AnyValue as OtlpAnyValue, ArrayValue as OtlpArrayValue, KeyValue as OtlpKeyValue,

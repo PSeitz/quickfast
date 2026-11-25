@@ -23,7 +23,7 @@ use quickwit_config::{INGEST_V2_SOURCE_ID, SourceInputFormat, SourceParams, buil
 use quickwit_doc_mapper::DocMapper;
 use quickwit_metastore::{IndexMetadata, IndexMetadataResponseExt, IndexesMetadataResponseExt};
 use quickwit_proto::ServiceError;
-use quickwit_proto::ingest::router::IngestFailureReason;
+use quickwit_proto::ingest::IngestFailureReason;
 use quickwit_proto::metastore::{
     EntityKind, IndexMetadataRequest, IndexMetadataSubrequest, IndexesMetadataRequest,
     MetastoreError, MetastoreService, MetastoreServiceClient,

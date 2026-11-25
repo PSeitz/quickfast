@@ -41,8 +41,7 @@ use quickwit_config::{
 use quickwit_ingest::IngestServiceError;
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_metastore::ListIndexesMetadataResponseExt;
-use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
-use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2};
+use quickwit_proto::ingest::{CommitTypeV2, DocBatchV2, IngestRequestV2, IngestSubrequest};
 use quickwit_proto::metastore::{
     ListIndexesMetadataRequest, MetastoreService, MetastoreServiceClient,
 };

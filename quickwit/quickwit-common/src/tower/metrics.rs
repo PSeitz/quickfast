@@ -22,19 +22,8 @@ use quickwit_metrics::{
     Counter, Gauge, Histogram, Labels, LazyCounter, LazyGauge, LazyHistogram, counter, gauge,
     histogram, labels, lazy_counter, lazy_gauge, lazy_histogram,
 };
-use tower::{Layer, Service};
 
 use crate::metrics::exponential_buckets;
-
-pub trait RpcName {
-    fn rpc_name() -> &'static str;
-}
-
-impl<T: RpcName> RpcName for tonic::Request<T> {
-    fn rpc_name() -> &'static str {
-        T::rpc_name()
-    }
-}
 
 /// Returns the gRPC status code associated with a service error.
 pub trait GrpcStatusCode {
@@ -93,52 +82,6 @@ static GRPC_REQUEST_DURATION_SECONDS: LazyHistogram = lazy_histogram!(
         subsystem: "grpc",
         buckets: exponential_buckets(0.001, 2.0, 12).unwrap(),
 );
-
-#[derive(Clone)]
-pub struct GrpcMetrics<S> {
-    inner: S,
-    requests_total: Counter,
-    requests_in_flight: Gauge,
-    request_duration_seconds: Histogram,
-}
-
-impl<S, R> Service<R> for GrpcMetrics<S>
-where
-    S: Service<R>,
-    S::Error: GrpcStatusCode,
-    R: RpcName,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = ResponseFuture<S::Future>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, request: R) -> Self::Future {
-        let start = Instant::now();
-        let rpc_name = R::rpc_name();
-        let inner = self.inner.call(request);
-
-        gauge!(
-            parent: self.requests_in_flight,
-            "rpc" => rpc_name,
-        )
-        .inc();
-
-        ResponseFuture {
-            inner,
-            start,
-            rpc_name,
-            status: "cancelled",
-            code: "cancelled",
-            requests_total: self.requests_total.clone(),
-            requests_in_flight: self.requests_in_flight.clone(),
-            request_duration_seconds: self.request_duration_seconds.clone(),
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct GrpcMetricsLayer {
@@ -215,20 +158,7 @@ impl GrpcMetricsLayer {
     }
 }
 
-impl<S> Layer<S> for GrpcMetricsLayer {
-    type Service = GrpcMetrics<S>;
-
-    fn layer(&self, inner: S) -> Self::Service {
-        GrpcMetrics {
-            inner,
-            requests_total: self.requests_total.clone(),
-            requests_in_flight: self.requests_in_flight.clone(),
-            request_duration_seconds: self.request_duration_seconds.clone(),
-        }
-    }
-}
-
-/// Response future for [`GrpcMetrics`].
+/// Response future for [`GrpcMetricsLayer::instrument_rpc`].
 #[pin_project(PinnedDrop)]
 pub struct ResponseFuture<F> {
     #[pin]
@@ -288,23 +218,6 @@ mod tests {
 
     use super::*;
 
-    #[derive(Clone, Debug)]
-    struct HelloRequest;
-
-    impl RpcName for HelloRequest {
-        fn rpc_name() -> &'static str {
-            "hello"
-        }
-    }
-
-    struct GoodbyeRequest;
-
-    impl RpcName for GoodbyeRequest {
-        fn rpc_name() -> &'static str {
-            "goodbye"
-        }
-    }
-
     #[tokio::test(start_paused = true)]
     async fn test_tonic_request_grpc_metrics_errors_and_cancellation() {
         for kind in ["client", "server"] {
@@ -313,45 +226,31 @@ mod tests {
             let count = |status: &'static str, code: &'static str| {
                 counter!(parent: layer.requests_total, "rpc" => "hello", "status" => status, "code" => code).get()
             };
-            let mut success = layer.layer(tower::service_fn(
-                |request: tonic::Request<HelloRequest>| async move {
-                    assert_eq!(
-                        request.metadata().get("ingest-version").unwrap(),
-                        "ingesthree"
-                    );
-                    Ok::<_, tonic::Status>(request.into_inner())
-                },
-            ));
-            let mut request = tonic::Request::new(HelloRequest);
-            request
-                .metadata_mut()
-                .insert("ingest-version", "ingesthree".parse().unwrap());
-            success.call(request).await.unwrap();
+            layer
+                .instrument_rpc("hello", async { Ok::<(), tonic::Status>(()) })
+                .await
+                .unwrap();
             assert_eq!(count("success", "ok"), 1);
             assert_eq!(in_flight.get(), 0.0);
 
-            let mut rejected =
-                layer.layer(tower::service_fn(|_: tonic::Request<HelloRequest>| async {
+            layer
+                .instrument_rpc("hello", async {
                     Err::<(), _>(tonic::Status::failed_precondition("missing version"))
-                }));
-            rejected
-                .call(tonic::Request::new(HelloRequest))
+                })
                 .await
                 .unwrap_err();
             assert_eq!(count("error", "failed_precondition"), 1);
             assert_eq!(in_flight.get(), 0.0);
 
-            let mut timed_out =
-                layer.layer(tower::service_fn(|_: tonic::Request<HelloRequest>| async {
+            let status = layer
+                .instrument_rpc("hello", async {
                     tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         std::future::pending::<Result<(), tonic::Status>>(),
                     )
                     .await
                     .unwrap_or_else(|_| Err(tonic::Status::deadline_exceeded("intake timed out")))
-                }));
-            let status = timed_out
-                .call(tonic::Request::new(HelloRequest))
+                })
                 .await
                 .unwrap_err();
             assert_eq!(status.code(), tonic::Code::DeadlineExceeded);
@@ -359,10 +258,9 @@ mod tests {
             assert_eq!(count("cancelled", "cancelled"), 0);
             assert_eq!(in_flight.get(), 0.0);
 
-            let mut pending = layer.layer(tower::service_fn(|_: tonic::Request<HelloRequest>| {
-                std::future::pending::<Result<(), tonic::Status>>()
-            }));
-            let mut response = Box::pin(pending.call(tonic::Request::new(HelloRequest)));
+            let mut response = Box::pin(
+                layer.instrument_rpc("hello", std::future::pending::<Result<(), tonic::Status>>()),
+            );
             assert!(futures::poll!(&mut response).is_pending());
             assert_eq!(in_flight.get(), 1.0);
             drop(response);
@@ -390,34 +288,34 @@ mod tests {
                     labels!("metastore_kind" => "read_replica", "test_label" => "test"),
                 );
 
-                let mut hello_service = primary_layer.clone().layer(tower::service_fn(
-                    |request: HelloRequest| async move { Ok::<_, tonic::Status>(request) },
-                ));
-                let mut goodbye_service = primary_layer.clone().layer(tower::service_fn(
-                    |request: GoodbyeRequest| async move { Ok::<_, tonic::Status>(request) },
-                ));
-                let mut read_replica_service = read_replica_layer.layer(tower::service_fn(
-                    |request: HelloRequest| async move { Ok::<_, tonic::Status>(request) },
-                ));
-                let mut failing_service = primary_layer.clone().layer(tower::service_fn(
-                    |_request: HelloRequest| async move {
-                        Err::<HelloRequest, _>(tonic::Status::not_found("not found"))
-                    },
-                ));
+                primary_layer
+                    .instrument_rpc("hello", async { Ok::<(), tonic::Status>(()) })
+                    .await
+                    .unwrap();
+                primary_layer
+                    .instrument_rpc("goodbye", async { Ok::<(), tonic::Status>(()) })
+                    .await
+                    .unwrap();
+                read_replica_layer
+                    .instrument_rpc("hello", async { Ok::<(), tonic::Status>(()) })
+                    .await
+                    .unwrap();
+                primary_layer
+                    .instrument_rpc("hello", async {
+                        Err::<(), _>(tonic::Status::not_found("not found"))
+                    })
+                    .await
+                    .unwrap_err();
 
-                hello_service.call(HelloRequest).await.unwrap();
-                goodbye_service.call(GoodbyeRequest).await.unwrap();
-                read_replica_service.call(HelloRequest).await.unwrap();
-                failing_service.call(HelloRequest).await.unwrap_err();
-
-                let hello_future = hello_service.call(HelloRequest);
+                let hello_future =
+                    primary_layer.instrument_rpc("hello", async { Ok::<(), tonic::Status>(()) });
                 drop(hello_future);
 
                 primary_layer.record_retry("hello", tonic::Code::Unavailable);
                 primary_layer.record_retry("hello", tonic::Code::Unavailable);
                 let _ = primary_layer
                     .instrument_rpc("hello", async {
-                        Err::<HelloRequest, _>(tonic::Status::unavailable("unavailable"))
+                        Err::<(), _>(tonic::Status::unavailable("unavailable"))
                     })
                     .await;
             });

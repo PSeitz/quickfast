@@ -15,11 +15,10 @@
 use quickwit_common::metrics::IN_FLIGHT_INGEST_ROUTER;
 use quickwit_common::tower::GrpcMetricsLayer;
 use quickwit_metrics::{Counter, Gauge, LazyCounter, counter, lazy_counter};
-use quickwit_proto::ingest::router::IngestFailureReason;
 use quickwit_proto::types::AvailabilityZone;
 
 use crate::IngestServiceError;
-use crate::router_client::{IngestFailure, IngestResponse};
+use crate::router_client::IngestResponse;
 
 // Identical name and labels share the v2 counters through quickwit-metrics registration.
 static INGEST_RESULT_TOTAL: LazyCounter = lazy_counter!(
@@ -59,18 +58,7 @@ impl RouterMetrics {
         counter!(parent: self.results, "result" => "success")
             .inc_by(response.successes.len() as u64);
         for failure in &response.failures {
-            let result = match failure {
-                IngestFailure::V2(failure) => match failure.reason() {
-                    IngestFailureReason::Unspecified => "unspecified",
-                    IngestFailureReason::IndexNotFound => "index_not_found",
-                    IngestFailureReason::SourceNotFound => "source_not_found",
-                    IngestFailureReason::Internal => "internal",
-                    IngestFailureReason::Timeout => "timeout",
-                    IngestFailureReason::LoadShedding => "load_shedding",
-                },
-                IngestFailure::Ingesthree { error, .. } => error_result(error),
-            };
-            counter!(parent: self.results, "result" => result).inc();
+            counter!(parent: self.results, "result" => error_result(&failure.error)).inc();
         }
     }
 
@@ -98,13 +86,12 @@ impl RouterMetrics {
 fn error_result(error: &IngestServiceError) -> &'static str {
     match error {
         IngestServiceError::IndexNotFound { .. } => "index_not_found",
-        IngestServiceError::BadRequest(_) | IngestServiceError::InvalidPosition(_) => "bad_request",
+        IngestServiceError::SourceNotFound { .. } => "source_not_found",
+        IngestServiceError::Timeout => "timeout",
+        IngestServiceError::BadRequest(_) => "bad_request",
         IngestServiceError::RateLimited(_) => "load_shedding",
         IngestServiceError::Unavailable(_) => "unavailable",
-        IngestServiceError::Corruption(_)
-        | IngestServiceError::IndexAlreadyExists { .. }
-        | IngestServiceError::Internal(_)
-        | IngestServiceError::IoError(_) => "internal",
+        IngestServiceError::Internal(_) => "internal",
     }
 }
 
@@ -164,8 +151,7 @@ mod tests {
 
     #[test]
     fn test_ingesthree_results_count_subrequests_including_all_invalid_batches() {
-        use quickwit_proto::ingest::router::IngestSuccess;
-        use quickwit_proto::ingest::{ParseFailure, ParseFailureReason};
+        use quickwit_proto::ingest::{IngestSuccess, ParseFailure, ParseFailureReason};
 
         let metrics = RouterMetrics::for_test("subrequest_results");
         let response = IngestResponse {

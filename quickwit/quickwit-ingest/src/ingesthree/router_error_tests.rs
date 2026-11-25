@@ -112,11 +112,6 @@ async fn test_ingesthree_client_preserves_partial_results_and_backend_errors() {
     {
         assert_eq!(failure.subrequest_id(), index as u32 + 1);
         assert_eq!(failure.index_id(), indexes[index + 1]);
-        if index < 3 {
-            assert!(matches!(failure, IngestFailure::Ingesthree { .. }));
-        } else {
-            assert!(matches!(failure, IngestFailure::V2(_)));
-        }
         assert_eq!(
             IngestServiceError::from(failure)
                 .error_code()

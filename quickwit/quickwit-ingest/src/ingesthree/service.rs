@@ -18,17 +18,15 @@ use std::sync::Arc;
 use quickwit_cluster::Cluster;
 use quickwit_common::tower::GrpcMetricsLayer;
 use quickwit_config::INGEST_V2_SOURCE_ID;
-use quickwit_proto::ingest::CommitTypeV2;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_server::{
     IngesthreeService as GrpcIngesthreeService, IngesthreeServiceServer,
 };
-use quickwit_proto::ingest::router::{
-    IngestFailure, IngestFailureReason, IngestRequestV2, IngestResponseV2, IngestSubrequest,
-    IngestSuccess,
+use quickwit_proto::ingest::{
+    CommitTypeV2, IngestFailure, IngestFailureReason, IngestRequestV2, IngestResponseV2,
+    IngestSubrequest, IngestSuccess,
 };
 use quickwit_proto::metastore::MetastoreServiceClient;
 use tonic::{Request, Response, Status};
-use tower::{Layer, Service};
 
 use super::metadata_cache::{MetadataCache, MetadataWatch, ResolveError};
 use super::{IngestError, WriteQueue};
@@ -158,8 +156,7 @@ impl GrpcIngesthreeService for IngesthreeService {
         request: Request<IngestRequestV2>,
     ) -> Result<Response<IngestResponseV2>, Status> {
         self.grpc_metrics
-            .layer(tower::service_fn(|request| self.ingest_request(request)))
-            .call(request)
+            .instrument_rpc("ingest", self.ingest_request(request))
             .await
     }
 }

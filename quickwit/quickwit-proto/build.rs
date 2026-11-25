@@ -114,12 +114,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[PathBuf::from("protos")],
         )?;
 
-    // Ingest wire types (shared by IngesthreeService and internal routing).
-    println!("cargo:rerun-if-changed=protos/quickwit/ingest.proto");
-    println!("cargo:rerun-if-changed=protos/quickwit/router.proto");
+    // Ingest service and wire types.
+    println!("cargo:rerun-if-changed=protos/quickwit/ingesthree.proto");
     let mut prost_config = prost_build::Config::default();
     prost_config
-        .bytes(["DocBatchV2.doc_buffer"])
+        .file_descriptor_set_path("src/codegen/quickwit/ingesthree_descriptor.bin")
+        .bytes(["DocBatchV2.doc_buffer"]);
+    tonic_prost_build::configure()
         .extern_path(
             ".quickwit.common.DocMappingUid",
             "crate::types::DocMappingUid",
@@ -131,22 +132,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
         )
         .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
-        .out_dir("src/codegen/quickwit");
-    prost_config.compile_protos(&["protos/quickwit/router.proto"], &["protos"])?;
-
-    // Ingesthree has a distinct wire service and retains tonic request metadata so
-    // the version guard runs before admission. Shared messages keep public adapters reusable.
-    println!("cargo:rerun-if-changed=protos/quickwit/ingesthree.proto");
-    tonic_prost_build::configure()
-        .file_descriptor_set_path("src/codegen/quickwit/ingesthree_descriptor.bin")
-        .extern_path(".quickwit.ingest.router", "crate::ingest::router")
-        // Keep imported service output separate from Quickwit's generated adapters.
-        .out_dir(std::env::var("OUT_DIR")?)
-        .compile_protos(&["protos/quickwit/ingesthree.proto"], &["protos"])?;
-    std::fs::copy(
-        PathBuf::from(std::env::var("OUT_DIR")?).join("quickwit.ingest.ingesthree.rs"),
-        "src/codegen/quickwit/quickwit.ingest.ingesthree.rs",
-    )?;
+        .out_dir("src/codegen/quickwit")
+        .compile_with_config(
+            prost_config,
+            &[PathBuf::from("protos/quickwit/ingesthree.proto")],
+            &[PathBuf::from("protos")],
+        )?;
 
     // Search service.
     // `prost_build` 0.14 does not emit `cargo:rerun-if-changed` directives itself.

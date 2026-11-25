@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ingest::router::*;
 use crate::ingest::*;
 use crate::metastore::*;
 use crate::types::*;

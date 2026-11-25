@@ -108,7 +108,7 @@ async fn test_ingesthree_router_deadline_counts_timeout_and_releases_memory() {
     tokio::time::advance(Duration::from_secs(6)).await;
     let response = response.await.unwrap();
     assert!(
-        matches!(&response.failures[0], IngestFailure::V2(failure) if failure.reason() == IngestFailureReason::Timeout),
+        matches!(response.failures[0].error, IngestServiceError::Timeout),
         "{response:?}"
     );
     assert_eq!(metrics.result_count("timeout"), 1);

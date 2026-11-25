@@ -19,8 +19,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::DocUid;
 
-pub mod router;
-
 pub mod ingesthree {
     include!("../codegen/quickwit/quickwit.ingest.ingesthree.rs");
 
@@ -28,7 +26,25 @@ pub mod ingesthree {
         include_bytes!("../codegen/quickwit/ingesthree_descriptor.bin");
 }
 
-include!("../codegen/quickwit/quickwit.ingest.rs");
+pub use ingesthree::*;
+
+impl IngestRequestV2 {
+    pub fn num_bytes(&self) -> usize {
+        self.subrequests
+            .iter()
+            .map(|subrequest| subrequest.num_bytes())
+            .sum()
+    }
+}
+
+impl IngestSubrequest {
+    pub fn num_bytes(&self) -> usize {
+        self.doc_batch
+            .as_ref()
+            .map(|doc_batch| doc_batch.doc_buffer.len())
+            .unwrap_or(0)
+    }
+}
 
 #[derive(Debug, Copy, Clone, thiserror::Error, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RateLimitingCause {

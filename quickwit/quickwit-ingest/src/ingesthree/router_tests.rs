@@ -19,11 +19,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use quickwit_cluster::{ChitchatTransport, TestClusterBuilder};
 use quickwit_config::INGEST_V2_SOURCE_ID;
 use quickwit_config::service::QuickwitService;
-use quickwit_proto::ingest::DocBatchV2;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_server::{
     IngesthreeService, IngesthreeServiceServer,
 };
-use quickwit_proto::ingest::router::IngestSuccess;
+use quickwit_proto::ingest::{DocBatchV2, IngestSuccess};
 use quickwit_proto::types::{IndexUid, NodeId};
 use quickwit_proto::{ServiceError, ServiceErrorCode};
 use tokio::net::TcpListener;
@@ -417,11 +416,8 @@ async fn test_ingesthree_exhausted_capacity_is_429_compatible_and_retries_are_li
     .await;
     assert!(response.successes.is_empty());
     assert!(matches!(
-        response.failures[0],
-        IngestFailure::Ingesthree {
-            error: IngestServiceError::RateLimited(RateLimitingCause::LoadShedding),
-            ..
-        }
+        response.failures[0].error,
+        IngestServiceError::RateLimited(RateLimitingCause::LoadShedding)
     ));
     assert!(matches!(
         crate::IngestServiceError::from(response.failures[0].clone()).error_code(),

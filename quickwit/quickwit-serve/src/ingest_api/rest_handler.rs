@@ -15,8 +15,7 @@
 use quickwit_config::{INGEST_V2_SOURCE_ID, IngestApiConfig, validate_identifier};
 use quickwit_ingest::router_client::IngestRouterClient;
 use quickwit_ingest::{IngestServiceError, doc_batch_v2_from_ndjson};
-use quickwit_proto::ingest::CommitTypeV2;
-use quickwit_proto::ingest::router::{IngestRequestV2, IngestSubrequest};
+use quickwit_proto::ingest::{CommitTypeV2, IngestRequestV2, IngestSubrequest};
 use quickwit_proto::types::IndexId;
 use serde::Deserialize;
 use warp::{Filter, Rejection};
@@ -152,7 +151,7 @@ async fn ingest(
 mod tests {
     use quickwit_config::IngestApiConfig;
     use quickwit_ingest::router_client::{IngestResponse, IngestRouterClient, MockIngestRouter};
-    use quickwit_proto::ingest::router::IngestSuccess;
+    use quickwit_proto::ingest::IngestSuccess;
     use warp::Filter;
 
     use super::{RestIngestResponse, ingest_api_handlers};

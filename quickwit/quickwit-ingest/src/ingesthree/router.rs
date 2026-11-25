@@ -20,20 +20,19 @@ use quickwit_cluster::{Cluster, ClusterNode};
 use quickwit_common::rendezvous_hasher::node_affinity;
 use quickwit_metrics::GaugeGuard;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_client::IngesthreeServiceClient;
-use quickwit_proto::ingest::router::{
-    IngestFailureReason, IngestRequestV2, IngestResponseV2, IngestSubrequest,
+use quickwit_proto::ingest::{
+    CommitTypeV2, IngestFailureReason, IngestRequestV2, IngestResponseV2, IngestSubrequest,
+    RateLimitingCause,
 };
-use quickwit_proto::ingest::{CommitTypeV2, RateLimitingCause};
 use quickwit_proto::types::{AvailabilityZone, NodeId};
 use tonic::{Code, Request, Status};
-use tower::{Layer, Service};
 
 #[path = "router_metrics.rs"]
 mod metrics;
 
 use metrics::RouterMetrics;
 
-use super::service::{VERSION, VERSION_HEADER, failure, validate_request};
+use super::service::{VERSION, VERSION_HEADER, validate_request};
 use crate::IngestServiceError;
 use crate::router_client::{IngestFailure, IngestResponse};
 
@@ -193,22 +192,19 @@ async fn route_subrequest(
         request.set_timeout(Duration::from_secs(5));
         let result = metrics
             .grpc_client
-            .layer(tower::service_fn(move |request| {
-                let mut client = client.clone();
-                async move {
-                    // Keep expiry inside the metrics layer and prioritize it if both
-                    // timers have elapsed: tonic reports its transport timeout as Cancelled.
-                    // Dropping the caller's future still counts as cancellation.
-                    tokio::select! {
-                        biased;
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                            Err(Status::deadline_exceeded("ingesthree intake timed out"))
-                        }
-                        response = client.ingest(request) => response,
+            .instrument_rpc("ingest", async move {
+                let mut client = client;
+                // Keep expiry inside the metrics layer and prioritize it if both
+                // timers have elapsed: tonic reports its transport timeout as Cancelled.
+                // Dropping the caller's future still counts as cancellation.
+                tokio::select! {
+                    biased;
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        Err(Status::deadline_exceeded("ingesthree intake timed out"))
                     }
+                    response = client.ingest(request) => response,
                 }
-            }))
-            .call(request)
+            })
             .await;
         let attempt_error = match result {
             Ok(response) => {
@@ -234,11 +230,14 @@ async fn route_subrequest(
                     }
                     // Preserve the existing timeout response and stop retrying.
                     Code::DeadlineExceeded => {
-                        return IngestResponseV2 {
+                        return IngestResponse {
                             successes: Vec::new(),
-                            failures: vec![failure(subrequest, IngestFailureReason::Timeout)],
-                        }
-                        .into();
+                            failures: vec![IngestFailure {
+                                subrequest_id: subrequest.subrequest_id,
+                                index_id: subrequest.index_id.clone(),
+                                error: IngestServiceError::Timeout,
+                            }],
+                        };
                     }
                     _ => IngestServiceError::Internal(status.to_string()),
                 }
@@ -260,7 +259,7 @@ async fn route_subrequest(
     }
     IngestResponse {
         successes: Vec::new(),
-        failures: vec![IngestFailure::Ingesthree {
+        failures: vec![IngestFailure {
             subrequest_id: subrequest.subrequest_id,
             index_id: subrequest.index_id.clone(),
             error,

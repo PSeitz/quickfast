@@ -120,9 +120,8 @@ fn apply_op<T>(a: Option<T>, b: Option<T>, f: impl Fn(T, T) -> T) -> Option<T> {
 }
 #[cfg(test)]
 mod tests {
-    use quickwit_proto::ingest::ParseFailure;
-    use quickwit_proto::ingest::router::{
-        IngestFailure, IngestFailureReason, IngestResponseV2, IngestSuccess,
+    use quickwit_proto::ingest::{
+        IngestFailure, IngestFailureReason, IngestResponseV2, IngestSuccess, ParseFailure,
     };
     use quickwit_proto::types::IndexUid;
 
