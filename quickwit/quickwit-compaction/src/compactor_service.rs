@@ -296,6 +296,9 @@ impl CompactorService {
             }
             Err(error) => {
                 error!(%error, "failed to report status to compaction planner");
+                if statuses.is_empty() {
+                    self.check_decommissioning_status();
+                }
             }
         }
     }

@@ -23,7 +23,6 @@ tonic = { workspace = true }
 tower = { workspace = true }
 utoipa = { workspace = true }
 
-quickwit-actors = { workspace = true }
 quickwit-proto = { workspace = true }
 
 [dev-dependencies]

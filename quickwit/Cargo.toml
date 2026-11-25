@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-  "quickwit-actors",
   "quickwit-aws",
   "quickwit-cli",
   "quickwit-cluster",
@@ -326,7 +325,6 @@ opendal = { version = "0.59", default-features = false, features = [
 reqsign-core = { version = "3.3", default-features = false }
 reqsign-google = { version = "3.2", default-features = false }
 
-quickwit-actors = { path = "quickwit-actors" }
 quickwit-aws = { path = "quickwit-aws" }
 quickwit-cli = { path = "quickwit-cli" }
 quickwit-cluster = { path = "quickwit-cluster" }

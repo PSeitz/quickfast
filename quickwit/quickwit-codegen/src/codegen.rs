@@ -228,7 +228,6 @@ struct CodegenContext {
     inner_client_name: Ident,
     tower_svc_stack_name: Ident,
     tower_layer_stack_name: Ident,
-    mailbox_name: Ident,
     mock_mod_name: Ident,
     mock_name: Ident,
     grpc_client_name: Ident,
@@ -273,7 +272,6 @@ impl CodegenContext {
         let inner_client_name = quote::format_ident!("Inner{}", client_name);
         let tower_svc_stack_name = quote::format_ident!("{}TowerServiceStack", service.name);
         let tower_layer_stack_name = quote::format_ident!("{}TowerLayerStack", service.name);
-        let mailbox_name = quote::format_ident!("{}Mailbox", service.name);
 
         let grpc_client_name = quote::format_ident!("{}GrpcClient", service.name);
         let grpc_client_adapter_name = quote::format_ident!("{}GrpcClientAdapter", service.name);
@@ -300,7 +298,6 @@ impl CodegenContext {
             inner_client_name,
             tower_svc_stack_name,
             tower_layer_stack_name,
-            mailbox_name,
             mock_mod_name,
             mock_name,
             grpc_client_name,
@@ -337,7 +334,6 @@ fn generate_all(
     let tower_services = generate_tower_services(&context);
     let tower_svc_stack = generate_tower_svc_stack(&context);
     let tower_layer_stack = generate_tower_layer_stack(&context);
-    let tower_mailbox = generate_tower_mailbox(&context);
     let grpc_client_adapter = generate_grpc_client_adapter(&context);
     let grpc_server_adapter = generate_grpc_server_adapter(&context);
     let prom_labels_impl = if generate_prom_labels_for_requests {
@@ -367,8 +363,6 @@ fn generate_all(
         #tower_svc_stack
 
         #tower_layer_stack
-
-        #tower_mailbox
 
         #grpc_client_adapter
 
@@ -611,7 +605,6 @@ fn generate_client(context: &CodegenContext) -> TokenStream {
     let client_methods = generate_client_methods(context, false);
     let mock_mod_name = &context.mock_mod_name;
     let mock_methods = generate_client_methods(context, true);
-    let mailbox_name = &context.mailbox_name;
     let tower_layer_stack_name = &context.tower_layer_stack_name;
     let mock_name = &context.mock_name;
     let mock_wrapper_name = quote::format_ident!("{}Wrapper", mock_name);
@@ -708,14 +701,6 @@ fn generate_client(context: &CodegenContext) -> TokenStream {
                 }
                 let adapter = #grpc_client_adapter_name::new(client, connection_keys_watcher);
                 Self::new(adapter)
-            }
-
-            pub fn from_mailbox<A>(mailbox: quickwit_actors::Mailbox<A>) -> Self
-            where
-                A: quickwit_actors::Actor + std::fmt::Debug + Send + 'static,
-                #mailbox_name<A>: #service_name,
-            {
-                #client_name::new(#mailbox_name::new(mailbox))
             }
 
             pub fn tower() -> #tower_layer_stack_name {
@@ -967,7 +952,6 @@ fn generate_layer_stack_impl(context: &CodegenContext) -> TokenStream {
     let service_name = &context.service_name;
     let client_name = &context.client_name;
     let inner_client_name = &context.inner_client_name;
-    let mailbox_name = &context.mailbox_name;
     let mock_name = &context.mock_name;
     let tower_svc_stack_name = &context.tower_svc_stack_name;
     let tower_layer_stack_name = &context.tower_layer_stack_name;
@@ -1070,15 +1054,6 @@ fn generate_layer_stack_impl(context: &CodegenContext) -> TokenStream {
                 self.build_from_inner_client(inner_client)
             }
 
-            pub fn build_from_mailbox<A>(self, mailbox: quickwit_actors::Mailbox<A>) -> #client_name
-            where
-                A: quickwit_actors::Actor + std::fmt::Debug + Send + 'static,
-                #mailbox_name<A>: #service_name,
-            {
-                let inner_client = #inner_client_name(std::sync::Arc::new(#mailbox_name::new(mailbox)));
-                self.build_from_inner_client(inner_client)
-            }
-
             #[cfg(any(test, feature = "testsuite"))]
             pub fn build_from_mock(self, mock: #mock_name) -> #client_name {
                 let client = #client_name::from_mock(mock);
@@ -1098,143 +1073,6 @@ fn generate_layer_stack_impl(context: &CodegenContext) -> TokenStream {
             }
         }
     }
-}
-
-fn generate_tower_mailbox(context: &CodegenContext) -> TokenStream {
-    let service_name = &context.service_name;
-    let mailbox_name = &context.mailbox_name;
-    let error_type = &context.error_type;
-    let extra_mailbox_methods = if context.generate_extra_service_methods {
-        quote! {
-            async fn check_connectivity(&self) -> anyhow::Result<()> {
-                if self.inner.is_disconnected() {
-                    anyhow::bail!("actor `{}` is disconnected", self.inner.actor_instance_id())
-                }
-                Ok(())
-            }
-
-            fn endpoints(&self) -> Vec<quickwit_common::uri::Uri> {
-                vec![quickwit_common::uri::Uri::from_str(&format!("actor://localhost/{}", self.inner.actor_instance_id())).expect("URI should be valid")]
-            }
-        }
-    } else {
-        TokenStream::new()
-    };
-
-    let (mailbox_bounds, mailbox_methods) = generate_mailbox_bounds_and_methods(context);
-
-    quote! {
-        #[derive(Debug, Clone)]
-        struct MailboxAdapter<A: quickwit_actors::Actor, E> {
-            inner: quickwit_actors::Mailbox<A>,
-            phantom: std::marker::PhantomData<E>,
-        }
-
-        impl<A, E> std::ops::Deref for MailboxAdapter<A, E> where A: quickwit_actors::Actor {
-            type Target = quickwit_actors::Mailbox<A>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.inner
-            }
-        }
-
-        #[derive(Debug)]
-        pub struct #mailbox_name<A: quickwit_actors::Actor> {
-            inner: MailboxAdapter<A, #error_type>
-        }
-
-        impl <A: quickwit_actors::Actor> #mailbox_name<A> {
-            pub fn new(instance: quickwit_actors::Mailbox<A>) -> Self {
-                let inner = MailboxAdapter {
-                    inner: instance,
-                    phantom: std::marker::PhantomData,
-                };
-                Self {
-                    inner
-                }
-            }
-        }
-
-        impl <A: quickwit_actors::Actor> Clone for #mailbox_name<A> {
-            fn clone(&self) -> Self {
-                let inner = MailboxAdapter {
-                    inner: self.inner.clone(),
-                    phantom: std::marker::PhantomData,
-                };
-                Self { inner }
-            }
-        }
-
-        impl<A, M, T, E> tower::Service<M> for #mailbox_name<A>
-        where
-            A: quickwit_actors::Actor + quickwit_actors::DeferableReplyHandler<M, Reply = Result<T, E>> + Send + 'static,
-            M: std::fmt::Debug + Send + 'static,
-            T: Send + 'static,
-            E: std::fmt::Debug + Send + 'static,
-            #error_type: From<quickwit_actors::AskError<E>>,
-        {
-            type Response = T;
-            type Error = #error_type;
-            type Future = BoxFuture<Self::Response, Self::Error>;
-
-            fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
-                //! This does not work with balance middlewares such as `tower::balance::pool::Pool` because
-                //! this always returns `Poll::Ready`. The fix is to acquire a permit from the
-                //! mailbox in `poll_ready` and consume it in `call`.
-                std::task::Poll::Ready(Ok(()))
-            }
-
-            fn call(&mut self, message: M) -> Self::Future {
-                let mailbox = self.inner.clone();
-                let fut = async move {
-                    mailbox
-                        .ask_for_res(message)
-                        .await
-                        .map_err(|error| error.into())
-                };
-                Box::pin(fut)
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl<A> #service_name for #mailbox_name<A>
-        where
-            A: quickwit_actors::Actor + std::fmt::Debug,
-            #mailbox_name<A>: #(#mailbox_bounds)+*,
-        {
-            #mailbox_methods
-            #extra_mailbox_methods
-        }
-    }
-}
-
-fn generate_mailbox_bounds_and_methods(
-    context: &CodegenContext,
-) -> (Vec<TokenStream>, TokenStream) {
-    let result_type = &context.result_type;
-    let error_type = &context.error_type;
-
-    let mut bounds = Vec::with_capacity(context.methods.len());
-    let mut methods = TokenStream::new();
-
-    for syn_method in &context.methods {
-        let method_name = syn_method.name.to_token_stream();
-        let request_type = syn_method.request_type(false);
-        let response_type = syn_method.response_type(context, false);
-
-        let bound = quote! {
-            tower::Service<#request_type, Response = #response_type, Error = #error_type, Future = BoxFuture<#response_type, #error_type>>
-        };
-        bounds.push(bound);
-
-        let method = quote! {
-            async fn #method_name(&self, request: #request_type) -> #result_type<#response_type> {
-                self.clone().call(request).await
-            }
-        };
-        methods.extend(method);
-    }
-    (bounds, methods)
 }
 
 fn generate_grpc_client_adapter(context: &CodegenContext) -> TokenStream {

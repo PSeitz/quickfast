@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use quickwit_actors::AskError;
 use quickwit_common::tower::TimeoutExceeded;
 use quickwit_proto::error::GrpcServiceError;
 pub use quickwit_proto::error::{grpc_error_to_grpc_status, grpc_status_to_service_error};
@@ -69,14 +66,6 @@ impl GrpcServiceError for HelloError {
 
     fn new_unavailable(message: String) -> Self {
         Self::Unavailable(message)
-    }
-}
-
-impl<E> From<AskError<E>> for HelloError
-where E: fmt::Debug
-{
-    fn from(error: AskError<E>) -> Self {
-        HelloError::Internal(format!("{error:?}"))
     }
 }
 

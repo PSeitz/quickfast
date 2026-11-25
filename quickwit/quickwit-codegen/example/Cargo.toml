@@ -29,14 +29,11 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 utoipa = { workspace = true }
 
-quickwit-actors = { workspace = true }
 quickwit-common = { workspace = true }
 quickwit-proto = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
-
-quickwit-actors = { workspace = true, features = ["testsuite"] }
 
 [build-dependencies]
 quickwit-codegen = { workspace = true }

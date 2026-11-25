@@ -17,7 +17,6 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use anyhow::Context;
-use quickwit_actors::AskError;
 use quickwit_common::tower::GrpcStatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -82,18 +81,6 @@ pub trait ServiceError: Error + Debug + 'static {
 impl ServiceError for Infallible {
     fn error_code(&self) -> ServiceErrorCode {
         unreachable!()
-    }
-}
-
-impl<E> ServiceError for AskError<E>
-where E: ServiceError
-{
-    fn error_code(&self) -> ServiceErrorCode {
-        match self {
-            AskError::ErrorReply(error) => error.error_code(),
-            AskError::MessageNotDelivered => ServiceErrorCode::Unavailable,
-            AskError::ProcessMessageError => ServiceErrorCode::Internal,
-        }
     }
 }
 

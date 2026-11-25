@@ -1,7 +1,3 @@
-quickwit_actor_inboxes_count:
-  module: quickwit_actors::mailbox
-  kind: gauge
-  description: overall count of actors
 quickwit_build_info:
   module: quickwit_cli::metrics
   kind: gauge

@@ -621,6 +621,9 @@ impl ClusterSandbox {
             if handler_to_shutdown
                 .node_services
                 .contains(&QuickwitService::Indexer)
+                || handler_to_shutdown
+                    .node_services
+                    .contains(&QuickwitService::Compactor)
             {
                 indexer_shutdown_futures.push(handler_to_shutdown.shutdown());
             } else {
@@ -628,7 +631,8 @@ impl ClusterSandbox {
             }
         }
         debug!("shutting down {:?}", shutdown_nodes);
-        // We must decommision the indexer nodes first and independently from the other nodes.
+        // Decommission indexer and compactor nodes before metastore/janitor nodes so in-flight
+        // intake and compaction reports complete before their upstream coordinators shut down.
         let indexer_shutdown_results = future::join_all(indexer_shutdown_futures).await;
         let other_shutdown_results = future::join_all(other_shutdown_futures).await;
         let mut count = 0;

@@ -4,7 +4,6 @@ import graphviz
 
 FILTER = {
 	"quickwit-backward-compat",
-	"quickwit-actors",
 	"quickwit-cli",
     "quickwit-rest-client",
 	"quickwit-doc-mapper",

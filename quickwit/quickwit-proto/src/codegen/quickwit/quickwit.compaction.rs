@@ -172,15 +172,6 @@ impl CompactionPlannerServiceClient {
         );
         Self::new(adapter)
     }
-    pub fn from_mailbox<A>(mailbox: quickwit_actors::Mailbox<A>) -> Self
-    where
-        A: quickwit_actors::Actor + std::fmt::Debug + Send + 'static,
-        CompactionPlannerServiceMailbox<A>: CompactionPlannerService,
-    {
-        CompactionPlannerServiceClient::new(
-            CompactionPlannerServiceMailbox::new(mailbox),
-        )
-    }
     pub fn tower() -> CompactionPlannerServiceTowerLayerStack {
         CompactionPlannerServiceTowerLayerStack::default()
     }
@@ -367,19 +358,6 @@ impl CompactionPlannerServiceTowerLayerStack {
         let inner_client = client.inner;
         self.build_from_inner_client(inner_client)
     }
-    pub fn build_from_mailbox<A>(
-        self,
-        mailbox: quickwit_actors::Mailbox<A>,
-    ) -> CompactionPlannerServiceClient
-    where
-        A: quickwit_actors::Actor + std::fmt::Debug + Send + 'static,
-        CompactionPlannerServiceMailbox<A>: CompactionPlannerService,
-    {
-        let inner_client = InnerCompactionPlannerServiceClient(
-            std::sync::Arc::new(CompactionPlannerServiceMailbox::new(mailbox)),
-        );
-        self.build_from_inner_client(inner_client)
-    }
     #[cfg(any(test, feature = "testsuite"))]
     pub fn build_from_mock(
         self,
@@ -406,92 +384,6 @@ impl CompactionPlannerServiceTowerLayerStack {
             report_status_svc,
         };
         CompactionPlannerServiceClient::new(tower_svc_stack)
-    }
-}
-#[derive(Debug, Clone)]
-struct MailboxAdapter<A: quickwit_actors::Actor, E> {
-    inner: quickwit_actors::Mailbox<A>,
-    phantom: std::marker::PhantomData<E>,
-}
-impl<A, E> std::ops::Deref for MailboxAdapter<A, E>
-where
-    A: quickwit_actors::Actor,
-{
-    type Target = quickwit_actors::Mailbox<A>;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-#[derive(Debug)]
-pub struct CompactionPlannerServiceMailbox<A: quickwit_actors::Actor> {
-    inner: MailboxAdapter<A, crate::compaction::CompactionError>,
-}
-impl<A: quickwit_actors::Actor> CompactionPlannerServiceMailbox<A> {
-    pub fn new(instance: quickwit_actors::Mailbox<A>) -> Self {
-        let inner = MailboxAdapter {
-            inner: instance,
-            phantom: std::marker::PhantomData,
-        };
-        Self { inner }
-    }
-}
-impl<A: quickwit_actors::Actor> Clone for CompactionPlannerServiceMailbox<A> {
-    fn clone(&self) -> Self {
-        let inner = MailboxAdapter {
-            inner: self.inner.clone(),
-            phantom: std::marker::PhantomData,
-        };
-        Self { inner }
-    }
-}
-impl<A, M, T, E> tower::Service<M> for CompactionPlannerServiceMailbox<A>
-where
-    A: quickwit_actors::Actor
-        + quickwit_actors::DeferableReplyHandler<M, Reply = Result<T, E>> + Send
-        + 'static,
-    M: std::fmt::Debug + Send + 'static,
-    T: Send + 'static,
-    E: std::fmt::Debug + Send + 'static,
-    crate::compaction::CompactionError: From<quickwit_actors::AskError<E>>,
-{
-    type Response = T;
-    type Error = crate::compaction::CompactionError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        //! This does not work with balance middlewares such as `tower::balance::pool::Pool` because
-        //! this always returns `Poll::Ready`. The fix is to acquire a permit from the
-        //! mailbox in `poll_ready` and consume it in `call`.
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, message: M) -> Self::Future {
-        let mailbox = self.inner.clone();
-        let fut = async move {
-            mailbox.ask_for_res(message).await.map_err(|error| error.into())
-        };
-        Box::pin(fut)
-    }
-}
-#[async_trait::async_trait]
-impl<A> CompactionPlannerService for CompactionPlannerServiceMailbox<A>
-where
-    A: quickwit_actors::Actor + std::fmt::Debug,
-    CompactionPlannerServiceMailbox<
-        A,
-    >: tower::Service<
-        ReportStatusRequest,
-        Response = ReportStatusResponse,
-        Error = crate::compaction::CompactionError,
-        Future = BoxFuture<ReportStatusResponse, crate::compaction::CompactionError>,
-    >,
-{
-    async fn report_status(
-        &self,
-        request: ReportStatusRequest,
-    ) -> crate::compaction::CompactionResult<ReportStatusResponse> {
-        self.clone().call(request).await
     }
 }
 #[derive(Debug, Clone)]

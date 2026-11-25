@@ -6742,27 +6742,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quickwit-actors"
-version = "0.9.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "criterion",
- "flume 0.12.0",
- "futures",
- "heck 0.5.0",
- "quickwit-common",
- "quickwit-metrics",
- "rand 0.10.3",
- "serde",
- "serde_json",
- "sync_wrapper",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "quickwit-aws"
 version = "0.9.3"
 dependencies = [
@@ -6801,7 +6780,6 @@ dependencies = [
  "openssl-probe",
  "predicates",
  "procfs 0.18.0",
- "quickwit-actors",
  "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
@@ -6887,7 +6865,6 @@ dependencies = [
  "http 1.5.0",
  "mockall",
  "prost 0.14.4",
- "quickwit-actors",
  "quickwit-codegen",
  "quickwit-common",
  "quickwit-proto",
@@ -7168,7 +7145,6 @@ dependencies = [
  "mockall",
  "proptest",
  "prost 0.14.4",
- "quickwit-actors",
  "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
@@ -7241,7 +7217,6 @@ dependencies = [
  "postcard",
  "prost 0.14.4",
  "prost-types 0.14.4",
- "quickwit-actors",
  "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
@@ -7469,7 +7444,6 @@ dependencies = [
  "prost 0.14.4",
  "prost-build",
  "prost-types 0.14.4",
- "quickwit-actors",
  "quickwit-codegen",
  "quickwit-common",
  "sea-query",

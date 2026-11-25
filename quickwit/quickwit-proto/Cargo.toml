@@ -40,7 +40,6 @@ ulid = { workspace = true }
 utoipa = { workspace = true }
 zstd = { workspace = true }
 
-quickwit-actors = { workspace = true }
 quickwit-common = { workspace = true }
 
 [dev-dependencies]

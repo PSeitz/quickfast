@@ -14,7 +14,6 @@
 
 use std::io;
 
-use quickwit_actors::AskError;
 use quickwit_common::rate_limited_error;
 use quickwit_proto::ingest::RateLimitingCause;
 use quickwit_proto::ingest::router::{IngestFailure, IngestFailureReason};
@@ -42,18 +41,6 @@ pub enum IngestServiceError {
     Unavailable(String),
     #[error("bad request ({0})")]
     BadRequest(String),
-}
-
-impl From<AskError<IngestServiceError>> for IngestServiceError {
-    fn from(error: AskError<IngestServiceError>) -> Self {
-        match error {
-            AskError::ErrorReply(error) => error,
-            AskError::MessageNotDelivered => {
-                IngestServiceError::Unavailable("actor not running".to_string())
-            }
-            AskError::ProcessMessageError => IngestServiceError::Internal(error.to_string()),
-        }
-    }
 }
 
 impl From<io::Error> for IngestServiceError {

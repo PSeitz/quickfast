@@ -162,7 +162,6 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use bytesize::ByteSize;
-    use quickwit_actors::{Actor, ActorContext, ActorExitStatus, Handler, Universe};
     use quickwit_common::tower::{BalanceChannel, Change, TimeoutLayer};
     use tokio::sync::mpsc::error::TrySendError;
     use tokio_stream::StreamExt;
@@ -174,7 +173,7 @@ mod tests {
     use crate::hello::MockHello;
     use crate::hello::hello_grpc_server::HelloGrpcServer;
     use crate::hello_grpc_client::HelloGrpcClient;
-    use crate::{CounterLayer, GoodbyeRequest, GoodbyeResponse};
+    use crate::{CounterLayer, GoodbyeRequest};
 
     const MAX_GRPC_MESSAGE_SIZE: ByteSize = ByteSize::mib(1);
 
@@ -492,146 +491,6 @@ mod tests {
             })
             .unwrap_err();
         assert!(matches!(error, TrySendError::Closed(_)));
-    }
-
-    #[tokio::test]
-    async fn test_hello_codegen_actor() {
-        #[derive(Debug)]
-        struct HelloActor;
-
-        impl Actor for HelloActor {
-            type ObservableState = ();
-
-            fn observable_state(&self) -> Self::ObservableState {}
-        }
-
-        #[async_trait]
-        impl Handler<HelloRequest> for HelloActor {
-            type Reply = HelloResult<HelloResponse>;
-
-            async fn handle(
-                &mut self,
-                message: HelloRequest,
-                _ctx: &ActorContext<Self>,
-            ) -> Result<Self::Reply, ActorExitStatus> {
-                Ok(Ok(HelloResponse {
-                    message: format!("Hello, {}!", message.name),
-                }))
-            }
-        }
-
-        #[async_trait]
-        impl Handler<GoodbyeRequest> for HelloActor {
-            type Reply = HelloResult<GoodbyeResponse>;
-
-            async fn handle(
-                &mut self,
-                message: GoodbyeRequest,
-                _ctx: &ActorContext<Self>,
-            ) -> Result<Self::Reply, ActorExitStatus> {
-                Ok(Ok(GoodbyeResponse {
-                    message: format!("Goodbye, {}!", message.name),
-                }))
-            }
-        }
-
-        #[async_trait]
-        impl Handler<ServiceStream<PingRequest>> for HelloActor {
-            type Reply = HelloResult<HelloStream<PingResponse>>;
-
-            async fn handle(
-                &mut self,
-                message: ServiceStream<PingRequest>,
-                _ctx: &ActorContext<Self>,
-            ) -> Result<Self::Reply, ActorExitStatus> {
-                Ok(Ok(spawn_ping_response_stream(message)))
-            }
-        }
-
-        let universe = Universe::new();
-        let hello_actor = HelloActor;
-        let (actor_mailbox, _actor_handle) = universe.spawn_builder().spawn(hello_actor);
-        let actor_client = HelloClient::from_mailbox(actor_mailbox.clone());
-
-        assert_eq!(
-            actor_client
-                .hello(HelloRequest {
-                    name: "beautiful actor".to_string()
-                })
-                .await
-                .unwrap(),
-            HelloResponse {
-                message: "Hello, beautiful actor!".to_string()
-            }
-        );
-
-        actor_client.check_connectivity().await.unwrap();
-        assert_eq!(
-            actor_client.endpoints(),
-            vec![
-                Uri::from_str(&format!(
-                    "actor://localhost/{}",
-                    actor_mailbox.actor_instance_id()
-                ))
-                .unwrap()
-            ]
-        );
-
-        let (ping_stream_tx, ping_stream) = ServiceStream::new_bounded(1);
-        let mut pong_stream = actor_client.ping(ping_stream).await.unwrap();
-
-        ping_stream_tx
-            .try_send(PingRequest {
-                name: "beautiful actor".to_string(),
-            })
-            .unwrap();
-        assert_eq!(
-            pong_stream.next().await.unwrap().unwrap().message,
-            "Pong, beautiful actor!"
-        );
-
-        let hello_tower = HelloClient::tower().build_from_mailbox(actor_mailbox);
-
-        assert_eq!(
-            hello_tower
-                .hello(HelloRequest {
-                    name: "Tower actor".to_string()
-                })
-                .await
-                .unwrap(),
-            HelloResponse {
-                message: "Hello, Tower actor!".to_string()
-            }
-        );
-
-        assert_eq!(
-            hello_tower
-                .goodbye(GoodbyeRequest {
-                    name: "Tower actor".to_string()
-                })
-                .await
-                .unwrap(),
-            GoodbyeResponse {
-                message: "Goodbye, Tower actor!".to_string()
-            }
-        );
-
-        let (ping_stream_tx, ping_stream) = ServiceStream::new_bounded(1);
-        let mut pong_stream = actor_client.ping(ping_stream).await.unwrap();
-
-        ping_stream_tx
-            .try_send(PingRequest {
-                name: "beautiful Tower actor".to_string(),
-            })
-            .unwrap();
-        assert_eq!(
-            pong_stream.next().await.unwrap().unwrap().message,
-            "Pong, beautiful Tower actor!"
-        );
-
-        universe.assert_quit().await;
-
-        actor_client.check_connectivity().await.unwrap_err();
     }
 
     #[tokio::test]
