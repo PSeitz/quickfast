@@ -20,8 +20,6 @@
 //  - list_indexes
 //  - delete_index
 
-use std::num::NonZeroUsize;
-
 use quickwit_common::rand::append_random_suffix;
 use quickwit_config::merge_policy_config::{MergePolicyConfig, StableLogMergePolicyConfig};
 use quickwit_config::{
@@ -160,8 +158,7 @@ pub async fn test_metastore_update_ingest_settings<
         setup_metastore_for_update::<MetastoreToTest>().await;
 
     let ingest_settings = IngestSettings {
-        min_shards: NonZeroUsize::new(12).unwrap(),
-        ..Default::default()
+        validate_docs: false,
     };
     let index_update_request = UpdateIndexRequest::try_from_updates(
         index_uid.clone(),
@@ -173,7 +170,7 @@ pub async fn test_metastore_update_ingest_settings<
     )
     .unwrap();
 
-    let min_shards = metastore
+    let validate_docs = metastore
         .update_index(index_update_request)
         .await
         .unwrap()
@@ -181,13 +178,12 @@ pub async fn test_metastore_update_ingest_settings<
         .unwrap()
         .index_config
         .ingest_settings
-        .min_shards
-        .get();
-    assert_eq!(min_shards, 12);
+        .validate_docs;
+    assert!(!validate_docs);
 
     let index_metadata_request = IndexMetadataRequest::for_index_uid(index_uid.clone());
 
-    let min_shards = metastore
+    let validate_docs = metastore
         .index_metadata(index_metadata_request)
         .await
         .unwrap()
@@ -195,9 +191,8 @@ pub async fn test_metastore_update_ingest_settings<
         .unwrap()
         .index_config
         .ingest_settings
-        .min_shards
-        .get();
-    assert_eq!(min_shards, 12);
+        .validate_docs;
+    assert!(!validate_docs);
 
     cleanup_index(&mut metastore, index_uid).await;
 }

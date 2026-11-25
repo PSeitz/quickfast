@@ -3031,9 +3031,6 @@ name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
-dependencies = [
- "getrandom 0.4.3",
-]
 
 [[package]]
 name = "ff"
@@ -3106,18 +3103,6 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da0e4dd2a88388a1f4ccc7c9ce104604dab68d9f408dc34cd45823d5a9069095"
 dependencies = [
- "futures-core",
- "futures-sink",
- "spin 0.9.9",
-]
-
-[[package]]
-name = "flume"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
-dependencies = [
- "fastrand",
  "futures-core",
  "futures-sink",
  "spin 0.9.9",
@@ -6780,12 +6765,10 @@ dependencies = [
  "openssl-probe",
  "predicates",
  "procfs 0.18.0",
- "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
  "quickwit-index-management",
  "quickwit-indexing",
- "quickwit-ingest",
  "quickwit-metastore",
  "quickwit-metrics",
  "quickwit-proto",
@@ -6794,7 +6777,6 @@ dependencies = [
  "quickwit-serve",
  "quickwit-storage",
  "quickwit-telemetry-exporters",
- "quickwit-transport",
  "reqwest 0.13.5",
  "rustls 0.23.46",
  "serde_json",
@@ -6915,11 +6897,9 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "serial_test",
  "siphasher",
  "sysinfo",
  "tempfile",
- "thiserror 2.0.21",
  "tikv-jemallocator",
  "tokio",
  "tokio-metrics",
@@ -6937,7 +6917,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "itertools 0.15.0",
- "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
  "quickwit-doc-mapper",
@@ -7081,15 +7060,12 @@ dependencies = [
  "bytes",
  "bytesize",
  "criterion",
- "flume 0.12.0",
- "fnv",
  "futures",
  "google-cloud-auth",
  "google-cloud-googleapis",
  "google-cloud-pubsub",
  "itertools 0.15.0",
  "libz-sys",
- "mockall",
  "oneshot 0.2.1",
  "openssl",
  "percent-encoding",
@@ -7112,7 +7088,6 @@ dependencies = [
  "rand 0.10.3",
  "rdkafka",
  "regex",
- "reqwest 0.13.5",
  "serde",
  "serde_json",
  "sqlx",
@@ -7124,7 +7099,6 @@ dependencies = [
  "tower 0.5.3",
  "tracing",
  "ulid 3.0.0",
- "unicode-segmentation",
  "utoipa",
  "vrl",
 ]
@@ -7140,11 +7114,9 @@ dependencies = [
  "crc32fast",
  "futures",
  "http 1.5.0",
- "itertools 0.15.0",
  "memchr",
  "mockall",
  "proptest",
- "prost 0.14.4",
  "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
@@ -7154,7 +7126,6 @@ dependencies = [
  "quickwit-proto",
  "quickwit-storage",
  "rand 0.10.3",
- "rand_distr",
  "serde",
  "serde_json",
  "serde_json_borrow",
@@ -7162,12 +7133,9 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tonic 0.14.6",
- "tonic-prost",
  "tower 0.5.3",
  "tracing",
- "tracing-opentelemetry",
  "ulid 3.0.0",
- "utoipa",
  "zstd 0.14.3",
 ]
 
@@ -7176,7 +7144,6 @@ name = "quickwit-integration-tests"
 version = "0.9.3"
 dependencies = [
  "anyhow",
- "aws-sdk-sqs",
  "futures-util",
  "http-body-util",
  "hyper 1.12.0",
@@ -7191,7 +7158,6 @@ dependencies = [
  "quickwit-opentelemetry",
  "quickwit-proto",
  "quickwit-rest-client",
- "quickwit-search",
  "quickwit-serve",
  "quickwit-storage",
  "quickwit-transport",
@@ -7205,7 +7171,6 @@ dependencies = [
  "tokio-rustls 0.26.6",
  "tonic 0.14.6",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -7217,11 +7182,9 @@ dependencies = [
  "postcard",
  "prost 0.14.4",
  "prost-types 0.14.4",
- "quickwit-cluster",
  "quickwit-common",
  "quickwit-config",
  "quickwit-indexing",
- "quickwit-ingest",
  "quickwit-metastore",
  "quickwit-metrics",
  "quickwit-opentelemetry",
@@ -7232,7 +7195,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tantivy",
- "tempfile",
  "time",
  "tokio",
  "tokio-stream",
@@ -7344,7 +7306,6 @@ dependencies = [
  "http 1.5.0",
  "hyper-util",
  "itertools 0.15.0",
- "md5",
  "mockall",
  "ouroboros",
  "quickwit-common",
@@ -7435,7 +7396,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "bytesize",
- "bytestring",
  "futures",
  "glob",
  "hex",
@@ -7504,7 +7464,6 @@ dependencies = [
  "quickwit-config",
  "quickwit-indexing",
  "quickwit-metastore",
- "quickwit-proto",
  "quickwit-serve",
  "reqwest 0.13.5",
  "reqwest-middleware",
@@ -7587,7 +7546,6 @@ dependencies = [
  "mime_guess",
  "mockall",
  "opentelemetry",
- "opentelemetry_sdk",
  "percent-encoding",
  "pprof",
  "prost 0.14.4",
@@ -7910,16 +7868,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "rand_distr"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d431c2703ccf129de4d45253c03f49ebb22b97d6ad79ee3ecfc7e3f4862c1d8"
-dependencies = [
- "num-traits",
- "rand 0.10.3",
-]
 
 [[package]]
 name = "rand_pcg"
@@ -9599,7 +9547,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea"
 dependencies = [
  "atoi",
- "flume 0.11.1",
+ "flume",
  "futures-channel",
  "futures-core",
  "futures-executor",

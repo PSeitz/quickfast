@@ -94,9 +94,7 @@
       },
       "split_num_docs_target": 10000001
     },
-    "ingest_settings": {
-      "min_shards": 12
-    },
+    "ingest_settings": {},
     "retention": {
       "period": "90 days",
       "schedule": "daily"

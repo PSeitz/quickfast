@@ -288,7 +288,6 @@ impl FileBackedIndex {
     }
 
     /// Helper to mark a list of splits as published.
-    /// This function however does not update the checkpoint.
     fn mark_splits_as_published_helper(
         &mut self,
         staged_split_ids: impl IntoIterator<Item = impl AsRef<str>>,

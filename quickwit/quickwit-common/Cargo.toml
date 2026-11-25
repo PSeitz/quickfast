@@ -41,7 +41,6 @@ serde = { workspace = true }
 siphasher = { workspace = true }
 sysinfo = { workspace = true }
 tempfile = { workspace = true }
-thiserror = { workspace = true }
 tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true }
 tokio-metrics = { workspace = true }
@@ -70,6 +69,5 @@ metrics-util = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }
-serial_test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

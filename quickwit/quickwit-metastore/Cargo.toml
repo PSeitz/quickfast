@@ -51,7 +51,6 @@ quickwit-storage = { workspace = true }
 dotenvy = { workspace = true }
 futures = { workspace = true }
 hyper-util = { workspace = true }
-md5 = { workspace = true }
 mockall = { workspace = true }
 rand = { workspace = true }
 serial_test = { workspace = true }

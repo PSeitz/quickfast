@@ -18,8 +18,6 @@ async-trait = { workspace = true }
 aws-sdk-sqs = { workspace = true, optional = true }
 bytes = { workspace = true }
 bytesize = { workspace = true }
-flume = { workspace = true }
-fnv = { workspace = true }
 futures = { workspace = true }
 google-cloud-auth = { workspace = true, optional = true }
 google-cloud-googleapis = { workspace = true, optional = true }
@@ -90,15 +88,12 @@ ci-test = []
 [dev-dependencies]
 bytes = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
-mockall = { workspace = true }
 proptest = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 tempfile = { workspace = true }
 tower = { workspace = true }
-unicode-segmentation = { workspace = true }
 
 quickwit-cluster = { workspace = true, features = ["testsuite"] }
 quickwit-common = { workspace = true, features = ["testsuite"] }

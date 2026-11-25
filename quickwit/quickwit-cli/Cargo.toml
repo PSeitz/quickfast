@@ -50,13 +50,11 @@ toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 
-quickwit-cluster = { workspace = true }
 quickwit-common = { workspace = true }
 quickwit-metrics = { workspace = true }
 quickwit-config = { workspace = true }
 quickwit-index-management = { workspace = true }
 quickwit-indexing = { workspace = true }
-quickwit-ingest = { workspace = true }
 quickwit-metastore = { workspace = true }
 quickwit-telemetry-exporters = { workspace = true }
 quickwit-proto = { workspace = true }
@@ -64,7 +62,6 @@ quickwit-rest-client = { workspace = true }
 quickwit-search = { workspace = true }
 quickwit-serve = { workspace = true }
 quickwit-storage = { workspace = true }
-quickwit-transport = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = { workspace = true }

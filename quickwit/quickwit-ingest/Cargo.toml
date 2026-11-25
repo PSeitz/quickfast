@@ -18,10 +18,8 @@ bytesize = { workspace = true }
 crc32fast = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
-itertools = { workspace = true }
 memchr = { workspace = true }
 mockall = { workspace = true, optional = true }
-prost = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,12 +27,9 @@ serde_json_borrow = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
-tonic-prost = { workspace = true }
 tower = { workspace = true }
 tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 ulid = { workspace = true }
-utoipa = { workspace = true }
 zstd = { workspace = true }
 
 quickwit-cluster = { workspace = true }
@@ -50,7 +45,6 @@ quickwit-storage = { workspace = true }
 mockall = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
-rand_distr = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"]}
 

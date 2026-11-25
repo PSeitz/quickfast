@@ -16,7 +16,6 @@ pub(crate) mod serialize;
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -125,15 +124,28 @@ impl Default for IndexingSettings {
 }
 
 /// Settings for ingestion.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct IngestSettingsDeser {
+    #[serde(default, rename = "min_shards")]
+    _min_shards: Option<serde::de::IgnoredAny>,
+    #[serde(default = "true_fn")]
+    validate_docs: bool,
+}
+
+impl From<IngestSettingsDeser> for IngestSettings {
+    fn from(deser: IngestSettingsDeser) -> Self {
+        Self {
+            validate_docs: deser.validate_docs,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(from = "IngestSettingsDeser")]
 pub struct IngestSettings {
-    /// Configures the minimum number of shards to use for ingestion.
-    #[schema(default = 1, value_type = usize)]
-    #[serde(default = "IngestSettings::default_min_shards")]
-    pub min_shards: NonZeroUsize,
     /// Whether to validate documents against the current doc mapping during ingestion.
-    /// Defaults to true. When false, documents will be written directly to the WAL without
+    /// Defaults to true. When false, documents will be written directly without
     /// validation, but might still be rejected during indexing when applying the doc mapping
     /// in the doc processor, in that case the documents are dropped and a warning is logged.
     ///
@@ -144,16 +156,9 @@ pub struct IngestSettings {
     pub validate_docs: bool,
 }
 
-impl IngestSettings {
-    pub fn default_min_shards() -> NonZeroUsize {
-        NonZeroUsize::MIN
-    }
-}
-
 impl Default for IngestSettings {
     fn default() -> Self {
         Self {
-            min_shards: Self::default_min_shards(),
             validate_docs: true,
         }
     }
@@ -479,7 +484,6 @@ impl crate::TestableForRegression for IndexConfig {
             ..Default::default()
         };
         let ingest_settings = IngestSettings {
-            min_shards: NonZeroUsize::new(12).unwrap(),
             validate_docs: true,
         };
         let search_settings = SearchSettings {
@@ -687,7 +691,7 @@ mod tests {
                 heap_size: ByteSize::gb(3),
             }
         );
-        assert_eq!(index_config.ingest_settings.min_shards.get(), 12);
+        assert!(index_config.ingest_settings.validate_docs);
         assert_eq!(
             index_config.search_settings,
             SearchSettings {
@@ -1117,7 +1121,6 @@ mod tests {
     #[test]
     fn test_ingest_settings_serde() {
         let settings = IngestSettings {
-            min_shards: NonZeroUsize::MIN,
             validate_docs: false,
         };
         let settings_yaml = serde_yaml::to_string(&settings).unwrap();
@@ -1127,7 +1130,6 @@ mod tests {
         assert_eq!(settings, expected_settings);
 
         let settings = IngestSettings {
-            min_shards: NonZeroUsize::MIN,
             validate_docs: true,
         };
         let settings_yaml = serde_yaml::to_string(&settings).unwrap();
@@ -1136,11 +1138,12 @@ mod tests {
         let expected_settings: IngestSettings = serde_yaml::from_str(&settings_yaml).unwrap();
         assert_eq!(settings, expected_settings);
 
-        let settings_yaml = r#"
-            min_shards: 0
+        // Legacy `min_shards` field is accepted and ignored.
+        let legacy_yaml = r#"
+            min_shards: 12
         "#;
-        let error = serde_yaml::from_str::<IngestSettings>(settings_yaml).unwrap_err();
-        assert!(error.to_string().contains("expected a nonzero"));
+        let parsed: IngestSettings = serde_yaml::from_str(legacy_yaml).unwrap();
+        assert_eq!(parsed, IngestSettings::default());
     }
 
     #[test]

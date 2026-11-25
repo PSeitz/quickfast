@@ -16,7 +16,6 @@ sqs-localstack-tests = [
 ]
 [dev-dependencies]
 anyhow = { workspace = true }
-aws-sdk-sqs = { workspace = true }
 futures-util = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
@@ -32,7 +31,6 @@ tokio = { workspace = true }
 tokio-rustls = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 quickwit-cli = { workspace = true }
 quickwit-common = { workspace = true, features = ["testsuite"] }
@@ -43,7 +41,6 @@ quickwit-metastore = { workspace = true, features = ["testsuite"] }
 quickwit-opentelemetry = { workspace = true, features = ["testsuite"] }
 quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-rest-client = { workspace = true }
-quickwit-search = { workspace = true }
 quickwit-serve = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
 quickwit-transport = { workspace = true }

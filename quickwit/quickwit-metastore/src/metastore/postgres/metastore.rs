@@ -1158,18 +1158,6 @@ impl MetastoreService for PostgresqlMetastore {
                 Ok::<_, MetastoreError>(MutationOccurred::Yes(()))
             })
             .await?;
-            sqlx::query(
-                r#"
-                    DELETE FROM shards
-                    WHERE
-                        index_uid = $1
-                        AND source_id = $2
-                "#,
-            )
-            .bind(&index_uid)
-            .bind(source_id)
-            .execute(tx.as_mut())
-            .await?;
             Ok(())
         })?;
         Ok(EmptyResponse {})
