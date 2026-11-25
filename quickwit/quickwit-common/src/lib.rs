@@ -191,13 +191,6 @@ macro_rules! ignore_error_kind {
 }
 
 #[inline]
-pub const fn div_ceil_u32(lhs: u32, rhs: u32) -> u32 {
-    let d = lhs / rhs;
-    let r = lhs % rhs;
-    if r > 0 { d + 1 } else { d }
-}
-
-#[inline]
 pub const fn div_ceil(lhs: i64, rhs: i64) -> i64 {
     let d = lhs / rhs;
     let r = lhs % rhs;
@@ -240,20 +233,6 @@ where
     tokio::task::spawn(future)
 }
 
-#[cfg(not(all(tokio_unstable, feature = "named_tasks")))]
-#[track_caller]
-pub fn spawn_named_task_on<F>(
-    future: F,
-    _name: &'static str,
-    runtime: &tokio::runtime::Handle,
-) -> tokio::task::JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    runtime.spawn(future)
-}
-
 #[cfg(all(tokio_unstable, feature = "named_tasks"))]
 #[track_caller]
 pub fn spawn_named_task<F>(future: F, name: &'static str) -> tokio::task::JoinHandle<F::Output>
@@ -264,23 +243,6 @@ where
     tokio::task::Builder::new()
         .name(name)
         .spawn(future)
-        .unwrap()
-}
-
-#[cfg(all(tokio_unstable, feature = "named_tasks"))]
-#[track_caller]
-pub fn spawn_named_task_on<F>(
-    future: F,
-    name: &'static str,
-    runtime: &tokio::runtime::Handle,
-) -> tokio::task::JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    tokio::task::Builder::new()
-        .name(name)
-        .spawn_on(future, runtime)
         .unwrap()
 }
 
@@ -336,16 +298,5 @@ mod tests {
         assert_eq!(div_ceil(-5, -1), 5);
         assert_eq!(div_ceil(-5, -2), 3);
         assert_eq!(div_ceil(-6, -2), 3);
-    }
-
-    #[test]
-    fn test_div_ceil_u32() {
-        assert_eq!(div_ceil_u32(5, 1), 5);
-        assert_eq!(div_ceil_u32(5, 2), 3);
-        assert_eq!(div_ceil_u32(6, 2), 3);
-        assert_eq!(div_ceil_u32(3, 3), 1);
-        assert_eq!(div_ceil_u32(2, 3), 1);
-        assert_eq!(div_ceil_u32(1, 3), 1);
-        assert_eq!(div_ceil_u32(0, 3), 0);
     }
 }

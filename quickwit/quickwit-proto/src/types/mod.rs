@@ -40,23 +40,7 @@ pub type SourceId = String;
 
 pub type SubrequestId = u32;
 
-pub type IndexingPlanId = String;
-
 pub type AvailabilityZone = Arc<str>;
-
-/// It can however appear only once in a given index.
-/// In itself, `SourceId` is not unique, but the pair `(IndexUid, SourceId)` is.
-#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Hash, Clone)]
-pub struct SourceUid {
-    pub index_uid: IndexUid,
-    pub source_id: SourceId,
-}
-
-impl Display for SourceUid {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}:{}", self.index_uid, self.source_id)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId(Arc<str>);

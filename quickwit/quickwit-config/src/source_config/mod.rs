@@ -266,24 +266,6 @@ pub enum FileSourceMessageType {
 pub struct FileSourceSqs {
     pub queue_url: String,
     pub message_type: FileSourceMessageType,
-    #[serde(default = "default_deduplication_window_duration_secs")]
-    pub deduplication_window_duration_secs: u32,
-    #[serde(default = "default_deduplication_window_max_messages")]
-    pub deduplication_window_max_messages: u32,
-    #[serde(default = "default_deduplication_cleanup_interval_secs")]
-    pub deduplication_cleanup_interval_secs: u32,
-}
-
-fn default_deduplication_window_duration_secs() -> u32 {
-    3600
-}
-
-fn default_deduplication_window_max_messages() -> u32 {
-    100_000
-}
-
-fn default_deduplication_cleanup_interval_secs() -> u32 {
-    60
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
@@ -295,10 +277,7 @@ pub enum FileSourceNotification {
 impl FileSourceNotification {
     fn validate_update(&self, other: &Self) -> anyhow::Result<()> {
         match (self, other) {
-            (Self::Sqs(_), Self::Sqs(_)) => {
-                // changing the queue or the deduplication settings should be fine
-                Ok(())
-            }
+            (Self::Sqs(_), Self::Sqs(_)) => Ok(()),
         }
     }
 }
@@ -666,11 +645,6 @@ mod tests {
                     queue_url: "https://sqs.us-east-1.amazonaws.com/123456789012/queue-name"
                         .to_string(),
                     message_type: FileSourceMessageType::S3Notification,
-                    deduplication_window_duration_secs: default_deduplication_window_duration_secs(
-                    ),
-                    deduplication_window_max_messages: default_deduplication_window_max_messages(),
-                    deduplication_cleanup_interval_secs:
-                        default_deduplication_cleanup_interval_secs()
                 })),
             );
             let file_params_reserialized = serde_json::to_value(&file_params_deserialized).unwrap();
@@ -680,9 +654,6 @@ mod tests {
                     "type": "sqs",
                     "queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/queue-name",
                     "message_type": "s3_notification",
-                    "deduplication_window_duration_secs": default_deduplication_window_duration_secs(),
-                    "deduplication_window_max_messages": default_deduplication_window_max_messages(),
-                    "deduplication_cleanup_interval_secs": default_deduplication_cleanup_interval_secs(),
                 }]})
             );
         }

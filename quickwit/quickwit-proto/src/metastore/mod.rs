@@ -14,6 +14,7 @@
 
 use std::{fmt, io};
 
+use quickwit_common::pubsub::Event;
 use quickwit_common::rate_limited_error;
 use quickwit_common::retry::Retryable;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use crate::types::{IndexId, IndexUid, SourceId};
 use crate::{GrpcServiceError, ServiceError, ServiceErrorCode};
 
-pub mod events;
 mod service;
 #[cfg(any(test, feature = "testsuite"))]
 mod test_intercept;
@@ -34,6 +34,14 @@ pub use service::{
 };
 
 include!("../codegen/quickwit/quickwit.metastore.rs");
+
+impl Event for AddSourceRequest {}
+impl Event for CreateIndexRequest {}
+impl Event for DeleteIndexRequest {}
+impl Event for DeleteSourceRequest {}
+impl Event for ToggleSourceRequest {}
+impl Event for UpdateIndexRequest {}
+impl Event for UpdateSourceRequest {}
 
 pub const METASTORE_FILE_DESCRIPTOR_SET: &[u8] =
     include_bytes!("../codegen/quickwit/metastore_descriptor.bin");
