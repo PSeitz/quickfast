@@ -242,12 +242,15 @@ impl S3Indexer {
                     Ok(()) => break,
                     Err(error) => error,
                 };
-                let retry_upload = error.downcast_ref::<StorageError>().is_some_and(|error| {
-                    !matches!(
-                        error.kind(),
-                        StorageErrorKind::Unauthorized | StorageErrorKind::NotFound
-                    )
-                });
+                let retry_upload = error
+                    .downcast_ref::<StorageError>()
+                    .map(|error| {
+                        !matches!(
+                            error.kind(),
+                            StorageErrorKind::Unauthorized | StorageErrorKind::NotFound
+                        )
+                    })
+                    .unwrap_or(false);
                 if !retry_upload || attempt == 3 {
                     return Err(error);
                 }

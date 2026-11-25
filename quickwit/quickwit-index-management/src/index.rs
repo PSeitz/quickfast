@@ -57,8 +57,6 @@ pub enum IndexServiceError {
     InvalidConfig(anyhow::Error),
     #[error("invalid identifier: {0}")]
     InvalidIdentifier(String),
-    #[error("operation not allowed: {0}")]
-    OperationNotAllowed(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -73,7 +71,6 @@ impl ServiceError for IndexServiceError {
             Self::InvalidConfig(_) => ServiceErrorCode::BadRequest,
             Self::InvalidIdentifier(_) => ServiceErrorCode::BadRequest,
             Self::Metastore(error) => error.error_code(),
-            Self::OperationNotAllowed(_) => ServiceErrorCode::Forbidden,
             Self::SplitDeletion(delete_splits_error) => {
                 rate_limited_error!(
                     limit_per_min = 6,

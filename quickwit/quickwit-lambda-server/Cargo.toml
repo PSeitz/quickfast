@@ -43,7 +43,6 @@ path = "src/bin/leaf_search.rs"
 
 [features]
 default = []
-testsuite = []
 
 # Keep this in sync with quickwit-cli!
 lambda-release = [

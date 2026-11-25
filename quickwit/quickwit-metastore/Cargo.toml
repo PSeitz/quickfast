@@ -64,6 +64,5 @@ quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
 
 [features]
-ci-test = []
 postgres = ["quickwit-proto/postgres", "sea-query", "sea-query-sqlx", "sqlx"]
 testsuite = ["mockall", "tempfile", "quickwit-config/testsuite"]

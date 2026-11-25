@@ -88,9 +88,9 @@ fn test_size_limit_keeps_whole_batches_and_counts_framing() {
     let index_uid = index(1);
     core.file_limits.target_file_bytes = file_size(&index_uid, 2);
 
-    let first_id = core.append(&index_uid, &documents(1)).unwrap();
+    let first_id = core.append(&index_uid, documents(1)).unwrap();
     assert!(core.finished_files().is_empty());
-    assert_eq!(core.append(&index_uid, &documents(1)).unwrap(), first_id);
+    assert_eq!(core.append(&index_uid, documents(1)).unwrap(), first_id);
     assert!(core.active.is_empty());
     assert_eq!(
         core.finished_files()[0].num_bytes,
@@ -103,14 +103,14 @@ fn test_size_limit_keeps_whole_batches_and_counts_framing() {
     let compressed = CompressedBatch::new(documents(3)).unwrap();
     let large_size = file_size(&index_uid, 0) + FRAME_OVERHEAD + compressed.data.len() as u64;
     core.file_limits.target_file_bytes = large_size - 1;
-    let large_id = core.append(&index_uid, &documents(3)).unwrap();
+    let large_id = core.append(&index_uid, documents(3)).unwrap();
     assert_ne!(large_id, first_id);
     assert!(core.active.is_empty());
     assert_eq!(core.finished_files()[1].num_bytes, large_size);
     assert!(large_size > core.file_limits.target_file_bytes);
     assert_eq!(read_input(&core.finished_files()[1].path).1, documents(3));
     core.file_limits.target_file_bytes = file_size(&index_uid, 2);
-    let next_id = core.append(&index_uid, &documents(1)).unwrap();
+    let next_id = core.append(&index_uid, documents(1)).unwrap();
     assert_ne!(next_id, first_id);
     assert_ne!(next_id, large_id);
     assert_eq!(core.active.len(), 1);
@@ -128,17 +128,17 @@ fn test_finished_file_requires_a_new_header_in_the_disk_budget() {
     let dir = tempfile::tempdir().unwrap();
     let index_uid = index(1);
     let mut core = Ingester::open(dir.path(), file_size(&index_uid, 2)).unwrap();
-    let first_id = core.append(&index_uid, &documents(1)).unwrap();
+    let first_id = core.append(&index_uid, documents(1)).unwrap();
     core.finish_file(&index_uid).unwrap();
     // Another document would fit in the old file, but its replacement needs a new header.
-    assert!(core.append(&index_uid, &documents(1)).is_err());
+    assert!(core.append(&index_uid, documents(1)).is_err());
     assert!(!core.requires_recovery);
     assert_eq!(core.disk_bytes, file_size(&index_uid, 1));
     assert!(core.active.is_empty());
     assert_eq!(core.finished_files()[0].file_id, first_id);
 
     core.max_disk_bytes = 2 * file_size(&index_uid, 1);
-    let next_id = core.append(&index_uid, &documents(1)).unwrap();
+    let next_id = core.append(&index_uid, documents(1)).unwrap();
     assert_ne!(first_id, next_id);
     assert_eq!(core.disk_bytes, core.max_disk_bytes);
     assert_eq!(core.finished_files()[0].file_id, first_id);
@@ -150,9 +150,9 @@ async fn test_open_file_limit_rejects_new_writers_without_finishing_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = Ingester::open(dir.path(), BUDGET).unwrap();
     core.file_limits.max_open_files = 2;
-    let first_id = core.append(&index(1), &documents(1)).unwrap();
+    let first_id = core.append(&index(1), documents(1)).unwrap();
     advance(Duration::from_secs(1)).await;
-    let second_id = core.append(&index(2), &documents(1)).unwrap();
+    let second_id = core.append(&index(2), documents(1)).unwrap();
     let retained = core.disk_bytes;
     let deadline = core.next_deadline();
     let originals: Vec<_> = core
@@ -166,7 +166,7 @@ async fn test_open_file_limit_rejects_new_writers_without_finishing_files() {
         })
         .collect();
 
-    let error = core.append(&index(3), &documents(1)).unwrap_err();
+    let error = core.append(&index(3), documents(1)).unwrap_err();
     assert!(error.is::<OpenFileLimit>());
     assert!(!core.requires_recovery);
     assert_eq!(core.disk_bytes, retained);
@@ -180,15 +180,15 @@ async fn test_open_file_limit_rejects_new_writers_without_finishing_files() {
     for (path, original) in originals {
         assert_eq!(fs::read(path).unwrap(), original);
     }
-    assert_eq!(core.append(&index(1), &documents(1)).unwrap(), first_id);
-    assert_eq!(core.append(&index(2), &documents(1)).unwrap(), second_id);
+    assert_eq!(core.append(&index(1), documents(1)).unwrap(), first_id);
+    assert_eq!(core.append(&index(2), documents(1)).unwrap(), second_id);
     assert!(core.finished_files().is_empty());
 
     // Reaching the size target finishes a file, allowing another writer.
     core.file_limits.target_file_bytes = file_size(&index(1), 3);
-    assert_eq!(core.append(&index(1), &documents(1)).unwrap(), first_id);
+    assert_eq!(core.append(&index(1), documents(1)).unwrap(), first_id);
     assert_eq!(core.finished_files()[0].file_id, first_id);
-    let third_id = core.append(&index(3), &documents(1)).unwrap();
+    let third_id = core.append(&index(3), documents(1)).unwrap();
     assert_eq!(core.active[&index(3)].input.file_id, third_id);
     assert_eq!(core.active.len(), 2);
     assert_eq!(core.finish().unwrap().len(), 3);
@@ -199,10 +199,10 @@ async fn test_writer_loop_finishes_expired_files() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = Ingester::open(dir.path(), BUDGET).unwrap();
     core.file_limits.max_open_files = 1;
-    let first_id = core.append(&index(1), &documents(1)).unwrap();
+    let first_id = core.append(&index(1), documents(1)).unwrap();
     advance(Duration::from_secs(10)).await;
     // A batch already being processed can finish in the current file after expiry.
-    assert_eq!(core.append(&index(1), &documents(1)).unwrap(), first_id);
+    assert_eq!(core.append(&index(1), documents(1)).unwrap(), first_id);
     assert_eq!(core.active.len(), 1);
     assert!(core.finished_files().is_empty());
 
@@ -400,13 +400,13 @@ fn test_finishing_file_at_size_limit_io_failure_requires_recovery() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = Ingester::open(dir.path(), BUDGET).unwrap();
     core.file_limits.target_file_bytes = file_size(&index(1), 2);
-    let file_id = core.append(&index(1), &documents(1)).unwrap();
+    let file_id = core.append(&index(1), documents(1)).unwrap();
     let finished_path = input_path(dir.path(), file_id, "finished");
     // Make the rename fail after the batch has been flushed.
     fs::create_dir(&finished_path).unwrap();
-    assert!(core.append(&index(1), &documents(1)).is_err());
+    assert!(core.append(&index(1), documents(1)).is_err());
     assert!(core.requires_recovery);
-    assert!(core.append(&index(2), &documents(1)).is_err());
+    assert!(core.append(&index(2), documents(1)).is_err());
     fs::remove_dir(&finished_path).unwrap();
     drop(core);
     let recovered = Ingester::open(dir.path(), BUDGET).unwrap();
@@ -419,7 +419,7 @@ fn test_finishing_file_at_size_limit_io_failure_requires_recovery() {
 async fn test_finishing_expired_files_precedes_queued_work_and_io_failure_stops_the_worker() {
     let dir = tempfile::tempdir().unwrap();
     let mut core = Ingester::open(dir.path(), BUDGET).unwrap();
-    let file_id = core.append(&index(1), &documents(1)).unwrap();
+    let file_id = core.append(&index(1), documents(1)).unwrap();
     let active = core.active.get_mut(&index(1)).unwrap();
     active.writer = BufWriter::new(File::open(&active.input.path).unwrap());
     active.writer.write_all(b"unflushed bytes").unwrap();

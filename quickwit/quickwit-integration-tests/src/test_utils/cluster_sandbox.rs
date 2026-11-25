@@ -291,7 +291,7 @@ impl ClusterSandbox {
             let storage_resolver = self.storage_resolver.clone();
             let tcp_listener_resolver = self.tcp_listener_resolver.clone();
             async move {
-                let result = serve_quickwit(
+                serve_quickwit(
                     config,
                     runtimes_config,
                     metastore_resolver,
@@ -303,7 +303,7 @@ impl ClusterSandbox {
                 .await
                 .inspect_err(|error| tracing::error!(%node_id, ?error, "node failed"))?;
                 debug!("{node_id} stopped successfully ({services:?})");
-                Result::<_, anyhow::Error>::Ok(result)
+                Result::<_, anyhow::Error>::Ok(())
             }
         });
         shutdown_handle.set_node_join_handle(join_handle);

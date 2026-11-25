@@ -196,7 +196,7 @@ impl SplitBuilders {
                 num_bytes,
             )?;
             loop {
-                let _guard = self.io_controls.check_if_alive()?;
+                self.io_controls.check_if_alive()?;
                 let documents = read_batch(&mut reader)?;
                 if documents.is_empty() {
                     break;

@@ -706,7 +706,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(IndexUid::new_with_random_ulid("index-not-found")),
             staged_split_ids: vec!["split-not-found-1".to_string()],
             replaced_split_ids: vec!["split-not-found-2".to_string()],
-            ..Default::default()
         };
         let error = metastore
             .publish_splits(publish_splits_request)
@@ -733,7 +732,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec!["split-not-found-1".to_string()],
             replaced_split_ids: vec!["split-not-found-2".to_string()],
-            ..Default::default()
         };
         // TODO source id
         let error = metastore
@@ -779,7 +777,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone()],
             replaced_split_ids: vec![split_id_1.clone()],
-            ..Default::default()
         };
         let error = metastore
             .publish_splits(publish_splits_request)
@@ -833,7 +830,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone()],
             replaced_split_ids: vec![split_id_1.clone()],
-            ..Default::default()
         };
         let error = metastore
             .publish_splits(publish_splits_request)
@@ -885,7 +881,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone(), split_id_3.clone()],
             replaced_split_ids: vec![split_id_1.clone()],
-            ..Default::default()
         };
         let error = metastore
             .publish_splits(publish_splits_request) // TODO source id
@@ -941,7 +936,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone()],
             replaced_split_ids: vec![split_id_1.clone()],
-            ..Default::default()
         };
         let error = metastore
             .publish_splits(publish_splits_request)
@@ -992,7 +986,6 @@ pub async fn test_metastore_replace_splits<
             index_uid: Some(index_uid.clone()),
             staged_split_ids: vec![split_id_2.clone(), split_id_3.clone()],
             replaced_split_ids: vec![split_id_1.clone()],
-            ..Default::default()
         };
         metastore
             .publish_splits(publish_splits_request)

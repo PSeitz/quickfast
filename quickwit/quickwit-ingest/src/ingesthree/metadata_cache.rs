@@ -151,7 +151,8 @@ impl MetadataCache {
                         let mut indexes = cache.lock().unwrap();
                         if indexes
                             .get(&index_id)
-                            .is_some_and(|index| Arc::ptr_eq(&index.lookup, &completion))
+                            .map(|index| Arc::ptr_eq(&index.lookup, &completion))
+                            .unwrap_or(false)
                         {
                             indexes.remove(&index_id);
                         }
@@ -165,7 +166,8 @@ impl MetadataCache {
         if result.is_err() {
             if indexes
                 .get(index_id)
-                .is_some_and(|index| Arc::ptr_eq(&index.lookup, &lookup))
+                .map(|index| Arc::ptr_eq(&index.lookup, &lookup))
+                .unwrap_or(false)
             {
                 indexes.remove(index_id);
             }
@@ -175,7 +177,8 @@ impl MetadataCache {
         // configuration. Pointer identity also fences eviction followed by recreation.
         if !indexes
             .get(index_id)
-            .is_some_and(|index| Arc::ptr_eq(&index.lookup, &lookup))
+            .map(|index| Arc::ptr_eq(&index.lookup, &lookup))
+            .unwrap_or(false)
         {
             return Err(
                 Status::unavailable("index metadata changed during resolution; retry").into(),
@@ -262,7 +265,8 @@ impl MetadataCache {
                 if !unchanged
                     && indexes
                         .get(index_id)
-                        .is_some_and(|index| Arc::ptr_eq(&index.lookup, lookup))
+                        .map(|index| Arc::ptr_eq(&index.lookup, lookup))
+                        .unwrap_or(false)
                 {
                     indexes.remove(index_id);
                 }

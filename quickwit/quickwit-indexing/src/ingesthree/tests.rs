@@ -88,8 +88,7 @@ async fn register_file(
     ingester
         .append(
             index_uid,
-            &docs
-                .iter()
+            docs.iter()
                 .map(|doc| Bytes::copy_from_slice(doc.as_bytes()))
                 .collect::<Vec<_>>(),
         )

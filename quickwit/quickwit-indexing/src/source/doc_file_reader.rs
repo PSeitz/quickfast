@@ -41,7 +41,8 @@ impl DocFileReader {
         let is_gzip = file_name
             .extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gz"));
+            .map(|ext| ext.eq_ignore_ascii_case("gz"))
+            .unwrap_or(false);
         let reader: Box<dyn AsyncRead + Send + Unpin> = if is_gzip {
             let mut decoder = GzipDecoder::new(BufReader::new(raw_reader));
             decoder.multiple_members(true);

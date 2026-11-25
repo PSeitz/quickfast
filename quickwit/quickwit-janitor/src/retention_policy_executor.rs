@@ -88,7 +88,8 @@ impl RetentionPolicyExecutor {
                     .values()
                     .map(|entry| entry.next_evaluation_at)
                     .min()
-                    .map_or(next_refresh_at, |eval_at| eval_at.min(next_refresh_at));
+                    .map(|eval_at| eval_at.min(next_refresh_at))
+                    .unwrap_or(next_refresh_at);
 
                 tokio::select! {
                     biased;

@@ -69,9 +69,9 @@ fn test_append_flushes_and_groups_by_index_incarnation() {
     let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
     let first = IndexUid::for_test("logs", 1);
     let second = IndexUid::for_test("logs", 2);
-    let first_id = ingester.append(&first, &documents()).unwrap();
-    assert_eq!(ingester.append(&first, &documents()).unwrap(), first_id);
-    let second_id = ingester.append(&second, &documents()).unwrap();
+    let first_id = ingester.append(&first, documents()).unwrap();
+    assert_eq!(ingester.append(&first, documents()).unwrap(), first_id);
+    let second_id = ingester.append(&second, documents()).unwrap();
     assert_ne!(first_id, second_id);
     // Read through another file descriptor before dropping the writer or finishing the file.
     let active = &ingester.active[&first];
@@ -103,7 +103,7 @@ fn test_finish_file_preserves_bytes_and_next_append_gets_new_id() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexUid::for_test("logs", 1);
     let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
-    let first_id = ingester.append(&index, &documents()).unwrap();
+    let first_id = ingester.append(&index, documents()).unwrap();
     let original = fs::read(&ingester.active[&index].input.path).unwrap();
     ingester.finish_file(&index).unwrap();
     ingester.finish_file(&index).unwrap();
@@ -112,7 +112,7 @@ fn test_finish_file_preserves_bytes_and_next_append_gets_new_id() {
         fs::read(&ingester.finished_files()[0].path).unwrap(),
         original
     );
-    let next_id = ingester.append(&index, &documents()).unwrap();
+    let next_id = ingester.append(&index, documents()).unwrap();
     assert_ne!(first_id, next_id);
     let inputs = ingester.finish().unwrap();
     assert_eq!(inputs.len(), 2);
@@ -133,7 +133,7 @@ fn test_recovery_preserves_open_and_finished_files() {
     let mut originals = HashMap::new();
     for incarnation in 0..32 {
         let index = IndexUid::for_test("logs", incarnation);
-        let file_id = ingester.append(&index, &documents()).unwrap();
+        let file_id = ingester.append(&index, documents()).unwrap();
         originals.insert(
             file_id,
             fs::read(&ingester.active[&index].input.path).unwrap(),
@@ -166,7 +166,7 @@ fn test_recovery_preserves_open_and_finished_files() {
         assert_eq!(input.num_docs, documents().len() as u64);
     }
     let new_id = recovered
-        .append(&IndexUid::for_test("logs", 1), &documents())
+        .append(&IndexUid::for_test("logs", 1), documents())
         .unwrap();
     assert!(!ids.contains(&new_id));
     assert_eq!(recovered.finish().unwrap().len(), ids.len() + 1);
@@ -182,7 +182,7 @@ fn test_recovery_truncates_incomplete_final_frames_and_keeps_complete_frames() {
     for prefix_len in 0..=frame.len() {
         let dir = tempfile::tempdir().unwrap();
         let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
-        let file_id = ingester.append(&index, &documents()).unwrap();
+        let file_id = ingester.append(&index, documents()).unwrap();
         let path = ingester.active[&index].input.path.clone();
         let original = fs::read(&path).unwrap();
         drop(ingester);
@@ -314,7 +314,7 @@ fn test_corruption_fails_recovery_without_changing_file() {
         let dir = tempfile::tempdir().unwrap();
         let index = IndexUid::for_test("logs", 1);
         let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
-        ingester.append(&index, &documents()).unwrap();
+        ingester.append(&index, documents()).unwrap();
         let path = ingester.active[&index].input.path.clone();
         drop(ingester);
         let mut bytes = fs::read(&path).unwrap();
@@ -336,7 +336,7 @@ fn test_finished_file_is_never_repaired() {
     let dir = tempfile::tempdir().unwrap();
     let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
     ingester
-        .append(&IndexUid::for_test("logs", 1), &documents())
+        .append(&IndexUid::for_test("logs", 1), documents())
         .unwrap();
     let files = ingester.finish().unwrap();
     let path = &files[0].path;
@@ -352,7 +352,7 @@ fn test_budget_includes_framing_and_recovered_files() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexUid::for_test("logs", 1);
     let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
-    ingester.append(&index, &documents()).unwrap();
+    ingester.append(&index, documents()).unwrap();
     let used = ingester.disk_bytes;
     let batch = CompressedBatch::new([b"x"]).unwrap();
     let extra = record_size(batch.data.len()).unwrap();
@@ -371,7 +371,7 @@ fn test_budget_includes_framing_and_recovered_files() {
     drop(ingester);
     let mut recovered = Ingester::open(dir.path(), used).unwrap();
     assert_eq!(recovered.disk_bytes, used + extra);
-    assert!(recovered.append(&index, &documents()).is_err());
+    assert!(recovered.append(&index, documents()).is_err());
     assert!(recovered.active.is_empty());
     assert_eq!(recovered.finished_files()[0].num_docs, 3);
 }
@@ -382,16 +382,16 @@ fn test_rejections_create_no_input_files() {
     let index = IndexUid::for_test("logs", 1);
     let mut ingester = Ingester::open(dir.path(), 0).unwrap();
     assert!(ingester.append(&index, &[] as &[Bytes]).is_err());
-    assert!(ingester.append(&index, &documents()).is_err());
+    assert!(ingester.append(&index, documents()).is_err());
     assert_eq!(
         fs::read_dir(dir.path().join("ingesthree")).unwrap().count(),
         1
     ); // LOCK only
     let invalid_index = IndexUid::for_test(&"x".repeat(20_000), 1);
     ingester.max_disk_bytes = DISK_BUDGET;
-    assert!(ingester.append(&invalid_index, &documents()).is_err());
+    assert!(ingester.append(&invalid_index, documents()).is_err());
     // Rejections do not poison subsequent valid writes.
-    ingester.append(&index, &documents()).unwrap();
+    ingester.append(&index, documents()).unwrap();
 }
 
 #[test]
@@ -399,13 +399,13 @@ fn test_flush_failure_stops_further_writes_until_recovery() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexUid::for_test("logs", 1);
     let mut ingester = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
-    ingester.append(&index, &documents()).unwrap();
+    ingester.append(&index, documents()).unwrap();
     let active = ingester.active.get_mut(&index).unwrap();
     // Small writes enter the userspace buffer, then fail when flush reaches the
     // read-only descriptor. This specifically checks the acknowledgment boundary.
     active.writer = BufWriter::new(File::open(&active.input.path).unwrap());
-    assert!(ingester.append(&index, &documents()).is_err());
-    let error = ingester.append(&index, &documents()).unwrap_err();
+    assert!(ingester.append(&index, documents()).is_err());
+    let error = ingester.append(&index, documents()).unwrap_err();
     assert!(error.to_string().contains("requires recovery"));
     drop(ingester);
     let recovered = Ingester::open(dir.path(), DISK_BUDGET).unwrap();
@@ -445,7 +445,7 @@ fn test_acknowledged_data_survives_process_exit_without_destructors() {
         let path = Path::new(&path);
         let mut ingester = Ingester::open(path, DISK_BUDGET).unwrap();
         let file_id = ingester
-            .append(&IndexUid::for_test("logs", 1), &documents())
+            .append(&IndexUid::for_test("logs", 1), documents())
             .unwrap();
         fs::write(path.join("acknowledged-file-id"), file_id.to_string()).unwrap();
         // Exit bypasses BufWriter and Ingester destructors. The parent checks

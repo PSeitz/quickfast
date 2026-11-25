@@ -258,7 +258,7 @@ pub(super) fn append_prepared(
         }
     };
     let previous_disk_bytes = ingester.disk_bytes;
-    let num_docs = batch.as_ref().map_or(0, |batch| batch.num_docs);
+    let num_docs = batch.as_ref().map(|batch| batch.num_docs).unwrap_or(0);
     let result = match &batch {
         Some(batch) => ingester.append_compressed(&index_uid, batch).map(Some),
         None => Ok(None),

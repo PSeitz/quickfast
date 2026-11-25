@@ -247,7 +247,6 @@ pub(crate) async fn stage_upload_and_publish_split(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::Duration;
 
     use async_trait::async_trait;
@@ -353,7 +352,7 @@ mod tests {
             },
             split_scratch_directory: scratch_dir,
             tags: Default::default(),
-            split_files: vec![PathBuf::from(file_path)],
+            split_files: vec![file_path],
             hotcache_bytes: vec![1, 2, 3],
         };
 

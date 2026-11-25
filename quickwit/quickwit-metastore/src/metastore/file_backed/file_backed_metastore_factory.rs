@@ -20,7 +20,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use quickwit_common::uri::Uri;
 use quickwit_config::{MetastoreBackend, MetastoreConfig};
-use quickwit_proto::metastore::{MetastoreError, MetastoreServiceClient};
+use quickwit_proto::metastore::MetastoreServiceClient;
 use quickwit_storage::{StorageResolver, StorageResolverError};
 use regex::Regex;
 use tokio::sync::Mutex;
@@ -127,12 +127,6 @@ impl MetastoreFactory for FileBackedMetastoreFactory {
                 }
                 StorageResolverError::UnsupportedBackend(message) => {
                     MetastoreResolverError::UnsupportedBackend(message)
-                }
-                StorageResolverError::FailedToOpenStorage { kind, message } => {
-                    MetastoreResolverError::Initialization(MetastoreError::Internal {
-                        message: format!("failed to open metastore file `{uri}`"),
-                        cause: format!("StorageError {kind:?}: {message}"),
-                    })
                 }
             })?;
         let file_backed_metastore = FileBackedMetastore::try_new(storage, polling_interval_opt)

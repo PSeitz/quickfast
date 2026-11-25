@@ -67,7 +67,8 @@ impl JanitorService {
             .inner
             .extra_health_check
             .as_ref()
-            .is_none_or(|check| check());
+            .map(|check| check())
+            .unwrap_or(true);
         tasks_healthy && extra_healthy
     }
 

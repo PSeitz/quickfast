@@ -78,7 +78,6 @@ testsuite = [
   "quickwit-storage/testsuite"
 ]
 vrl = ["dep:vrl", "quickwit-config/vrl"]
-postgres = ["quickwit-metastore/postgres"]
 ci-test = []
 
 [dev-dependencies]

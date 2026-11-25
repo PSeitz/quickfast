@@ -54,16 +54,6 @@ pub enum StorageResolverError {
     /// The requested backend is unsupported or unavailable.
     #[error("unsupported storage backend: `{0}`")]
     UnsupportedBackend(String),
-
-    /// The URI is valid, and is meant to be handled by this resolver,
-    /// but the resolver failed to actually connect to the storage.
-    /// e.g. connection error, credentials error, incompatible version,
-    /// internal error in third party, etc.
-    #[error("failed to open storage {kind:?}: {message}")]
-    FailedToOpenStorage {
-        kind: crate::StorageErrorKind,
-        message: String,
-    },
 }
 
 impl StorageErrorKind {

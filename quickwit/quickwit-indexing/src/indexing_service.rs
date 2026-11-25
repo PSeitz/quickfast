@@ -93,15 +93,17 @@ impl IndexingService {
         ingest_router_opt: Option<IngestRouterClient>,
     ) -> anyhow::Result<Self> {
         let indexing_root_directory = data_dir_path.join(INDEXING_DIR_NAME);
-        if indexing_root_directory.exists() {
-            tokio::fs::remove_dir_all(&indexing_root_directory)
-                .await
-                .with_context(|| {
+        match tokio::fs::remove_dir_all(&indexing_root_directory).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
                     format!(
                         "failed to clean indexing directory `{}`",
                         indexing_root_directory.display()
                     )
-                })?;
+                });
+            }
         }
         tokio::fs::create_dir_all(&indexing_root_directory)
             .await

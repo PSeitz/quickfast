@@ -472,7 +472,7 @@ async fn test_ingesthree_prefers_own_node_with_positive_capacity() {
         .await;
         assert_eq!(response.successes.len(), 1);
         assert!(response.failures.is_empty());
-        let expect_local = usize::from(capacity.is_some_and(|score| score > 0));
+        let expect_local = usize::from(capacity.map(|score| score > 0).unwrap_or(false));
         assert_eq!(
             local.calls.load(Ordering::SeqCst),
             local_before + expect_local

@@ -86,23 +86,20 @@ async fn get_liveness(
 ) -> impl warp::Reply {
     let mut is_live = true;
 
-    if indexer_service_opt
-        .as_ref()
-        .is_some_and(|service| !service.is_healthy())
+    if let Some(service) = indexer_service_opt.as_ref()
+        && !service.is_healthy()
     {
         error!("indexer service is unhealthy");
         is_live = false;
     }
-    if janitor_service_opt
-        .as_ref()
-        .is_some_and(|service| !service.is_healthy())
+    if let Some(service) = janitor_service_opt.as_ref()
+        && !service.is_healthy()
     {
         error!("janitor service is unhealthy");
         is_live = false;
     }
-    if compactor_service_opt
-        .as_ref()
-        .is_some_and(|service| !service.is_healthy())
+    if let Some(service) = compactor_service_opt.as_ref()
+        && !service.is_healthy()
     {
         error!("compactor service is unhealthy");
         is_live = false;

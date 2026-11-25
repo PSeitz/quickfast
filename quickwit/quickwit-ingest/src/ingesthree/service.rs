@@ -115,8 +115,6 @@ impl IngesthreeService {
                 source_id: subrequest.source_id,
                 num_ingested_docs: appended.num_docs as u32,
                 parse_failures: appended.parse_failures,
-                // File appends have no shard or replication position.
-                ..Default::default()
             }],
             failures: Vec::new(),
         })

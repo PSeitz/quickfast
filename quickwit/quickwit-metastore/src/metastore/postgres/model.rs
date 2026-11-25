@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 use std::convert::TryInto;
 use std::str::FromStr;
 
@@ -23,16 +21,6 @@ use sea_query::Iden;
 use tracing::error;
 
 use crate::{IndexMetadata, Split, SplitMetadata, SplitState};
-
-#[derive(Iden, Clone, Copy)]
-#[allow(dead_code)]
-pub enum Indexes {
-    Table,
-    IndexUid,
-    IndexId,
-    IndexMetadataJson,
-    CreateTimestamp,
-}
 
 /// A model structure for handling index metadata in a database.
 #[derive(sqlx::FromRow)]
@@ -71,7 +59,6 @@ impl PgIndex {
 }
 
 #[derive(Iden, Clone, Copy)]
-#[allow(dead_code)]
 pub enum Splits {
     Table,
     SplitId,
@@ -82,8 +69,6 @@ pub enum Splits {
     UpdateTimestamp,
     PublishTimestamp,
     MaturityTimestamp,
-    Tags,
-    SplitMetadataJson,
     IndexUid,
     NodeId,
     DeleteOpstamp,
@@ -106,21 +91,12 @@ pub(super) struct PgSplit {
     /// The state of the split. With `update_timestamp`, this is the only mutable attribute of the
     /// split.
     pub split_state: String,
-    /// If a timestamp field is available, the min timestamp of the split.
-    pub time_range_start: Option<i64>,
-    /// If a timestamp field is available, the max timestamp of the split.
-    pub time_range_end: Option<i64>,
     /// Timestamp for tracking when the split was created.
     pub create_timestamp: sqlx::types::time::PrimitiveDateTime,
     /// Timestamp for tracking when the split was last updated.
     pub update_timestamp: sqlx::types::time::PrimitiveDateTime,
     /// Timestamp for tracking when the split was published.
     pub publish_timestamp: Option<sqlx::types::time::PrimitiveDateTime>,
-    /// Timestamp for tracking when the split becomes mature.
-    /// If a split is already mature, this timestamp is set to 0.
-    pub maturity_timestamp: sqlx::types::time::PrimitiveDateTime,
-    /// A list of tags for categorizing and searching group of splits.
-    pub tags: Vec<String>,
     // The split's metadata serialized as a JSON string.
     pub split_metadata_json: String,
     /// Index UID. It is used as a foreign key in the database.
