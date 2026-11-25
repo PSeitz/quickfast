@@ -22,7 +22,6 @@ use quickwit_metrics::{
     Counter, Gauge, Histogram, Labels, LazyCounter, LazyGauge, LazyHistogram, counter, gauge,
     histogram, labels, lazy_counter, lazy_gauge, lazy_histogram,
 };
-use tower::retry::Policy;
 use tower::{Layer, Service};
 
 use crate::metrics::exponential_buckets;
@@ -148,37 +147,6 @@ pub struct GrpcMetricsLayer {
     request_duration_seconds: Histogram,
 }
 
-/// Retry policy that records each failed attempt which will be retried.
-#[derive(Clone)]
-pub struct GrpcRetryPolicy<P> {
-    inner: P,
-    metrics_layer: GrpcMetricsLayer,
-}
-
-impl<R, T, E, P> Policy<R, T, E> for GrpcRetryPolicy<P>
-where
-    P: Policy<R, T, E>,
-    R: RpcName,
-    E: GrpcStatusCode,
-{
-    type Future = P::Future;
-
-    fn retry(&mut self, request: &mut R, result: &mut Result<T, E>) -> Option<Self::Future> {
-        let retry = self.inner.retry(request, result);
-        if let Err(error) = result
-            && retry.is_some()
-        {
-            self.metrics_layer
-                .record_request(R::rpc_name(), "retry", error.grpc_status_code());
-        }
-        retry
-    }
-
-    fn clone_request(&mut self, request: &R) -> Option<R> {
-        self.inner.clone_request(request)
-    }
-}
-
 impl GrpcMetricsLayer {
     pub fn new(subsystem: &'static str, kind: &'static str) -> Self {
         let labels = Self::default_labels(subsystem, kind);
@@ -203,7 +171,7 @@ impl GrpcMetricsLayer {
     }
 
     /// Wraps an async RPC future to track in-flight count, total count by outcome, and latency.
-    pub fn instrument<F, T, E>(&self, rpc_name: &'static str, inner: F) -> ResponseFuture<F>
+    pub fn instrument_rpc<F, T, E>(&self, rpc_name: &'static str, inner: F) -> ResponseFuture<F>
     where
         F: Future<Output = Result<T, E>>,
         E: GrpcStatusCode,
@@ -225,14 +193,6 @@ impl GrpcMetricsLayer {
     /// Records a retry attempt for `rpc_name` after an error with gRPC status `code`.
     pub fn record_retry(&self, rpc_name: &'static str, code: tonic::Code) {
         self.record_request(rpc_name, "retry", code);
-    }
-
-    /// Wraps a retry policy to record failed attempts that it retries.
-    pub fn from_retry_policy<P>(&self, inner: P) -> GrpcRetryPolicy<P> {
-        GrpcRetryPolicy {
-            inner,
-            metrics_layer: self.clone(),
-        }
     }
 
     fn record_request(&self, rpc_name: &'static str, status: &'static str, code: tonic::Code) {
@@ -326,9 +286,7 @@ mod tests {
     use metrics::with_local_recorder;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder};
 
-    use super::super::retry::{RetryLayer, RetryPolicy};
     use super::*;
-    use crate::retry::{RetryParams, Retryable};
 
     #[derive(Clone, Debug)]
     struct HelloRequest;
@@ -344,21 +302,6 @@ mod tests {
     impl RpcName for GoodbyeRequest {
         fn rpc_name() -> &'static str {
             "goodbye"
-        }
-    }
-
-    #[derive(Debug)]
-    struct RetryableError;
-
-    impl GrpcStatusCode for RetryableError {
-        fn grpc_status_code(&self) -> tonic::Code {
-            tonic::Code::Unavailable
-        }
-    }
-
-    impl Retryable for RetryableError {
-        fn is_retryable(&self) -> bool {
-            true
         }
     }
 
@@ -470,18 +413,13 @@ mod tests {
                 let hello_future = hello_service.call(HelloRequest);
                 drop(hello_future);
 
-                let retry_params = RetryParams {
-                    base_delay: std::time::Duration::ZERO,
-                    max_delay: std::time::Duration::ZERO,
-                    max_attempts: 3,
-                };
-                let retry_policy = primary_layer.from_retry_policy(RetryPolicy::from(retry_params));
-                let mut retry_service = primary_layer.layer(RetryLayer::new(retry_policy).layer(
-                    tower::service_fn(|_request: HelloRequest| async move {
-                        Err::<HelloRequest, _>(RetryableError)
-                    }),
-                ));
-                retry_service.call(HelloRequest).await.unwrap_err();
+                primary_layer.record_retry("hello", tonic::Code::Unavailable);
+                primary_layer.record_retry("hello", tonic::Code::Unavailable);
+                let _ = primary_layer
+                    .instrument_rpc("hello", async {
+                        Err::<HelloRequest, _>(tonic::Status::unavailable("unavailable"))
+                    })
+                    .await;
             });
         });
 

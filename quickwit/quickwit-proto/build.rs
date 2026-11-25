@@ -15,11 +15,9 @@
 use std::path::PathBuf;
 
 use glob::glob;
-use quickwit_codegen::Codegen;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Prost + tonic + Quickwit codegen for control plane, indexing, metastore, ingest and search
-    // services.
+    // Prost + tonic codegen for Quickwit services.
     //
     // Cluster service.
     println!("cargo:rerun-if-changed=protos/quickwit/cluster.proto");
@@ -77,8 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
     // Metastore service.
+    println!("cargo:rerun-if-changed=protos/quickwit/metastore.proto");
     let mut prost_config = prost_build::Config::default();
     prost_config
+        .protoc_arg("--experimental_allow_proto3_optional")
         .bytes([
             "IndexesMetadataResponse.indexes_metadata_json_zstd",
             "ListIndexesMetadataResponse.indexes_metadata_json_zstd",
@@ -101,17 +101,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .file_descriptor_set_path("src/codegen/quickwit/metastore_descriptor.bin");
 
-    Codegen::builder()
-        .with_prost_config(prost_config)
-        .with_protos(&["protos/quickwit/metastore.proto"])
-        .with_includes(&["protos"])
-        .with_output_dir("src/codegen/quickwit")
-        .with_result_type_path("crate::metastore::MetastoreResult")
-        .with_error_type_path("crate::metastore::MetastoreError")
-        .generate_extra_service_methods()
-        .generate_rpc_name_impls()
-        .run()
-        .unwrap();
+    tonic_prost_build::configure()
+        .type_attribute(
+            ".",
+            "#[derive(serde::Serialize, serde::Deserialize, utoipa::ToSchema)]",
+        )
+        .enum_attribute(".", "#[serde(rename_all = \"snake_case\")]")
+        .out_dir("src/codegen/quickwit")
+        .compile_with_config(
+            prost_config,
+            &[PathBuf::from("protos/quickwit/metastore.proto")],
+            &[PathBuf::from("protos")],
+        )?;
 
     // Ingest wire types (shared by IngesthreeService and internal routing).
     println!("cargo:rerun-if-changed=protos/quickwit/ingest.proto");
@@ -148,14 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     // Search service.
-    //
-    // Unlike the other services above, search goes through `tonic_prost_build` directly
-    // (not through `quickwit_codegen::Codegen`, which emits `cargo:rerun-if-changed` for
-    // every proto it compiles). `prost_build` 0.14 has a TODO acknowledging it does not
-    // emit those directives itself, and `tonic_prost_build` 0.14.5 exposes an
-    // `emit_rerun_if_changed` setter but never forwards it to the underlying `Config`.
-    // Without the explicit hint below, edits to `search.proto` do not retrigger build.rs
-    // (because the other `Codegen` calls have already narrowed cargo's watch list).
+    // `prost_build` 0.14 does not emit `cargo:rerun-if-changed` directives itself.
     println!("cargo:rerun-if-changed=protos/quickwit/search.proto");
 
     let mut prost_config = prost_build::Config::default();

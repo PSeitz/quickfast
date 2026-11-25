@@ -20,16 +20,13 @@ use bytesize::ByteSize;
 use quickwit_cluster::Cluster;
 use quickwit_common::pubsub::EventBroker;
 use quickwit_common::retry::RetryParams;
-use quickwit_common::tower::{
-    EventListenerLayer, GrpcMetricsLayer, LoadShedLayer, RetryLayer, RetryPolicy, TimeoutLayer,
-};
+use quickwit_common::tower::GrpcMetricsLayer;
 use quickwit_common::uri::Uri;
 use quickwit_config::service::QuickwitService;
 use quickwit_config::{NodeConfig, PostgresMetastoreConfig};
 use quickwit_metastore::MetastoreResolver;
 use quickwit_metrics::labels;
 use quickwit_proto::metastore::MetastoreServiceClient;
-use tower::ServiceBuilder;
 use tracing::info;
 
 use crate::balance_channel_for_service;
@@ -176,17 +173,15 @@ impl LocalMetastoreServer {
             }
             _ => unreachable!("unexpected metastore service `{service}`"),
         };
-        let retry_policy =
-            metrics_layer.from_retry_policy(RetryPolicy::from(RetryParams::standard()));
-        Ok(MetastoreServiceClient::tower()
-            // Metrics wrap retries so they record only the final outcome.
-            .stack_layer(metrics_layer)
-            .stack_layer(RetryLayer::new(retry_policy))
-            .stack_layer(TimeoutLayer::new(GRPC_METASTORE_SERVICE_TIMEOUT))
-            .stack_layer(tower::limit::GlobalConcurrencyLimitLayer::new(
-                get_metastore_client_max_concurrency(),
-            ))
-            .build_from_balance_channel(balance_channel, max_message_size, None))
+        Ok(
+            MetastoreServiceClient::from_balance_channel(balance_channel, max_message_size, None)
+                .with_client_middleware(
+                    metrics_layer,
+                    RetryParams::standard(),
+                    GRPC_METASTORE_SERVICE_TIMEOUT,
+                    get_metastore_client_max_concurrency(),
+                ),
+        )
     }
 
     fn metastore_max_in_flight_requests(node_config: &NodeConfig, uri: &Uri) -> usize {
@@ -223,27 +218,14 @@ pub(super) async fn start_metastore_service_if_needed(
                     node_config.metastore_uri
                 )
             })?;
-        // These layers apply to all the RPCs of the metastore.
-        let shared_layer = ServiceBuilder::new()
-            .layer(PRIMARY_METASTORE_GRPC_SERVER_METRICS_LAYER.clone())
-            .layer(LoadShedLayer::new(
-                LocalMetastoreServer::metastore_max_in_flight_requests(
-                    node_config,
-                    &node_config.metastore_uri,
-                ),
-            ))
-            .into_inner();
-        let broker_layer = EventListenerLayer::new(event_broker.clone());
-        let metastore = MetastoreServiceClient::tower()
-            .stack_layer(shared_layer)
-            .stack_create_index_layer(broker_layer.clone())
-            .stack_update_index_layer(broker_layer.clone())
-            .stack_update_source_layer(broker_layer.clone())
-            .stack_delete_index_layer(broker_layer.clone())
-            .stack_add_source_layer(broker_layer.clone())
-            .stack_delete_source_layer(broker_layer.clone())
-            .stack_toggle_source_layer(broker_layer)
-            .build(metastore);
+        let metastore = metastore.with_server_middleware(
+            PRIMARY_METASTORE_GRPC_SERVER_METRICS_LAYER.clone(),
+            LocalMetastoreServer::metastore_max_in_flight_requests(
+                node_config,
+                &node_config.metastore_uri,
+            ),
+            Some(event_broker.clone()),
+        );
         return Ok(LocalMetastoreServer::Primary(metastore));
     }
     // Instantiate a read-only metastore replica server if the `metastore_read_replica` role is
@@ -265,18 +247,11 @@ pub(super) async fn start_metastore_service_if_needed(
             .with_context(|| {
                 format!("failed to resolve metastore read replica uri `{read_replica_uri}`")
             })?;
-        let shared_layer = ServiceBuilder::new()
-            .layer(READ_REPLICA_METASTORE_GRPC_SERVER_METRICS_LAYER.clone())
-            .layer(LoadShedLayer::new(
-                LocalMetastoreServer::metastore_max_in_flight_requests(
-                    node_config,
-                    read_replica_uri,
-                ),
-            ))
-            .into_inner();
-        let metastore = MetastoreServiceClient::tower()
-            .stack_layer(shared_layer)
-            .build(metastore);
+        let metastore = metastore.with_server_middleware(
+            READ_REPLICA_METASTORE_GRPC_SERVER_METRICS_LAYER.clone(),
+            LocalMetastoreServer::metastore_max_in_flight_requests(node_config, read_replica_uri),
+            None,
+        );
         return Ok(LocalMetastoreServer::ReadReplica(metastore));
     }
     Ok(LocalMetastoreServer::NotServed)

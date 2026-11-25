@@ -48,10 +48,7 @@ mockall = { workspace = true }
 [build-dependencies]
 glob = "0.3"
 prost-build = { workspace = true }
-tonic-build = { workspace = true }
 tonic-prost-build = { workspace = true }
-
-quickwit-codegen = { workspace = true }
 
 [features]
 postgres = ["sea-query", "sqlx"]

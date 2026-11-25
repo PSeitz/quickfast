@@ -43,7 +43,7 @@ pub(crate) async fn with_optional_metrics<T, E: GrpcStatusCode>(
     fut: impl Future<Output = Result<T, E>>,
 ) -> Result<T, E> {
     if let Some(metrics) = metrics {
-        metrics.instrument(rpc_name, fut).await
+        metrics.instrument_rpc(rpc_name, fut).await
     } else {
         fut.await
     }

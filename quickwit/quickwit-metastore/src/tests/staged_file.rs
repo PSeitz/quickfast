@@ -63,7 +63,7 @@ pub(crate) async fn delete_index(metastore: &mut impl MetastoreService, index_ui
 }
 
 pub(crate) type GrpcMetastore = quickwit_proto::metastore::MetastoreServiceGrpcClientAdapter<
-    quickwit_proto::metastore::metastore_service_grpc_client::MetastoreServiceGrpcClient<
+    quickwit_proto::metastore::metastore_service_client::MetastoreServiceClient<
         quickwit_proto::tonic::transport::Channel,
     >,
 >;

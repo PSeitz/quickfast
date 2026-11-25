@@ -4,8 +4,6 @@ members = [
   "quickwit-aws",
   "quickwit-cli",
   "quickwit-cluster",
-  "quickwit-codegen",
-  "quickwit-codegen/example",
   "quickwit-common",
   "quickwit-compaction",
   "quickwit-config",
@@ -90,7 +88,6 @@ glob = "0.3"
 google-cloud-auth = { version = "0.17", default-features = false, features = ["rustls-tls"] }
 google-cloud-googleapis = { version = "0.16", features = ["pubsub"] }
 google-cloud-pubsub = { version = "0.30", default-features = false, features = ["auth", "rustls-tls"] }
-heck = "0.5"
 hex = "0.4"
 home = "0.5"
 hostname = "0.4"
@@ -155,7 +152,6 @@ postcard = { version = "1.1", features = [
 ], default-features = false }
 pprof = { version = "0.15", features = ["flamegraph"] }
 predicates = "3"
-prettyplease = "0.3"
 proc-macro2 = "1.0"
 prometheus = { version = "0.14", default-features = false, features = ["process"] }
 procfs = { version = "0.18", default-features = false }
@@ -239,7 +235,6 @@ tonic = { version = "0.14", features = [
   "tls-native-roots",
   "zstd",
 ] }
-tonic-build = "0.14"
 tonic-health = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
@@ -324,7 +319,6 @@ reqsign-google = { version = "3.2", default-features = false }
 quickwit-aws = { path = "quickwit-aws" }
 quickwit-cli = { path = "quickwit-cli" }
 quickwit-cluster = { path = "quickwit-cluster" }
-quickwit-codegen = { path = "quickwit-codegen" }
 quickwit-common = { path = "quickwit-common" }
 quickwit-compaction = { path = "quickwit-compaction" }
 quickwit-config = { path = "quickwit-config" }

@@ -21,16 +21,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use quickwit_common::tower::BoxService;
 use quickwit_common::uri::Uri;
 use quickwit_config::{ChecksumAlgorithm, IndexConfig, S3StorageConfig};
 use quickwit_ingest::ingesthree::{DocumentsStagedForUpload, Ingester, Uploader, WriteQueue};
 use quickwit_metastore::{CreateIndexRequestExt, FileBackedMetastore};
 use quickwit_proto::ingest::DocBatchV2;
-use quickwit_proto::metastore::{
-    CreateIndexRequest, MetastoreError, MetastoreService, MetastoreServiceClient,
-    RegisterFileForIndexing, RegisterFileForIndexingResponse,
-};
+use quickwit_proto::metastore::{CreateIndexRequest, MetastoreService, MetastoreServiceClient};
 use quickwit_proto::types::IndexUid;
 use quickwit_storage::{LocalFileStorage, S3CompatibleObjectStorage, Storage};
 use serde_json::Value;
@@ -38,7 +34,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, oneshot};
 use tokio::time::{sleep, timeout};
-use tower::ServiceExt;
 use ulid::Ulid;
 
 const BUDGET: u64 = 1024 * 1024;
@@ -144,9 +139,6 @@ async fn wait_for_marker(root: &Path) {
     .expect("child never reached crash point");
 }
 
-type Registration =
-    BoxService<RegisterFileForIndexing, RegisterFileForIndexingResponse, MetastoreError>;
-
 fn gate_registration(
     client: MetastoreServiceClient,
     root: &Path,
@@ -154,31 +146,22 @@ fn gate_registration(
     after_commit: bool,
 ) -> MetastoreServiceClient {
     let marker = root.join("ready");
-    MetastoreServiceClient::tower()
-        .stack_register_file_for_indexing_layer(tower::layer::layer_fn(
-            move |inner: Registration| {
-                let marker = marker.clone();
-                let gate = gate.clone();
-                tower::service_fn(move |request| {
-                    let inner = inner.clone();
-                    let marker = marker.clone();
-                    let gate = gate.clone();
-                    async move {
-                        if !after_commit {
-                            fs::write(&marker, []).unwrap();
-                            gate.acquire().await.unwrap().forget();
-                        }
-                        let response = inner.oneshot(request).await?;
-                        if after_commit {
-                            fs::write(&marker, []).unwrap();
-                            gate.acquire().await.unwrap().forget();
-                        }
-                        Ok::<_, MetastoreError>(response)
-                    }
-                })
-            },
-        ))
-        .build(client)
+    client.intercept_register_file_for_indexing(move |inner, request| {
+        let marker = marker.clone();
+        let gate = gate.clone();
+        async move {
+            if !after_commit {
+                fs::write(&marker, []).unwrap();
+                gate.acquire().await.unwrap().forget();
+            }
+            let response = inner.register_file_for_indexing(request).await?;
+            if after_commit {
+                fs::write(&marker, []).unwrap();
+                gate.acquire().await.unwrap().forget();
+            }
+            Ok(response)
+        }
+    })
 }
 
 // One real HTTP request, deliberately left unanswered. Optionally forward it to S3

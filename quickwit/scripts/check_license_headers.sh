@@ -16,12 +16,8 @@ do
     diff <(sed 's/{\\d+}/2021/' .license_header.txt) <(head -n 14 $file) > /dev/null
     DIFFRESULT=$?
     if [ $DIFFRESULT -ne 0 ]; then
-        grep -q -i 'begin quickwit-codegen' $file
-        GREPRESULT=$?
-        if [ $GREPRESULT -ne 0 ]; then
-            echo "Incomplete or missing license header in $file"
-            RESULT=1
-        fi
+        echo "Incomplete or missing license header in $file"
+        RESULT=1
     fi
 done
 

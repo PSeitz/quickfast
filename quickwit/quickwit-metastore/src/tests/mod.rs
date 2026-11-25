@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use itertools::Itertools;
-use quickwit_proto::metastore::metastore_service_grpc_client::MetastoreServiceGrpcClient;
+use quickwit_proto::metastore::metastore_service_client::MetastoreServiceClient as MetastoreServiceGrpcClient;
 use quickwit_proto::metastore::{
     DeleteIndexRequest, DeleteSplitsRequest, ListSplitsRequest, MarkSplitsForDeletionRequest,
     MetastoreServiceClient, MetastoreServiceGrpcClientAdapter,

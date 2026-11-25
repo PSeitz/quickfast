@@ -21,12 +21,12 @@ use futures::executor::block_on;
 use futures::poll;
 use quickwit_common::uri::Uri;
 use quickwit_proto::metastore::{
-    DocumentsStagedForUpload as RegisteredFile, EntityKind, MetastoreError, MetastoreServiceClient,
-    MockMetastoreService, RegisterFileForIndexing, RegisterFileForIndexingResponse,
+    DocumentsStagedForUpload as RegisteredFile, EntityKind, MetastoreError, MetastoreService,
+    MetastoreServiceClient, MockMetastoreService, RegisterFileForIndexing,
+    RegisterFileForIndexingResponse,
 };
 use quickwit_storage::{MockStorage, Storage, StorageErrorKind};
 use tokio::time::advance;
-use tower::limit::GlobalConcurrencyLimitLayer;
 
 use super::*;
 
@@ -196,11 +196,16 @@ fn stalled_metastore(
     mock: MockMetastoreService,
 ) -> (MetastoreServiceClient, Arc<tokio::sync::Semaphore>) {
     let permits = Arc::new(tokio::sync::Semaphore::new(0));
-    let metastore = MetastoreServiceClient::tower()
-        .stack_register_file_for_indexing_layer(GlobalConcurrencyLimitLayer::with_semaphore(
-            permits.clone(),
-        ))
-        .build_from_mock(mock);
+    let gate = permits.clone();
+    let metastore = MetastoreServiceClient::from_mock(mock).intercept_register_file_for_indexing(
+        move |inner, request| {
+            let gate = gate.clone();
+            async move {
+                let _permit = gate.acquire().await.unwrap();
+                inner.register_file_for_indexing(request).await
+            }
+        },
+    );
     (metastore, permits)
 }
 
@@ -595,8 +600,6 @@ async fn test_drain_closes_clones_and_finishes_queued_and_active_files() {
 
 #[tokio::test(start_paused = true)]
 async fn test_append_failure_cancels_registration_before_releasing_directory() {
-    use quickwit_common::tower::BoxService;
-
     // Observe the actual directory lock while the stalled registration is dropped.
     struct CheckLockOnCancellation(PathBuf);
     impl Drop for CheckLockOnCancellation {
@@ -618,30 +621,17 @@ async fn test_append_failure_cancels_registration_before_releasing_directory() {
     let (storage, _uploads) = capture_uploads(vec![Ok(())]);
     let path = dir.path().to_path_buf();
     let (started, mut registrations) = mpsc::unbounded_channel();
-    let metastore = MetastoreServiceClient::tower()
-        .stack_register_file_for_indexing_layer(tower::layer::layer_fn(
-            move |_: BoxService<
-                RegisterFileForIndexing,
-                RegisterFileForIndexingResponse,
-                MetastoreError,
-            >| {
-                let path = path.clone();
-                let started = started.clone();
-                tower::service_fn(move |_| {
-                    let check = CheckLockOnCancellation(path.clone());
-                    let started = started.clone();
-                    async move {
-                        let _check = check;
-                        started.send(()).unwrap();
-                        std::future::pending::<
-                            Result<RegisterFileForIndexingResponse, MetastoreError>,
-                        >()
-                        .await
-                    }
-                })
-            },
-        ))
-        .build_from_mock(MockMetastoreService::new());
+    let metastore = MetastoreServiceClient::from_mock(MockMetastoreService::new())
+        .intercept_register_file_for_indexing(move |_inner, _request| {
+            let check = CheckLockOnCancellation(path.clone());
+            let started = started.clone();
+            async move {
+                let _check = check;
+                started.send(()).unwrap();
+                std::future::pending::<Result<RegisterFileForIndexingResponse, MetastoreError>>()
+                    .await
+            }
+        });
     let (queue, receiver) = WriteQueue::channel(&core, BUDGET);
     let core = FileWriter::new(core, queue.admission.clone());
     let worker = tokio::spawn(write_batches(

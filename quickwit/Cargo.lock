@@ -6821,48 +6821,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quickwit-codegen"
-version = "0.9.3"
-dependencies = [
- "anyhow",
- "futures",
- "heck 0.5.0",
- "prettyplease 0.3.0",
- "proc-macro2",
- "prost-build",
- "quote",
- "serde",
- "syn 3.0.9",
- "tonic-prost-build",
-]
-
-[[package]]
-name = "quickwit-codegen-example"
-version = "0.9.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytesize",
- "futures",
- "http 1.5.0",
- "mockall",
- "prost 0.14.4",
- "quickwit-codegen",
- "quickwit-common",
- "quickwit-proto",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
- "tonic 0.14.6",
- "tonic-prost",
- "tower 0.5.3",
- "tracing",
- "tracing-opentelemetry",
- "utoipa",
-]
-
-[[package]]
 name = "quickwit-common"
 version = "0.9.3"
 dependencies = [
@@ -7096,7 +7054,6 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "tokio",
- "tower 0.5.3",
  "tracing",
  "ulid 3.0.0",
  "utoipa",
@@ -7404,7 +7361,6 @@ dependencies = [
  "prost 0.14.4",
  "prost-build",
  "prost-types 0.14.4",
- "quickwit-codegen",
  "quickwit-common",
  "sea-query",
  "serde",
@@ -7413,7 +7369,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tonic 0.14.6",
- "tonic-build",
  "tonic-prost",
  "tonic-prost-build",
  "tower 0.5.3",

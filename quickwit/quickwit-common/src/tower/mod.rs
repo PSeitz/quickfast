@@ -12,30 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod box_layer;
-mod box_service;
 mod change;
-mod event_listener;
-mod load_shed;
 mod metrics;
 mod pool;
-mod retry;
-mod timeout;
 mod transport;
 
 use std::error;
 use std::pin::Pin;
 
-pub use box_layer::BoxLayer;
-pub use box_service::BoxService;
 pub use change::Change;
-pub use event_listener::{EventListener, EventListenerLayer};
 use futures::Future;
-pub use load_shed::{LoadShed, LoadShedLayer, MakeLoadShedError};
-pub use metrics::{GrpcMetrics, GrpcMetricsLayer, GrpcRetryPolicy, GrpcStatusCode, RpcName};
+pub use metrics::{GrpcMetrics, GrpcMetricsLayer, GrpcStatusCode, RpcName};
 pub use pool::Pool;
-pub use retry::{RetryLayer, RetryPolicy};
-pub use timeout::{Timeout, TimeoutExceeded, TimeoutLayer};
 pub use transport::{BalanceChannel, warmup_channel};
 
 pub type BoxError = Box<dyn error::Error + Send + Sync + 'static>;

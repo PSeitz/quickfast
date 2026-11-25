@@ -28,14 +28,12 @@ use quickwit_metastore::{
 use quickwit_metrics::{Counter, counter, label_values};
 use quickwit_proto::metastore::{
     CreateIndexRequest, DeleteQuery, DocumentsStagedForUpload, ListSplitsRequest,
-    PublishFileSplitsResponse, RegisterFileForIndexing,
+    RegisterFileForIndexing,
 };
 use quickwit_storage::RamStorage;
 use tantivy::collector::Count;
 use tantivy::query::AllQuery;
 use tokio::sync::{Notify, Semaphore};
-use tower::ServiceBuilder;
-use tower::limit::GlobalConcurrencyLimitLayer;
 
 use super::*;
 use crate::get_tantivy_directory_from_split_bundle;
@@ -214,12 +212,13 @@ async fn test_files_publish_searchable_splits_and_completion_together() {
     assert_publication_counters(&counters, &[]);
     let active_assignments = Gauge::local();
     let observed_activity = active_assignments.clone();
-    worker.metastore = MetastoreServiceClient::tower()
-        .stack_assign_files_for_indexing_layer(tower::util::MapRequestLayer::new(move |request| {
-            assert_eq!(observed_activity.get(), 0.0, "polling is idle");
-            request
-        }))
-        .build(worker.metastore);
+    worker.metastore =
+        worker
+            .metastore
+            .intercept_assign_files_for_indexing(move |inner, request| {
+                assert_eq!(observed_activity.get(), 0.0, "polling is idle");
+                async move { inner.assign_files_for_indexing(request).await }
+            });
     // Cross document batches and input files without flushing at the document target.
     let mut docs = vec![DOC; 300];
     docs.push("not JSON");
@@ -418,25 +417,21 @@ async fn test_committed_publication_retry_keeps_ids_and_outputs() {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let recorded = requests.clone();
     let first = Arc::new(AtomicBool::new(true));
-    let layer = ServiceBuilder::new()
-        .map_request(move |request: PublishFileSplits| {
+    worker.metastore = worker
+        .metastore
+        .intercept_publish_file_splits(move |inner, request| {
             recorded.lock().unwrap().push(request.clone());
-            request
-        })
-        .map_result(
-            move |result: Result<PublishFileSplitsResponse, MetastoreError>| {
-                let response = result?;
+            let before_confirmation = before_confirmation.clone();
+            let first = first.clone();
+            async move {
+                let response = inner.publish_file_splits(request).await?;
                 assert_publication_counters(&before_confirmation, &[]);
                 if first.swap(false, Ordering::SeqCst) {
                     return Err(MetastoreError::Unavailable("committed reply lost".into()));
                 }
                 Ok(response)
-            },
-        )
-        .into_inner();
-    worker.metastore = MetastoreServiceClient::tower()
-        .stack_publish_file_splits_layer(layer)
-        .build(worker.metastore);
+            }
+        });
     let result = worker.index_next(assignment()).await.unwrap().unwrap();
     assert!(result.published);
     assert_publication_counters(&counters, &result.splits);
@@ -463,18 +458,16 @@ async fn test_cancel_after_committed_publication_preserves_winner() {
     let committed = Arc::new(Notify::new());
     let notify = committed.clone();
     let metastore = worker.metastore.clone();
-    let layer = tower::util::MapResultLayer::new(
-        move |result: Result<PublishFileSplitsResponse, MetastoreError>| {
-            result?;
-            notify.notify_one();
-            Err::<PublishFileSplitsResponse, _>(MetastoreError::Unavailable(
-                "committed reply lost".into(),
-            ))
-        },
-    );
-    worker.metastore = MetastoreServiceClient::tower()
-        .stack_publish_file_splits_layer(layer)
-        .build(metastore.clone());
+    worker.metastore = metastore
+        .clone()
+        .intercept_publish_file_splits(move |inner, request| {
+            let notify = notify.clone();
+            async move {
+                inner.publish_file_splits(request).await?;
+                notify.notify_one();
+                Err(MetastoreError::Unavailable("committed reply lost".into()))
+            }
+        });
     let mut observer = S3Indexer {
         metastore,
         ..worker_for_observation(&worker)
@@ -538,11 +531,16 @@ async fn test_reassigned_worker_wins_and_loser_returns_no_published_outputs() {
     let input = register_file(&mut older, &index_uid, &[DOC]).await;
     let mut newer = worker_for_observation(&older);
     let publication_gate = Arc::new(Semaphore::new(0));
-    older.metastore = MetastoreServiceClient::tower()
-        .stack_publish_file_splits_layer(GlobalConcurrencyLimitLayer::with_semaphore(
-            publication_gate.clone(),
-        ))
-        .build(older.metastore);
+    let gate = publication_gate.clone();
+    older.metastore = older
+        .metastore
+        .intercept_publish_file_splits(move |inner, request| {
+            let gate = gate.clone();
+            async move {
+                let _permit = gate.acquire().await.unwrap();
+                inner.publish_file_splits(request).await
+            }
+        });
     let handle = tokio::spawn(async move {
         older
             .index_next_with_activity(assignment(), &older_activity)

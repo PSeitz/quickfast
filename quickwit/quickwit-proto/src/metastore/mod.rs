@@ -16,13 +16,22 @@ use std::{fmt, io};
 
 use quickwit_common::rate_limited_error;
 use quickwit_common::retry::Retryable;
-use quickwit_common::tower::{MakeLoadShedError, TimeoutExceeded};
 use serde::{Deserialize, Serialize};
 
 use crate::types::{IndexId, IndexUid, SourceId};
 use crate::{GrpcServiceError, ServiceError, ServiceErrorCode};
 
 pub mod events;
+mod service;
+#[cfg(any(test, feature = "testsuite"))]
+mod test_intercept;
+
+#[cfg(any(test, feature = "testsuite"))]
+pub use service::MockMetastoreService;
+pub use service::{
+    MetastoreService, MetastoreServiceClient, MetastoreServiceGrpcClientAdapter,
+    MetastoreServiceGrpcServerAdapter, MetastoreServiceStream,
+};
 
 include!("../codegen/quickwit/quickwit.metastore.rs");
 
@@ -255,12 +264,6 @@ impl From<sqlx::Error> for MetastoreError {
     }
 }
 
-impl From<TimeoutExceeded> for MetastoreError {
-    fn from(_: TimeoutExceeded) -> Self {
-        MetastoreError::Timeout("client".to_string())
-    }
-}
-
 impl ServiceError for MetastoreError {
     fn error_code(&self) -> ServiceErrorCode {
         match self {
@@ -363,12 +366,6 @@ impl Retryable for MetastoreError {
                 | Self::Timeout(_)
                 | Self::Unavailable(_)
         )
-    }
-}
-
-impl MakeLoadShedError for MetastoreError {
-    fn make_load_shed_error() -> Self {
-        MetastoreError::TooManyRequests
     }
 }
 

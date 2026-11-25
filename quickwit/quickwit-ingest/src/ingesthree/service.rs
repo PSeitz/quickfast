@@ -296,13 +296,8 @@ mod tests {
         let queue = WriteQueue::open(directory.path().into(), 100_000, 100_000, None)
             .await
             .unwrap();
-        let metastore = MetastoreServiceClient::tower()
-            .stack_index_metadata_layer(tower::layer::layer_fn(|_inner| {
-                tower::service_fn(|_: IndexMetadataRequest| {
-                    std::future::pending::<Result<IndexMetadataResponse, MetastoreError>>()
-                })
-            }))
-            .build_from_mock(MockMetastoreService::new());
+        let metastore = MetastoreServiceClient::mocked()
+            .intercept_index_metadata(|_inner, _request| std::future::pending());
         let mut service = IngesthreeService::new(metastore, queue.clone());
         let (requests, in_flight) = service_metrics(&mut service, "service_cancellation");
         let mut response = Box::pin(service.ingest(request(payload())));

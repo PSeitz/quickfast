@@ -617,5240 +617,8 @@ impl IndexMetadataFailureReason {
         }
     }
 }
-/// BEGIN quickwit-codegen
-#[allow(unused_imports)]
-use std::str::FromStr;
-use tower::{Layer, Service, ServiceExt};
-use quickwit_common::tower::RpcName;
-impl RpcName for CreateIndexRequest {
-    fn rpc_name() -> &'static str {
-        "create_index"
-    }
-}
-impl RpcName for UpdateIndexRequest {
-    fn rpc_name() -> &'static str {
-        "update_index"
-    }
-}
-impl RpcName for IndexMetadataRequest {
-    fn rpc_name() -> &'static str {
-        "index_metadata"
-    }
-}
-impl RpcName for IndexesMetadataRequest {
-    fn rpc_name() -> &'static str {
-        "indexes_metadata"
-    }
-}
-impl RpcName for ListIndexesMetadataRequest {
-    fn rpc_name() -> &'static str {
-        "list_indexes_metadata"
-    }
-}
-impl RpcName for DeleteIndexRequest {
-    fn rpc_name() -> &'static str {
-        "delete_index"
-    }
-}
-impl RpcName for ListIndexStatsRequest {
-    fn rpc_name() -> &'static str {
-        "list_index_stats"
-    }
-}
-impl RpcName for ListSplitsRequest {
-    fn rpc_name() -> &'static str {
-        "list_splits"
-    }
-}
-impl RpcName for RegisterFileForIndexing {
-    fn rpc_name() -> &'static str {
-        "register_file_for_indexing"
-    }
-}
-impl RpcName for AssignFilesForIndexing {
-    fn rpc_name() -> &'static str {
-        "assign_files_for_indexing"
-    }
-}
-impl RpcName for PublishFileSplits {
-    fn rpc_name() -> &'static str {
-        "publish_file_splits"
-    }
-}
-impl RpcName for ListCompletedFilesRequest {
-    fn rpc_name() -> &'static str {
-        "list_completed_files"
-    }
-}
-impl RpcName for StageSplitsRequest {
-    fn rpc_name() -> &'static str {
-        "stage_splits"
-    }
-}
-impl RpcName for PublishSplitsRequest {
-    fn rpc_name() -> &'static str {
-        "publish_splits"
-    }
-}
-impl RpcName for MarkSplitsForDeletionRequest {
-    fn rpc_name() -> &'static str {
-        "mark_splits_for_deletion"
-    }
-}
-impl RpcName for DeleteSplitsRequest {
-    fn rpc_name() -> &'static str {
-        "delete_splits"
-    }
-}
-impl RpcName for AddSourceRequest {
-    fn rpc_name() -> &'static str {
-        "add_source"
-    }
-}
-impl RpcName for UpdateSourceRequest {
-    fn rpc_name() -> &'static str {
-        "update_source"
-    }
-}
-impl RpcName for ToggleSourceRequest {
-    fn rpc_name() -> &'static str {
-        "toggle_source"
-    }
-}
-impl RpcName for DeleteSourceRequest {
-    fn rpc_name() -> &'static str {
-        "delete_source"
-    }
-}
-impl RpcName for LastDeleteOpstampRequest {
-    fn rpc_name() -> &'static str {
-        "last_delete_opstamp"
-    }
-}
-impl RpcName for DeleteQuery {
-    fn rpc_name() -> &'static str {
-        "create_delete_task"
-    }
-}
-impl RpcName for UpdateSplitsDeleteOpstampRequest {
-    fn rpc_name() -> &'static str {
-        "update_splits_delete_opstamp"
-    }
-}
-impl RpcName for ListDeleteTasksRequest {
-    fn rpc_name() -> &'static str {
-        "list_delete_tasks"
-    }
-}
-impl RpcName for ListStaleSplitsRequest {
-    fn rpc_name() -> &'static str {
-        "list_stale_splits"
-    }
-}
-impl RpcName for CreateIndexTemplateRequest {
-    fn rpc_name() -> &'static str {
-        "create_index_template"
-    }
-}
-impl RpcName for GetIndexTemplateRequest {
-    fn rpc_name() -> &'static str {
-        "get_index_template"
-    }
-}
-impl RpcName for FindIndexTemplateMatchesRequest {
-    fn rpc_name() -> &'static str {
-        "find_index_template_matches"
-    }
-}
-impl RpcName for ListIndexTemplatesRequest {
-    fn rpc_name() -> &'static str {
-        "list_index_templates"
-    }
-}
-impl RpcName for DeleteIndexTemplatesRequest {
-    fn rpc_name() -> &'static str {
-        "delete_index_templates"
-    }
-}
-impl RpcName for GetClusterIdentityRequest {
-    fn rpc_name() -> &'static str {
-        "get_cluster_identity"
-    }
-}
-pub type MetastoreServiceStream<T> = quickwit_common::ServiceStream<
-    crate::metastore::MetastoreResult<T>,
->;
-#[cfg_attr(any(test, feature = "testsuite"), mockall::automock)]
-#[async_trait::async_trait]
-pub trait MetastoreService: std::fmt::Debug + Send + Sync + 'static {
-    ///Creates an index.
-    ///
-    ///This API creates a new index in the metastore.
-    ///An error will occur if an index that already exists in the storage is specified.
-    async fn create_index(
-        &self,
-        request: CreateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<CreateIndexResponse>;
-    ///Update an index.
-    async fn update_index(
-        &self,
-        request: UpdateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse>;
-    ///Returns the `IndexMetadata` of an index identified by its IndexID or its IndexUID.
-    async fn index_metadata(
-        &self,
-        request: IndexMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse>;
-    ///Fetches the metadata of a list of indexes identified by their Index IDs or UIDs.
-    async fn indexes_metadata(
-        &self,
-        request: IndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexesMetadataResponse>;
-    ///Gets an indexes metadatas.
-    async fn list_indexes_metadata(
-        &self,
-        request: ListIndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexesMetadataResponse>;
-    ///Deletes an index
-    async fn delete_index(
-        &self,
-        request: DeleteIndexRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Returns a list of size info for each index.
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexStatsResponse>;
-    ///Streams splits from index.
-    async fn list_splits(
-        &self,
-        request: ListSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<MetastoreServiceStream<ListSplitsResponse>>;
-    ///Registers an immutable file for indexing after upload has succeeded. The caller
-    ///generates a globally unique file_id and retains it across retries. Repeated
-    ///registration returns the existing record unchanged, including processing and
-    ///completion timestamps. The caller keeps index UID, URI, and size unchanged;
-    ///registration does not compare them with the stored metadata.
-    ///The metastore records the caller's upload assertion; it does not check storage.
-    async fn register_file_for_indexing(
-        &self,
-        request: RegisterFileForIndexing,
-    ) -> crate::metastore::MetastoreResult<RegisterFileForIndexingResponse>;
-    ///Claims eligible files from one index, oldest first. Assignment limits duplicate
-    ///work without fencing publication. A lost response recovers through retry eligibility.
-    async fn assign_files_for_indexing(
-        &self,
-        request: AssignFilesForIndexing,
-    ) -> crate::metastore::MetastoreResult<AssignFilesForIndexingResponse>;
-    ///Atomically publishes an attempt's output splits and completes all its inputs.
-    ///The first commit wins, including an older attempt after reassignment.
-    async fn publish_file_splits(
-        &self,
-        request: PublishFileSplits,
-    ) -> crate::metastore::MetastoreResult<PublishFileSplitsResponse>;
-    ///Lists completed inputs globally without changing retained completion evidence.
-    ///Callers repeat whole scans to catch late reuploads, including crashes before registration.
-    async fn list_completed_files(
-        &self,
-        request: ListCompletedFilesRequest,
-    ) -> crate::metastore::MetastoreResult<ListCompletedFilesResponse>;
-    ///Stages several splits.
-    async fn stage_splits(
-        &self,
-        request: StageSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Publishes split.
-    async fn publish_splits(
-        &self,
-        request: PublishSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Marks splits for deletion.
-    async fn mark_splits_for_deletion(
-        &self,
-        request: MarkSplitsForDeletionRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Deletes splits.
-    async fn delete_splits(
-        &self,
-        request: DeleteSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Adds a source.
-    async fn add_source(
-        &self,
-        request: AddSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Updates a source.
-    async fn update_source(
-        &self,
-        request: UpdateSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Toggles (turns on or off) source.
-    async fn toggle_source(
-        &self,
-        request: ToggleSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Removes source.
-    async fn delete_source(
-        &self,
-        request: DeleteSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Gets last opstamp for a given `index_id`.
-    async fn last_delete_opstamp(
-        &self,
-        request: LastDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<LastDeleteOpstampResponse>;
-    ///Creates a delete task.
-    async fn create_delete_task(
-        &self,
-        request: DeleteQuery,
-    ) -> crate::metastore::MetastoreResult<DeleteTask>;
-    ///Updates splits `delete_opstamp`.
-    async fn update_splits_delete_opstamp(
-        &self,
-        request: UpdateSplitsDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<UpdateSplitsDeleteOpstampResponse>;
-    ///Lists delete tasks with `delete_task.opstamp` > `opstamp_start` for a given `index_id`.
-    async fn list_delete_tasks(
-        &self,
-        request: ListDeleteTasksRequest,
-    ) -> crate::metastore::MetastoreResult<ListDeleteTasksResponse>;
-    ///Lists splits with `split.delete_opstamp` \< `delete_opstamp` for a given `index_id`.
-    async fn list_stale_splits(
-        &self,
-        request: ListStaleSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<ListSplitsResponse>;
-    ///Creates an index template.
-    async fn create_index_template(
-        &self,
-        request: CreateIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Fetches an index template.
-    async fn get_index_template(
-        &self,
-        request: GetIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<GetIndexTemplateResponse>;
-    ///Finds matching index templates.
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> crate::metastore::MetastoreResult<FindIndexTemplateMatchesResponse>;
-    ///Returns all the index templates.
-    async fn list_index_templates(
-        &self,
-        request: ListIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexTemplatesResponse>;
-    ///Deletes index templates.
-    async fn delete_index_templates(
-        &self,
-        request: DeleteIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse>;
-    ///Get cluster identity
-    async fn get_cluster_identity(
-        &self,
-        request: GetClusterIdentityRequest,
-    ) -> crate::metastore::MetastoreResult<GetClusterIdentityResponse>;
-    async fn check_connectivity(&self) -> anyhow::Result<()>;
-    fn endpoints(&self) -> Vec<quickwit_common::uri::Uri>;
-}
-#[derive(Debug, Clone)]
-pub struct MetastoreServiceClient {
-    inner: InnerMetastoreServiceClient,
-}
-#[derive(Debug, Clone)]
-struct InnerMetastoreServiceClient(std::sync::Arc<dyn MetastoreService>);
-impl MetastoreServiceClient {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: MetastoreService,
-    {
-        #[cfg(any(test, feature = "testsuite"))]
-        assert!(
-            std::any::TypeId::of:: < T > () != std::any::TypeId::of:: <
-            MockMetastoreService > (),
-            "`MockMetastoreService` must be wrapped in a `MockMetastoreServiceWrapper`: use `MetastoreServiceClient::from_mock(mock)` to instantiate the client"
-        );
-        Self {
-            inner: InnerMetastoreServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-    pub fn as_grpc_service(
-        &self,
-        max_message_size: bytesize::ByteSize,
-    ) -> metastore_service_grpc_server::MetastoreServiceGrpcServer<
-        MetastoreServiceGrpcServerAdapter,
-    > {
-        let adapter = MetastoreServiceGrpcServerAdapter::new(self.clone());
-        metastore_service_grpc_server::MetastoreServiceGrpcServer::new(adapter)
-            .accept_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .send_compressed(tonic::codec::CompressionEncoding::Gzip)
-            .send_compressed(tonic::codec::CompressionEncoding::Zstd)
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize)
-    }
-    pub fn from_channel(
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> Self {
-        let (_, connection_keys_watcher) = tokio::sync::watch::channel(
-            std::collections::HashSet::from_iter([addr]),
-        );
-        let mut client = metastore_service_grpc_client::MetastoreServiceGrpcClient::new(
-                channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = MetastoreServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn from_balance_channel(
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> MetastoreServiceClient {
-        let connection_keys_watcher = balance_channel.connection_keys_watcher();
-        let mut client = metastore_service_grpc_client::MetastoreServiceGrpcClient::new(
-                balance_channel,
-            )
-            .max_decoding_message_size(max_message_size.0 as usize)
-            .max_encoding_message_size(max_message_size.0 as usize);
-        if let Some(compression_encoding) = compression_encoding_opt {
-            client = client
-                .accept_compressed(compression_encoding)
-                .send_compressed(compression_encoding);
-        }
-        let adapter = MetastoreServiceGrpcClientAdapter::new(
-            client,
-            connection_keys_watcher,
-        );
-        Self::new(adapter)
-    }
-    pub fn tower() -> MetastoreServiceTowerLayerStack {
-        MetastoreServiceTowerLayerStack::default()
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn from_mock(mock: MockMetastoreService) -> Self {
-        let mock_wrapper = mock_metastore_service::MockMetastoreServiceWrapper {
-            inner: tokio::sync::Mutex::new(mock),
-        };
-        Self::new(mock_wrapper)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn mocked() -> Self {
-        Self::from_mock(MockMetastoreService::new())
-    }
-}
-#[async_trait::async_trait]
-impl MetastoreService for MetastoreServiceClient {
-    #[tracing::instrument(skip_all, name = "metastore.create_index")]
-    async fn create_index(
-        &self,
-        request: CreateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<CreateIndexResponse> {
-        self.inner.0.create_index(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.update_index")]
-    async fn update_index(
-        &self,
-        request: UpdateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        self.inner.0.update_index(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.index_metadata")]
-    async fn index_metadata(
-        &self,
-        request: IndexMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        self.inner.0.index_metadata(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.indexes_metadata")]
-    async fn indexes_metadata(
-        &self,
-        request: IndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexesMetadataResponse> {
-        self.inner.0.indexes_metadata(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_indexes_metadata")]
-    async fn list_indexes_metadata(
-        &self,
-        request: ListIndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexesMetadataResponse> {
-        self.inner.0.list_indexes_metadata(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.delete_index")]
-    async fn delete_index(
-        &self,
-        request: DeleteIndexRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.delete_index(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_index_stats")]
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexStatsResponse> {
-        self.inner.0.list_index_stats(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_splits")]
-    async fn list_splits(
-        &self,
-        request: ListSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<MetastoreServiceStream<ListSplitsResponse>> {
-        self.inner.0.list_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.register_file_for_indexing")]
-    async fn register_file_for_indexing(
-        &self,
-        request: RegisterFileForIndexing,
-    ) -> crate::metastore::MetastoreResult<RegisterFileForIndexingResponse> {
-        self.inner.0.register_file_for_indexing(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.assign_files_for_indexing")]
-    async fn assign_files_for_indexing(
-        &self,
-        request: AssignFilesForIndexing,
-    ) -> crate::metastore::MetastoreResult<AssignFilesForIndexingResponse> {
-        self.inner.0.assign_files_for_indexing(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.publish_file_splits")]
-    async fn publish_file_splits(
-        &self,
-        request: PublishFileSplits,
-    ) -> crate::metastore::MetastoreResult<PublishFileSplitsResponse> {
-        self.inner.0.publish_file_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_completed_files")]
-    async fn list_completed_files(
-        &self,
-        request: ListCompletedFilesRequest,
-    ) -> crate::metastore::MetastoreResult<ListCompletedFilesResponse> {
-        self.inner.0.list_completed_files(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.stage_splits")]
-    async fn stage_splits(
-        &self,
-        request: StageSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.stage_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.publish_splits")]
-    async fn publish_splits(
-        &self,
-        request: PublishSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.publish_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.mark_splits_for_deletion")]
-    async fn mark_splits_for_deletion(
-        &self,
-        request: MarkSplitsForDeletionRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.mark_splits_for_deletion(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.delete_splits")]
-    async fn delete_splits(
-        &self,
-        request: DeleteSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.delete_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.add_source")]
-    async fn add_source(
-        &self,
-        request: AddSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.add_source(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.update_source")]
-    async fn update_source(
-        &self,
-        request: UpdateSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.update_source(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.toggle_source")]
-    async fn toggle_source(
-        &self,
-        request: ToggleSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.toggle_source(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.delete_source")]
-    async fn delete_source(
-        &self,
-        request: DeleteSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.delete_source(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.last_delete_opstamp")]
-    async fn last_delete_opstamp(
-        &self,
-        request: LastDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<LastDeleteOpstampResponse> {
-        self.inner.0.last_delete_opstamp(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.create_delete_task")]
-    async fn create_delete_task(
-        &self,
-        request: DeleteQuery,
-    ) -> crate::metastore::MetastoreResult<DeleteTask> {
-        self.inner.0.create_delete_task(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.update_splits_delete_opstamp")]
-    async fn update_splits_delete_opstamp(
-        &self,
-        request: UpdateSplitsDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<UpdateSplitsDeleteOpstampResponse> {
-        self.inner.0.update_splits_delete_opstamp(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_delete_tasks")]
-    async fn list_delete_tasks(
-        &self,
-        request: ListDeleteTasksRequest,
-    ) -> crate::metastore::MetastoreResult<ListDeleteTasksResponse> {
-        self.inner.0.list_delete_tasks(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_stale_splits")]
-    async fn list_stale_splits(
-        &self,
-        request: ListStaleSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
-        self.inner.0.list_stale_splits(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.create_index_template")]
-    async fn create_index_template(
-        &self,
-        request: CreateIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.create_index_template(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.get_index_template")]
-    async fn get_index_template(
-        &self,
-        request: GetIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<GetIndexTemplateResponse> {
-        self.inner.0.get_index_template(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.find_index_template_matches")]
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> crate::metastore::MetastoreResult<FindIndexTemplateMatchesResponse> {
-        self.inner.0.find_index_template_matches(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.list_index_templates")]
-    async fn list_index_templates(
-        &self,
-        request: ListIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexTemplatesResponse> {
-        self.inner.0.list_index_templates(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.delete_index_templates")]
-    async fn delete_index_templates(
-        &self,
-        request: DeleteIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.inner.0.delete_index_templates(request).await
-    }
-    #[tracing::instrument(skip_all, name = "metastore.get_cluster_identity")]
-    async fn get_cluster_identity(
-        &self,
-        request: GetClusterIdentityRequest,
-    ) -> crate::metastore::MetastoreResult<GetClusterIdentityResponse> {
-        self.inner.0.get_cluster_identity(request).await
-    }
-    async fn check_connectivity(&self) -> anyhow::Result<()> {
-        self.inner.0.check_connectivity().await
-    }
-    fn endpoints(&self) -> Vec<quickwit_common::uri::Uri> {
-        self.inner.0.endpoints()
-    }
-}
-#[cfg(any(test, feature = "testsuite"))]
-pub mod mock_metastore_service {
-    use super::*;
-    #[derive(Debug)]
-    pub struct MockMetastoreServiceWrapper {
-        pub(super) inner: tokio::sync::Mutex<MockMetastoreService>,
-    }
-    #[async_trait::async_trait]
-    impl MetastoreService for MockMetastoreServiceWrapper {
-        async fn create_index(
-            &self,
-            request: super::CreateIndexRequest,
-        ) -> crate::metastore::MetastoreResult<super::CreateIndexResponse> {
-            self.inner.lock().await.create_index(request).await
-        }
-        async fn update_index(
-            &self,
-            request: super::UpdateIndexRequest,
-        ) -> crate::metastore::MetastoreResult<super::IndexMetadataResponse> {
-            self.inner.lock().await.update_index(request).await
-        }
-        async fn index_metadata(
-            &self,
-            request: super::IndexMetadataRequest,
-        ) -> crate::metastore::MetastoreResult<super::IndexMetadataResponse> {
-            self.inner.lock().await.index_metadata(request).await
-        }
-        async fn indexes_metadata(
-            &self,
-            request: super::IndexesMetadataRequest,
-        ) -> crate::metastore::MetastoreResult<super::IndexesMetadataResponse> {
-            self.inner.lock().await.indexes_metadata(request).await
-        }
-        async fn list_indexes_metadata(
-            &self,
-            request: super::ListIndexesMetadataRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListIndexesMetadataResponse> {
-            self.inner.lock().await.list_indexes_metadata(request).await
-        }
-        async fn delete_index(
-            &self,
-            request: super::DeleteIndexRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.delete_index(request).await
-        }
-        async fn list_index_stats(
-            &self,
-            request: super::ListIndexStatsRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListIndexStatsResponse> {
-            self.inner.lock().await.list_index_stats(request).await
-        }
-        async fn list_splits(
-            &self,
-            request: super::ListSplitsRequest,
-        ) -> crate::metastore::MetastoreResult<
-            MetastoreServiceStream<super::ListSplitsResponse>,
-        > {
-            self.inner.lock().await.list_splits(request).await
-        }
-        async fn register_file_for_indexing(
-            &self,
-            request: super::RegisterFileForIndexing,
-        ) -> crate::metastore::MetastoreResult<super::RegisterFileForIndexingResponse> {
-            self.inner.lock().await.register_file_for_indexing(request).await
-        }
-        async fn assign_files_for_indexing(
-            &self,
-            request: super::AssignFilesForIndexing,
-        ) -> crate::metastore::MetastoreResult<super::AssignFilesForIndexingResponse> {
-            self.inner.lock().await.assign_files_for_indexing(request).await
-        }
-        async fn publish_file_splits(
-            &self,
-            request: super::PublishFileSplits,
-        ) -> crate::metastore::MetastoreResult<super::PublishFileSplitsResponse> {
-            self.inner.lock().await.publish_file_splits(request).await
-        }
-        async fn list_completed_files(
-            &self,
-            request: super::ListCompletedFilesRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListCompletedFilesResponse> {
-            self.inner.lock().await.list_completed_files(request).await
-        }
-        async fn stage_splits(
-            &self,
-            request: super::StageSplitsRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.stage_splits(request).await
-        }
-        async fn publish_splits(
-            &self,
-            request: super::PublishSplitsRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.publish_splits(request).await
-        }
-        async fn mark_splits_for_deletion(
-            &self,
-            request: super::MarkSplitsForDeletionRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.mark_splits_for_deletion(request).await
-        }
-        async fn delete_splits(
-            &self,
-            request: super::DeleteSplitsRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.delete_splits(request).await
-        }
-        async fn add_source(
-            &self,
-            request: super::AddSourceRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.add_source(request).await
-        }
-        async fn update_source(
-            &self,
-            request: super::UpdateSourceRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.update_source(request).await
-        }
-        async fn toggle_source(
-            &self,
-            request: super::ToggleSourceRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.toggle_source(request).await
-        }
-        async fn delete_source(
-            &self,
-            request: super::DeleteSourceRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.delete_source(request).await
-        }
-        async fn last_delete_opstamp(
-            &self,
-            request: super::LastDeleteOpstampRequest,
-        ) -> crate::metastore::MetastoreResult<super::LastDeleteOpstampResponse> {
-            self.inner.lock().await.last_delete_opstamp(request).await
-        }
-        async fn create_delete_task(
-            &self,
-            request: super::DeleteQuery,
-        ) -> crate::metastore::MetastoreResult<super::DeleteTask> {
-            self.inner.lock().await.create_delete_task(request).await
-        }
-        async fn update_splits_delete_opstamp(
-            &self,
-            request: super::UpdateSplitsDeleteOpstampRequest,
-        ) -> crate::metastore::MetastoreResult<
-            super::UpdateSplitsDeleteOpstampResponse,
-        > {
-            self.inner.lock().await.update_splits_delete_opstamp(request).await
-        }
-        async fn list_delete_tasks(
-            &self,
-            request: super::ListDeleteTasksRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListDeleteTasksResponse> {
-            self.inner.lock().await.list_delete_tasks(request).await
-        }
-        async fn list_stale_splits(
-            &self,
-            request: super::ListStaleSplitsRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListSplitsResponse> {
-            self.inner.lock().await.list_stale_splits(request).await
-        }
-        async fn create_index_template(
-            &self,
-            request: super::CreateIndexTemplateRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.create_index_template(request).await
-        }
-        async fn get_index_template(
-            &self,
-            request: super::GetIndexTemplateRequest,
-        ) -> crate::metastore::MetastoreResult<super::GetIndexTemplateResponse> {
-            self.inner.lock().await.get_index_template(request).await
-        }
-        async fn find_index_template_matches(
-            &self,
-            request: super::FindIndexTemplateMatchesRequest,
-        ) -> crate::metastore::MetastoreResult<super::FindIndexTemplateMatchesResponse> {
-            self.inner.lock().await.find_index_template_matches(request).await
-        }
-        async fn list_index_templates(
-            &self,
-            request: super::ListIndexTemplatesRequest,
-        ) -> crate::metastore::MetastoreResult<super::ListIndexTemplatesResponse> {
-            self.inner.lock().await.list_index_templates(request).await
-        }
-        async fn delete_index_templates(
-            &self,
-            request: super::DeleteIndexTemplatesRequest,
-        ) -> crate::metastore::MetastoreResult<super::EmptyResponse> {
-            self.inner.lock().await.delete_index_templates(request).await
-        }
-        async fn get_cluster_identity(
-            &self,
-            request: super::GetClusterIdentityRequest,
-        ) -> crate::metastore::MetastoreResult<super::GetClusterIdentityResponse> {
-            self.inner.lock().await.get_cluster_identity(request).await
-        }
-        async fn check_connectivity(&self) -> anyhow::Result<()> {
-            self.inner.lock().await.check_connectivity().await
-        }
-        fn endpoints(&self) -> Vec<quickwit_common::uri::Uri> {
-            futures::executor::block_on(self.inner.lock()).endpoints()
-        }
-    }
-}
-pub type BoxFuture<T, E> = std::pin::Pin<
-    Box<dyn std::future::Future<Output = Result<T, E>> + Send + 'static>,
->;
-impl tower::Service<CreateIndexRequest> for InnerMetastoreServiceClient {
-    type Response = CreateIndexResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: CreateIndexRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.create_index(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<UpdateIndexRequest> for InnerMetastoreServiceClient {
-    type Response = IndexMetadataResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: UpdateIndexRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.update_index(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<IndexMetadataRequest> for InnerMetastoreServiceClient {
-    type Response = IndexMetadataResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: IndexMetadataRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.index_metadata(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<IndexesMetadataRequest> for InnerMetastoreServiceClient {
-    type Response = IndexesMetadataResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: IndexesMetadataRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.indexes_metadata(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListIndexesMetadataRequest> for InnerMetastoreServiceClient {
-    type Response = ListIndexesMetadataResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListIndexesMetadataRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_indexes_metadata(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteIndexRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteIndexRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.delete_index(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListIndexStatsRequest> for InnerMetastoreServiceClient {
-    type Response = ListIndexStatsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListIndexStatsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_index_stats(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListSplitsRequest> for InnerMetastoreServiceClient {
-    type Response = MetastoreServiceStream<ListSplitsResponse>;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListSplitsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<RegisterFileForIndexing> for InnerMetastoreServiceClient {
-    type Response = RegisterFileForIndexingResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: RegisterFileForIndexing) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.register_file_for_indexing(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<AssignFilesForIndexing> for InnerMetastoreServiceClient {
-    type Response = AssignFilesForIndexingResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: AssignFilesForIndexing) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.assign_files_for_indexing(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<PublishFileSplits> for InnerMetastoreServiceClient {
-    type Response = PublishFileSplitsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: PublishFileSplits) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.publish_file_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListCompletedFilesRequest> for InnerMetastoreServiceClient {
-    type Response = ListCompletedFilesResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListCompletedFilesRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_completed_files(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<StageSplitsRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: StageSplitsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.stage_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<PublishSplitsRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: PublishSplitsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.publish_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<MarkSplitsForDeletionRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: MarkSplitsForDeletionRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.mark_splits_for_deletion(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteSplitsRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteSplitsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.delete_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<AddSourceRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: AddSourceRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.add_source(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<UpdateSourceRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: UpdateSourceRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.update_source(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ToggleSourceRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ToggleSourceRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.toggle_source(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteSourceRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteSourceRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.delete_source(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<LastDeleteOpstampRequest> for InnerMetastoreServiceClient {
-    type Response = LastDeleteOpstampResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: LastDeleteOpstampRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.last_delete_opstamp(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteQuery> for InnerMetastoreServiceClient {
-    type Response = DeleteTask;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteQuery) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.create_delete_task(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<UpdateSplitsDeleteOpstampRequest> for InnerMetastoreServiceClient {
-    type Response = UpdateSplitsDeleteOpstampResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: UpdateSplitsDeleteOpstampRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.update_splits_delete_opstamp(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListDeleteTasksRequest> for InnerMetastoreServiceClient {
-    type Response = ListDeleteTasksResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListDeleteTasksRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_delete_tasks(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListStaleSplitsRequest> for InnerMetastoreServiceClient {
-    type Response = ListSplitsResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListStaleSplitsRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_stale_splits(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<CreateIndexTemplateRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: CreateIndexTemplateRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.create_index_template(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<GetIndexTemplateRequest> for InnerMetastoreServiceClient {
-    type Response = GetIndexTemplateResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: GetIndexTemplateRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.get_index_template(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<FindIndexTemplateMatchesRequest> for InnerMetastoreServiceClient {
-    type Response = FindIndexTemplateMatchesResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: FindIndexTemplateMatchesRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.find_index_template_matches(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<ListIndexTemplatesRequest> for InnerMetastoreServiceClient {
-    type Response = ListIndexTemplatesResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: ListIndexTemplatesRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.list_index_templates(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<DeleteIndexTemplatesRequest> for InnerMetastoreServiceClient {
-    type Response = EmptyResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: DeleteIndexTemplatesRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.delete_index_templates(request).await };
-        Box::pin(fut)
-    }
-}
-impl tower::Service<GetClusterIdentityRequest> for InnerMetastoreServiceClient {
-    type Response = GetClusterIdentityResponse;
-    type Error = crate::metastore::MetastoreError;
-    type Future = BoxFuture<Self::Response, Self::Error>;
-    fn poll_ready(
-        &mut self,
-        _cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        std::task::Poll::Ready(Ok(()))
-    }
-    fn call(&mut self, request: GetClusterIdentityRequest) -> Self::Future {
-        let svc = self.clone();
-        let fut = async move { svc.0.get_cluster_identity(request).await };
-        Box::pin(fut)
-    }
-}
-/// A tower service stack is a set of tower services.
-#[derive(Debug)]
-struct MetastoreServiceTowerServiceStack {
-    #[allow(dead_code)]
-    inner: InnerMetastoreServiceClient,
-    create_index_svc: quickwit_common::tower::BoxService<
-        CreateIndexRequest,
-        CreateIndexResponse,
-        crate::metastore::MetastoreError,
-    >,
-    update_index_svc: quickwit_common::tower::BoxService<
-        UpdateIndexRequest,
-        IndexMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    index_metadata_svc: quickwit_common::tower::BoxService<
-        IndexMetadataRequest,
-        IndexMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    indexes_metadata_svc: quickwit_common::tower::BoxService<
-        IndexesMetadataRequest,
-        IndexesMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_indexes_metadata_svc: quickwit_common::tower::BoxService<
-        ListIndexesMetadataRequest,
-        ListIndexesMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    delete_index_svc: quickwit_common::tower::BoxService<
-        DeleteIndexRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_index_stats_svc: quickwit_common::tower::BoxService<
-        ListIndexStatsRequest,
-        ListIndexStatsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_splits_svc: quickwit_common::tower::BoxService<
-        ListSplitsRequest,
-        MetastoreServiceStream<ListSplitsResponse>,
-        crate::metastore::MetastoreError,
-    >,
-    register_file_for_indexing_svc: quickwit_common::tower::BoxService<
-        RegisterFileForIndexing,
-        RegisterFileForIndexingResponse,
-        crate::metastore::MetastoreError,
-    >,
-    assign_files_for_indexing_svc: quickwit_common::tower::BoxService<
-        AssignFilesForIndexing,
-        AssignFilesForIndexingResponse,
-        crate::metastore::MetastoreError,
-    >,
-    publish_file_splits_svc: quickwit_common::tower::BoxService<
-        PublishFileSplits,
-        PublishFileSplitsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_completed_files_svc: quickwit_common::tower::BoxService<
-        ListCompletedFilesRequest,
-        ListCompletedFilesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    stage_splits_svc: quickwit_common::tower::BoxService<
-        StageSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    publish_splits_svc: quickwit_common::tower::BoxService<
-        PublishSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    mark_splits_for_deletion_svc: quickwit_common::tower::BoxService<
-        MarkSplitsForDeletionRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    delete_splits_svc: quickwit_common::tower::BoxService<
-        DeleteSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    add_source_svc: quickwit_common::tower::BoxService<
-        AddSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    update_source_svc: quickwit_common::tower::BoxService<
-        UpdateSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    toggle_source_svc: quickwit_common::tower::BoxService<
-        ToggleSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    delete_source_svc: quickwit_common::tower::BoxService<
-        DeleteSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    last_delete_opstamp_svc: quickwit_common::tower::BoxService<
-        LastDeleteOpstampRequest,
-        LastDeleteOpstampResponse,
-        crate::metastore::MetastoreError,
-    >,
-    create_delete_task_svc: quickwit_common::tower::BoxService<
-        DeleteQuery,
-        DeleteTask,
-        crate::metastore::MetastoreError,
-    >,
-    update_splits_delete_opstamp_svc: quickwit_common::tower::BoxService<
-        UpdateSplitsDeleteOpstampRequest,
-        UpdateSplitsDeleteOpstampResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_delete_tasks_svc: quickwit_common::tower::BoxService<
-        ListDeleteTasksRequest,
-        ListDeleteTasksResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_stale_splits_svc: quickwit_common::tower::BoxService<
-        ListStaleSplitsRequest,
-        ListSplitsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    create_index_template_svc: quickwit_common::tower::BoxService<
-        CreateIndexTemplateRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    get_index_template_svc: quickwit_common::tower::BoxService<
-        GetIndexTemplateRequest,
-        GetIndexTemplateResponse,
-        crate::metastore::MetastoreError,
-    >,
-    find_index_template_matches_svc: quickwit_common::tower::BoxService<
-        FindIndexTemplateMatchesRequest,
-        FindIndexTemplateMatchesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    list_index_templates_svc: quickwit_common::tower::BoxService<
-        ListIndexTemplatesRequest,
-        ListIndexTemplatesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    delete_index_templates_svc: quickwit_common::tower::BoxService<
-        DeleteIndexTemplatesRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    get_cluster_identity_svc: quickwit_common::tower::BoxService<
-        GetClusterIdentityRequest,
-        GetClusterIdentityResponse,
-        crate::metastore::MetastoreError,
-    >,
-}
-#[async_trait::async_trait]
-impl MetastoreService for MetastoreServiceTowerServiceStack {
-    async fn create_index(
-        &self,
-        request: CreateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<CreateIndexResponse> {
-        self.create_index_svc.clone().ready().await?.call(request).await
-    }
-    async fn update_index(
-        &self,
-        request: UpdateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        self.update_index_svc.clone().ready().await?.call(request).await
-    }
-    async fn index_metadata(
-        &self,
-        request: IndexMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        self.index_metadata_svc.clone().ready().await?.call(request).await
-    }
-    async fn indexes_metadata(
-        &self,
-        request: IndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexesMetadataResponse> {
-        self.indexes_metadata_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_indexes_metadata(
-        &self,
-        request: ListIndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexesMetadataResponse> {
-        self.list_indexes_metadata_svc.clone().ready().await?.call(request).await
-    }
-    async fn delete_index(
-        &self,
-        request: DeleteIndexRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.delete_index_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexStatsResponse> {
-        self.list_index_stats_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_splits(
-        &self,
-        request: ListSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<MetastoreServiceStream<ListSplitsResponse>> {
-        self.list_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn register_file_for_indexing(
-        &self,
-        request: RegisterFileForIndexing,
-    ) -> crate::metastore::MetastoreResult<RegisterFileForIndexingResponse> {
-        self.register_file_for_indexing_svc.clone().ready().await?.call(request).await
-    }
-    async fn assign_files_for_indexing(
-        &self,
-        request: AssignFilesForIndexing,
-    ) -> crate::metastore::MetastoreResult<AssignFilesForIndexingResponse> {
-        self.assign_files_for_indexing_svc.clone().ready().await?.call(request).await
-    }
-    async fn publish_file_splits(
-        &self,
-        request: PublishFileSplits,
-    ) -> crate::metastore::MetastoreResult<PublishFileSplitsResponse> {
-        self.publish_file_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_completed_files(
-        &self,
-        request: ListCompletedFilesRequest,
-    ) -> crate::metastore::MetastoreResult<ListCompletedFilesResponse> {
-        self.list_completed_files_svc.clone().ready().await?.call(request).await
-    }
-    async fn stage_splits(
-        &self,
-        request: StageSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.stage_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn publish_splits(
-        &self,
-        request: PublishSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.publish_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn mark_splits_for_deletion(
-        &self,
-        request: MarkSplitsForDeletionRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.mark_splits_for_deletion_svc.clone().ready().await?.call(request).await
-    }
-    async fn delete_splits(
-        &self,
-        request: DeleteSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.delete_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn add_source(
-        &self,
-        request: AddSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.add_source_svc.clone().ready().await?.call(request).await
-    }
-    async fn update_source(
-        &self,
-        request: UpdateSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.update_source_svc.clone().ready().await?.call(request).await
-    }
-    async fn toggle_source(
-        &self,
-        request: ToggleSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.toggle_source_svc.clone().ready().await?.call(request).await
-    }
-    async fn delete_source(
-        &self,
-        request: DeleteSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.delete_source_svc.clone().ready().await?.call(request).await
-    }
-    async fn last_delete_opstamp(
-        &self,
-        request: LastDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<LastDeleteOpstampResponse> {
-        self.last_delete_opstamp_svc.clone().ready().await?.call(request).await
-    }
-    async fn create_delete_task(
-        &self,
-        request: DeleteQuery,
-    ) -> crate::metastore::MetastoreResult<DeleteTask> {
-        self.create_delete_task_svc.clone().ready().await?.call(request).await
-    }
-    async fn update_splits_delete_opstamp(
-        &self,
-        request: UpdateSplitsDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<UpdateSplitsDeleteOpstampResponse> {
-        self.update_splits_delete_opstamp_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_delete_tasks(
-        &self,
-        request: ListDeleteTasksRequest,
-    ) -> crate::metastore::MetastoreResult<ListDeleteTasksResponse> {
-        self.list_delete_tasks_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_stale_splits(
-        &self,
-        request: ListStaleSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
-        self.list_stale_splits_svc.clone().ready().await?.call(request).await
-    }
-    async fn create_index_template(
-        &self,
-        request: CreateIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.create_index_template_svc.clone().ready().await?.call(request).await
-    }
-    async fn get_index_template(
-        &self,
-        request: GetIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<GetIndexTemplateResponse> {
-        self.get_index_template_svc.clone().ready().await?.call(request).await
-    }
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> crate::metastore::MetastoreResult<FindIndexTemplateMatchesResponse> {
-        self.find_index_template_matches_svc.clone().ready().await?.call(request).await
-    }
-    async fn list_index_templates(
-        &self,
-        request: ListIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexTemplatesResponse> {
-        self.list_index_templates_svc.clone().ready().await?.call(request).await
-    }
-    async fn delete_index_templates(
-        &self,
-        request: DeleteIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        self.delete_index_templates_svc.clone().ready().await?.call(request).await
-    }
-    async fn get_cluster_identity(
-        &self,
-        request: GetClusterIdentityRequest,
-    ) -> crate::metastore::MetastoreResult<GetClusterIdentityResponse> {
-        self.get_cluster_identity_svc.clone().ready().await?.call(request).await
-    }
-    async fn check_connectivity(&self) -> anyhow::Result<()> {
-        self.inner.0.check_connectivity().await
-    }
-    fn endpoints(&self) -> Vec<quickwit_common::uri::Uri> {
-        self.inner.0.endpoints()
-    }
-}
-type CreateIndexLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        CreateIndexRequest,
-        CreateIndexResponse,
-        crate::metastore::MetastoreError,
-    >,
-    CreateIndexRequest,
-    CreateIndexResponse,
-    crate::metastore::MetastoreError,
->;
-type UpdateIndexLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        UpdateIndexRequest,
-        IndexMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    UpdateIndexRequest,
-    IndexMetadataResponse,
-    crate::metastore::MetastoreError,
->;
-type IndexMetadataLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        IndexMetadataRequest,
-        IndexMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    IndexMetadataRequest,
-    IndexMetadataResponse,
-    crate::metastore::MetastoreError,
->;
-type IndexesMetadataLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        IndexesMetadataRequest,
-        IndexesMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    IndexesMetadataRequest,
-    IndexesMetadataResponse,
-    crate::metastore::MetastoreError,
->;
-type ListIndexesMetadataLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListIndexesMetadataRequest,
-        ListIndexesMetadataResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListIndexesMetadataRequest,
-    ListIndexesMetadataResponse,
-    crate::metastore::MetastoreError,
->;
-type DeleteIndexLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteIndexRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteIndexRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type ListIndexStatsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListIndexStatsRequest,
-        ListIndexStatsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListIndexStatsRequest,
-    ListIndexStatsResponse,
-    crate::metastore::MetastoreError,
->;
-type ListSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListSplitsRequest,
-        MetastoreServiceStream<ListSplitsResponse>,
-        crate::metastore::MetastoreError,
-    >,
-    ListSplitsRequest,
-    MetastoreServiceStream<ListSplitsResponse>,
-    crate::metastore::MetastoreError,
->;
-type RegisterFileForIndexingLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        RegisterFileForIndexing,
-        RegisterFileForIndexingResponse,
-        crate::metastore::MetastoreError,
-    >,
-    RegisterFileForIndexing,
-    RegisterFileForIndexingResponse,
-    crate::metastore::MetastoreError,
->;
-type AssignFilesForIndexingLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        AssignFilesForIndexing,
-        AssignFilesForIndexingResponse,
-        crate::metastore::MetastoreError,
-    >,
-    AssignFilesForIndexing,
-    AssignFilesForIndexingResponse,
-    crate::metastore::MetastoreError,
->;
-type PublishFileSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        PublishFileSplits,
-        PublishFileSplitsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    PublishFileSplits,
-    PublishFileSplitsResponse,
-    crate::metastore::MetastoreError,
->;
-type ListCompletedFilesLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListCompletedFilesRequest,
-        ListCompletedFilesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListCompletedFilesRequest,
-    ListCompletedFilesResponse,
-    crate::metastore::MetastoreError,
->;
-type StageSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        StageSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    StageSplitsRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type PublishSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        PublishSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    PublishSplitsRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type MarkSplitsForDeletionLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        MarkSplitsForDeletionRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    MarkSplitsForDeletionRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type DeleteSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteSplitsRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteSplitsRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type AddSourceLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        AddSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    AddSourceRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type UpdateSourceLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        UpdateSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    UpdateSourceRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type ToggleSourceLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ToggleSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ToggleSourceRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type DeleteSourceLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteSourceRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteSourceRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type LastDeleteOpstampLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        LastDeleteOpstampRequest,
-        LastDeleteOpstampResponse,
-        crate::metastore::MetastoreError,
-    >,
-    LastDeleteOpstampRequest,
-    LastDeleteOpstampResponse,
-    crate::metastore::MetastoreError,
->;
-type CreateDeleteTaskLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteQuery,
-        DeleteTask,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteQuery,
-    DeleteTask,
-    crate::metastore::MetastoreError,
->;
-type UpdateSplitsDeleteOpstampLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        UpdateSplitsDeleteOpstampRequest,
-        UpdateSplitsDeleteOpstampResponse,
-        crate::metastore::MetastoreError,
-    >,
-    UpdateSplitsDeleteOpstampRequest,
-    UpdateSplitsDeleteOpstampResponse,
-    crate::metastore::MetastoreError,
->;
-type ListDeleteTasksLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListDeleteTasksRequest,
-        ListDeleteTasksResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListDeleteTasksRequest,
-    ListDeleteTasksResponse,
-    crate::metastore::MetastoreError,
->;
-type ListStaleSplitsLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListStaleSplitsRequest,
-        ListSplitsResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListStaleSplitsRequest,
-    ListSplitsResponse,
-    crate::metastore::MetastoreError,
->;
-type CreateIndexTemplateLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        CreateIndexTemplateRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    CreateIndexTemplateRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type GetIndexTemplateLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        GetIndexTemplateRequest,
-        GetIndexTemplateResponse,
-        crate::metastore::MetastoreError,
-    >,
-    GetIndexTemplateRequest,
-    GetIndexTemplateResponse,
-    crate::metastore::MetastoreError,
->;
-type FindIndexTemplateMatchesLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        FindIndexTemplateMatchesRequest,
-        FindIndexTemplateMatchesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    FindIndexTemplateMatchesRequest,
-    FindIndexTemplateMatchesResponse,
-    crate::metastore::MetastoreError,
->;
-type ListIndexTemplatesLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        ListIndexTemplatesRequest,
-        ListIndexTemplatesResponse,
-        crate::metastore::MetastoreError,
-    >,
-    ListIndexTemplatesRequest,
-    ListIndexTemplatesResponse,
-    crate::metastore::MetastoreError,
->;
-type DeleteIndexTemplatesLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        DeleteIndexTemplatesRequest,
-        EmptyResponse,
-        crate::metastore::MetastoreError,
-    >,
-    DeleteIndexTemplatesRequest,
-    EmptyResponse,
-    crate::metastore::MetastoreError,
->;
-type GetClusterIdentityLayer = quickwit_common::tower::BoxLayer<
-    quickwit_common::tower::BoxService<
-        GetClusterIdentityRequest,
-        GetClusterIdentityResponse,
-        crate::metastore::MetastoreError,
-    >,
-    GetClusterIdentityRequest,
-    GetClusterIdentityResponse,
-    crate::metastore::MetastoreError,
->;
-#[derive(Debug, Default)]
-pub struct MetastoreServiceTowerLayerStack {
-    create_index_layers: Vec<CreateIndexLayer>,
-    update_index_layers: Vec<UpdateIndexLayer>,
-    index_metadata_layers: Vec<IndexMetadataLayer>,
-    indexes_metadata_layers: Vec<IndexesMetadataLayer>,
-    list_indexes_metadata_layers: Vec<ListIndexesMetadataLayer>,
-    delete_index_layers: Vec<DeleteIndexLayer>,
-    list_index_stats_layers: Vec<ListIndexStatsLayer>,
-    list_splits_layers: Vec<ListSplitsLayer>,
-    register_file_for_indexing_layers: Vec<RegisterFileForIndexingLayer>,
-    assign_files_for_indexing_layers: Vec<AssignFilesForIndexingLayer>,
-    publish_file_splits_layers: Vec<PublishFileSplitsLayer>,
-    list_completed_files_layers: Vec<ListCompletedFilesLayer>,
-    stage_splits_layers: Vec<StageSplitsLayer>,
-    publish_splits_layers: Vec<PublishSplitsLayer>,
-    mark_splits_for_deletion_layers: Vec<MarkSplitsForDeletionLayer>,
-    delete_splits_layers: Vec<DeleteSplitsLayer>,
-    add_source_layers: Vec<AddSourceLayer>,
-    update_source_layers: Vec<UpdateSourceLayer>,
-    toggle_source_layers: Vec<ToggleSourceLayer>,
-    delete_source_layers: Vec<DeleteSourceLayer>,
-    last_delete_opstamp_layers: Vec<LastDeleteOpstampLayer>,
-    create_delete_task_layers: Vec<CreateDeleteTaskLayer>,
-    update_splits_delete_opstamp_layers: Vec<UpdateSplitsDeleteOpstampLayer>,
-    list_delete_tasks_layers: Vec<ListDeleteTasksLayer>,
-    list_stale_splits_layers: Vec<ListStaleSplitsLayer>,
-    create_index_template_layers: Vec<CreateIndexTemplateLayer>,
-    get_index_template_layers: Vec<GetIndexTemplateLayer>,
-    find_index_template_matches_layers: Vec<FindIndexTemplateMatchesLayer>,
-    list_index_templates_layers: Vec<ListIndexTemplatesLayer>,
-    delete_index_templates_layers: Vec<DeleteIndexTemplatesLayer>,
-    get_cluster_identity_layers: Vec<GetClusterIdentityLayer>,
-}
-impl MetastoreServiceTowerLayerStack {
-    pub fn stack_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    CreateIndexRequest,
-                    CreateIndexResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                CreateIndexRequest,
-                CreateIndexResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                CreateIndexRequest,
-                Response = CreateIndexResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                CreateIndexRequest,
-                CreateIndexResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<CreateIndexRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateIndexRequest,
-                    IndexMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateIndexRequest,
-                IndexMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                UpdateIndexRequest,
-                Response = IndexMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateIndexRequest,
-                IndexMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<UpdateIndexRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    IndexMetadataRequest,
-                    IndexMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                IndexMetadataRequest,
-                IndexMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                IndexMetadataRequest,
-                Response = IndexMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                IndexMetadataRequest,
-                IndexMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<IndexMetadataRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    IndexesMetadataRequest,
-                    IndexesMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                IndexesMetadataRequest,
-                IndexesMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                IndexesMetadataRequest,
-                Response = IndexesMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                IndexesMetadataRequest,
-                IndexesMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<IndexesMetadataRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexesMetadataRequest,
-                    ListIndexesMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexesMetadataRequest,
-                ListIndexesMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListIndexesMetadataRequest,
-                Response = ListIndexesMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexesMetadataRequest,
-                ListIndexesMetadataResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            ListIndexesMetadataRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteIndexRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteIndexRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteIndexRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteIndexRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<DeleteIndexRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexStatsRequest,
-                    ListIndexStatsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexStatsRequest,
-                ListIndexStatsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListIndexStatsRequest,
-                Response = ListIndexStatsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexStatsRequest,
-                ListIndexStatsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ListIndexStatsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListSplitsRequest,
-                    MetastoreServiceStream<ListSplitsResponse>,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListSplitsRequest,
-                MetastoreServiceStream<ListSplitsResponse>,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListSplitsRequest,
-                Response = MetastoreServiceStream<ListSplitsResponse>,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListSplitsRequest,
-                MetastoreServiceStream<ListSplitsResponse>,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ListSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    RegisterFileForIndexing,
-                    RegisterFileForIndexingResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                RegisterFileForIndexing,
-                RegisterFileForIndexingResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                RegisterFileForIndexing,
-                Response = RegisterFileForIndexingResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                RegisterFileForIndexing,
-                RegisterFileForIndexingResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<RegisterFileForIndexing>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AssignFilesForIndexing,
-                    AssignFilesForIndexingResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AssignFilesForIndexing,
-                AssignFilesForIndexingResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                AssignFilesForIndexing,
-                Response = AssignFilesForIndexingResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AssignFilesForIndexing,
-                AssignFilesForIndexingResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<AssignFilesForIndexing>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PublishFileSplits,
-                    PublishFileSplitsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PublishFileSplits,
-                PublishFileSplitsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                PublishFileSplits,
-                Response = PublishFileSplitsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PublishFileSplits,
-                PublishFileSplitsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<PublishFileSplits>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListCompletedFilesRequest,
-                    ListCompletedFilesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListCompletedFilesRequest,
-                ListCompletedFilesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListCompletedFilesRequest,
-                Response = ListCompletedFilesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListCompletedFilesRequest,
-                ListCompletedFilesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            ListCompletedFilesRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    StageSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                StageSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                StageSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                StageSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<StageSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PublishSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PublishSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                PublishSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                PublishSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<PublishSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    MarkSplitsForDeletionRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                MarkSplitsForDeletionRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                MarkSplitsForDeletionRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                MarkSplitsForDeletionRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            MarkSplitsForDeletionRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteSplitsRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<DeleteSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AddSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AddSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                AddSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                AddSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<AddSourceRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                UpdateSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<UpdateSourceRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ToggleSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ToggleSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ToggleSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ToggleSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ToggleSourceRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteSourceRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<DeleteSourceRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    LastDeleteOpstampRequest,
-                    LastDeleteOpstampResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                LastDeleteOpstampRequest,
-                LastDeleteOpstampResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                LastDeleteOpstampRequest,
-                Response = LastDeleteOpstampResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                LastDeleteOpstampRequest,
-                LastDeleteOpstampResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<LastDeleteOpstampRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteQuery,
-                    DeleteTask,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteQuery,
-                DeleteTask,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteQuery,
-                Response = DeleteTask,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteQuery,
-                DeleteTask,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<DeleteQuery>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateSplitsDeleteOpstampRequest,
-                    UpdateSplitsDeleteOpstampResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateSplitsDeleteOpstampRequest,
-                UpdateSplitsDeleteOpstampResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                UpdateSplitsDeleteOpstampRequest,
-                Response = UpdateSplitsDeleteOpstampResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                UpdateSplitsDeleteOpstampRequest,
-                UpdateSplitsDeleteOpstampResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            UpdateSplitsDeleteOpstampRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListDeleteTasksRequest,
-                    ListDeleteTasksResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListDeleteTasksRequest,
-                ListDeleteTasksResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListDeleteTasksRequest,
-                Response = ListDeleteTasksResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListDeleteTasksRequest,
-                ListDeleteTasksResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ListDeleteTasksRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListStaleSplitsRequest,
-                    ListSplitsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListStaleSplitsRequest,
-                ListSplitsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListStaleSplitsRequest,
-                Response = ListSplitsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListStaleSplitsRequest,
-                ListSplitsResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<ListStaleSplitsRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    CreateIndexTemplateRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                CreateIndexTemplateRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                CreateIndexTemplateRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                CreateIndexTemplateRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            CreateIndexTemplateRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetIndexTemplateRequest,
-                    GetIndexTemplateResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetIndexTemplateRequest,
-                GetIndexTemplateResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                GetIndexTemplateRequest,
-                Response = GetIndexTemplateResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetIndexTemplateRequest,
-                GetIndexTemplateResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<GetIndexTemplateRequest>>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    FindIndexTemplateMatchesRequest,
-                    FindIndexTemplateMatchesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                FindIndexTemplateMatchesRequest,
-                FindIndexTemplateMatchesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                FindIndexTemplateMatchesRequest,
-                Response = FindIndexTemplateMatchesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                FindIndexTemplateMatchesRequest,
-                FindIndexTemplateMatchesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            FindIndexTemplateMatchesRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexTemplatesRequest,
-                    ListIndexTemplatesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexTemplatesRequest,
-                ListIndexTemplatesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                ListIndexTemplatesRequest,
-                Response = ListIndexTemplatesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                ListIndexTemplatesRequest,
-                ListIndexTemplatesResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            ListIndexTemplatesRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteIndexTemplatesRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteIndexTemplatesRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                DeleteIndexTemplatesRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                DeleteIndexTemplatesRequest,
-                EmptyResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            DeleteIndexTemplatesRequest,
-        >>::Future: Send + 'static,
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetClusterIdentityRequest,
-                    GetClusterIdentityResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Clone + Send + Sync + 'static,
-        <L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetClusterIdentityRequest,
-                GetClusterIdentityResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service: tower::Service<
-                GetClusterIdentityRequest,
-                Response = GetClusterIdentityResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <<L as tower::Layer<
-            quickwit_common::tower::BoxService<
-                GetClusterIdentityRequest,
-                GetClusterIdentityResponse,
-                crate::metastore::MetastoreError,
-            >,
-        >>::Service as tower::Service<
-            GetClusterIdentityRequest,
-        >>::Future: Send + 'static,
-    {
-        self.create_index_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.update_index_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.index_metadata_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.indexes_metadata_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_indexes_metadata_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.delete_index_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_index_stats_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.register_file_for_indexing_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.assign_files_for_indexing_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.publish_file_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_completed_files_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.stage_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.publish_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.mark_splits_for_deletion_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.delete_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.add_source_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.update_source_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.toggle_source_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.delete_source_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.last_delete_opstamp_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.create_delete_task_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.update_splits_delete_opstamp_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_delete_tasks_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_stale_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.create_index_template_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.get_index_template_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.find_index_template_matches_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.list_index_templates_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.delete_index_templates_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self.get_cluster_identity_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer.clone()));
-        self
-    }
-    pub fn stack_create_index_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    CreateIndexRequest,
-                    CreateIndexResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                CreateIndexRequest,
-                Response = CreateIndexResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<CreateIndexRequest>>::Future: Send + 'static,
-    {
-        self.create_index_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_update_index_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateIndexRequest,
-                    IndexMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                UpdateIndexRequest,
-                Response = IndexMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<UpdateIndexRequest>>::Future: Send + 'static,
-    {
-        self.update_index_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_index_metadata_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    IndexMetadataRequest,
-                    IndexMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                IndexMetadataRequest,
-                Response = IndexMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<IndexMetadataRequest>>::Future: Send + 'static,
-    {
-        self.index_metadata_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_indexes_metadata_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    IndexesMetadataRequest,
-                    IndexesMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                IndexesMetadataRequest,
-                Response = IndexesMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<IndexesMetadataRequest>>::Future: Send + 'static,
-    {
-        self.indexes_metadata_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_indexes_metadata_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexesMetadataRequest,
-                    ListIndexesMetadataResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListIndexesMetadataRequest,
-                Response = ListIndexesMetadataResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            ListIndexesMetadataRequest,
-        >>::Future: Send + 'static,
-    {
-        self.list_indexes_metadata_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_delete_index_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteIndexRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteIndexRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<DeleteIndexRequest>>::Future: Send + 'static,
-    {
-        self.delete_index_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_index_stats_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexStatsRequest,
-                    ListIndexStatsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListIndexStatsRequest,
-                Response = ListIndexStatsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ListIndexStatsRequest>>::Future: Send + 'static,
-    {
-        self.list_index_stats_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListSplitsRequest,
-                    MetastoreServiceStream<ListSplitsResponse>,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListSplitsRequest,
-                Response = MetastoreServiceStream<ListSplitsResponse>,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ListSplitsRequest>>::Future: Send + 'static,
-    {
-        self.list_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_register_file_for_indexing_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    RegisterFileForIndexing,
-                    RegisterFileForIndexingResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                RegisterFileForIndexing,
-                Response = RegisterFileForIndexingResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<RegisterFileForIndexing>>::Future: Send + 'static,
-    {
-        self.register_file_for_indexing_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_assign_files_for_indexing_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AssignFilesForIndexing,
-                    AssignFilesForIndexingResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                AssignFilesForIndexing,
-                Response = AssignFilesForIndexingResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<AssignFilesForIndexing>>::Future: Send + 'static,
-    {
-        self.assign_files_for_indexing_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_publish_file_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PublishFileSplits,
-                    PublishFileSplitsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                PublishFileSplits,
-                Response = PublishFileSplitsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<PublishFileSplits>>::Future: Send + 'static,
-    {
-        self.publish_file_splits_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_completed_files_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListCompletedFilesRequest,
-                    ListCompletedFilesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListCompletedFilesRequest,
-                Response = ListCompletedFilesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            ListCompletedFilesRequest,
-        >>::Future: Send + 'static,
-    {
-        self.list_completed_files_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_stage_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    StageSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                StageSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<StageSplitsRequest>>::Future: Send + 'static,
-    {
-        self.stage_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_publish_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    PublishSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                PublishSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<PublishSplitsRequest>>::Future: Send + 'static,
-    {
-        self.publish_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_mark_splits_for_deletion_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    MarkSplitsForDeletionRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                MarkSplitsForDeletionRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            MarkSplitsForDeletionRequest,
-        >>::Future: Send + 'static,
-    {
-        self.mark_splits_for_deletion_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_delete_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteSplitsRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteSplitsRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<DeleteSplitsRequest>>::Future: Send + 'static,
-    {
-        self.delete_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_add_source_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    AddSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                AddSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<AddSourceRequest>>::Future: Send + 'static,
-    {
-        self.add_source_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_update_source_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                UpdateSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<UpdateSourceRequest>>::Future: Send + 'static,
-    {
-        self.update_source_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_toggle_source_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ToggleSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ToggleSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ToggleSourceRequest>>::Future: Send + 'static,
-    {
-        self.toggle_source_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_delete_source_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteSourceRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteSourceRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<DeleteSourceRequest>>::Future: Send + 'static,
-    {
-        self.delete_source_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_last_delete_opstamp_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    LastDeleteOpstampRequest,
-                    LastDeleteOpstampResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                LastDeleteOpstampRequest,
-                Response = LastDeleteOpstampResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<LastDeleteOpstampRequest>>::Future: Send + 'static,
-    {
-        self.last_delete_opstamp_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_create_delete_task_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteQuery,
-                    DeleteTask,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteQuery,
-                Response = DeleteTask,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<DeleteQuery>>::Future: Send + 'static,
-    {
-        self.create_delete_task_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_update_splits_delete_opstamp_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    UpdateSplitsDeleteOpstampRequest,
-                    UpdateSplitsDeleteOpstampResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                UpdateSplitsDeleteOpstampRequest,
-                Response = UpdateSplitsDeleteOpstampResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            UpdateSplitsDeleteOpstampRequest,
-        >>::Future: Send + 'static,
-    {
-        self.update_splits_delete_opstamp_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_delete_tasks_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListDeleteTasksRequest,
-                    ListDeleteTasksResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListDeleteTasksRequest,
-                Response = ListDeleteTasksResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ListDeleteTasksRequest>>::Future: Send + 'static,
-    {
-        self.list_delete_tasks_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_stale_splits_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListStaleSplitsRequest,
-                    ListSplitsResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListStaleSplitsRequest,
-                Response = ListSplitsResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<ListStaleSplitsRequest>>::Future: Send + 'static,
-    {
-        self.list_stale_splits_layers.push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_create_index_template_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    CreateIndexTemplateRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                CreateIndexTemplateRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            CreateIndexTemplateRequest,
-        >>::Future: Send + 'static,
-    {
-        self.create_index_template_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_get_index_template_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetIndexTemplateRequest,
-                    GetIndexTemplateResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                GetIndexTemplateRequest,
-                Response = GetIndexTemplateResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<GetIndexTemplateRequest>>::Future: Send + 'static,
-    {
-        self.get_index_template_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_find_index_template_matches_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    FindIndexTemplateMatchesRequest,
-                    FindIndexTemplateMatchesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                FindIndexTemplateMatchesRequest,
-                Response = FindIndexTemplateMatchesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            FindIndexTemplateMatchesRequest,
-        >>::Future: Send + 'static,
-    {
-        self.find_index_template_matches_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_list_index_templates_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    ListIndexTemplatesRequest,
-                    ListIndexTemplatesResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                ListIndexTemplatesRequest,
-                Response = ListIndexTemplatesResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            ListIndexTemplatesRequest,
-        >>::Future: Send + 'static,
-    {
-        self.list_index_templates_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_delete_index_templates_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    DeleteIndexTemplatesRequest,
-                    EmptyResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                DeleteIndexTemplatesRequest,
-                Response = EmptyResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            DeleteIndexTemplatesRequest,
-        >>::Future: Send + 'static,
-    {
-        self.delete_index_templates_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn stack_get_cluster_identity_layer<L>(mut self, layer: L) -> Self
-    where
-        L: tower::Layer<
-                quickwit_common::tower::BoxService<
-                    GetClusterIdentityRequest,
-                    GetClusterIdentityResponse,
-                    crate::metastore::MetastoreError,
-                >,
-            > + Send + Sync + 'static,
-        L::Service: tower::Service<
-                GetClusterIdentityRequest,
-                Response = GetClusterIdentityResponse,
-                Error = crate::metastore::MetastoreError,
-            > + Clone + Send + Sync + 'static,
-        <L::Service as tower::Service<
-            GetClusterIdentityRequest,
-        >>::Future: Send + 'static,
-    {
-        self.get_cluster_identity_layers
-            .push(quickwit_common::tower::BoxLayer::new(layer));
-        self
-    }
-    pub fn build<T>(self, instance: T) -> MetastoreServiceClient
-    where
-        T: MetastoreService,
-    {
-        let inner_client = InnerMetastoreServiceClient(std::sync::Arc::new(instance));
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_channel(
-        self,
-        addr: std::net::SocketAddr,
-        channel: tonic::transport::Channel,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> MetastoreServiceClient {
-        let client = MetastoreServiceClient::from_channel(
-            addr,
-            channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    pub fn build_from_balance_channel(
-        self,
-        balance_channel: quickwit_common::tower::BalanceChannel<std::net::SocketAddr>,
-        max_message_size: bytesize::ByteSize,
-        compression_encoding_opt: Option<tonic::codec::CompressionEncoding>,
-    ) -> MetastoreServiceClient {
-        let client = MetastoreServiceClient::from_balance_channel(
-            balance_channel,
-            max_message_size,
-            compression_encoding_opt,
-        );
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    #[cfg(any(test, feature = "testsuite"))]
-    pub fn build_from_mock(self, mock: MockMetastoreService) -> MetastoreServiceClient {
-        let client = MetastoreServiceClient::from_mock(mock);
-        let inner_client = client.inner;
-        self.build_from_inner_client(inner_client)
-    }
-    fn build_from_inner_client(
-        self,
-        inner_client: InnerMetastoreServiceClient,
-    ) -> MetastoreServiceClient {
-        let create_index_svc = self
-            .create_index_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let update_index_svc = self
-            .update_index_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let index_metadata_svc = self
-            .index_metadata_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let indexes_metadata_svc = self
-            .indexes_metadata_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_indexes_metadata_svc = self
-            .list_indexes_metadata_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let delete_index_svc = self
-            .delete_index_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_index_stats_svc = self
-            .list_index_stats_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_splits_svc = self
-            .list_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let register_file_for_indexing_svc = self
-            .register_file_for_indexing_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let assign_files_for_indexing_svc = self
-            .assign_files_for_indexing_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let publish_file_splits_svc = self
-            .publish_file_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_completed_files_svc = self
-            .list_completed_files_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let stage_splits_svc = self
-            .stage_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let publish_splits_svc = self
-            .publish_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let mark_splits_for_deletion_svc = self
-            .mark_splits_for_deletion_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let delete_splits_svc = self
-            .delete_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let add_source_svc = self
-            .add_source_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let update_source_svc = self
-            .update_source_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let toggle_source_svc = self
-            .toggle_source_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let delete_source_svc = self
-            .delete_source_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let last_delete_opstamp_svc = self
-            .last_delete_opstamp_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let create_delete_task_svc = self
-            .create_delete_task_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let update_splits_delete_opstamp_svc = self
-            .update_splits_delete_opstamp_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_delete_tasks_svc = self
-            .list_delete_tasks_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_stale_splits_svc = self
-            .list_stale_splits_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let create_index_template_svc = self
-            .create_index_template_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let get_index_template_svc = self
-            .get_index_template_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let find_index_template_matches_svc = self
-            .find_index_template_matches_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let list_index_templates_svc = self
-            .list_index_templates_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let delete_index_templates_svc = self
-            .delete_index_templates_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let get_cluster_identity_svc = self
-            .get_cluster_identity_layers
-            .into_iter()
-            .rev()
-            .fold(
-                quickwit_common::tower::BoxService::new(inner_client.clone()),
-                |svc, layer| layer.layer(svc),
-            );
-        let tower_svc_stack = MetastoreServiceTowerServiceStack {
-            inner: inner_client,
-            create_index_svc,
-            update_index_svc,
-            index_metadata_svc,
-            indexes_metadata_svc,
-            list_indexes_metadata_svc,
-            delete_index_svc,
-            list_index_stats_svc,
-            list_splits_svc,
-            register_file_for_indexing_svc,
-            assign_files_for_indexing_svc,
-            publish_file_splits_svc,
-            list_completed_files_svc,
-            stage_splits_svc,
-            publish_splits_svc,
-            mark_splits_for_deletion_svc,
-            delete_splits_svc,
-            add_source_svc,
-            update_source_svc,
-            toggle_source_svc,
-            delete_source_svc,
-            last_delete_opstamp_svc,
-            create_delete_task_svc,
-            update_splits_delete_opstamp_svc,
-            list_delete_tasks_svc,
-            list_stale_splits_svc,
-            create_index_template_svc,
-            get_index_template_svc,
-            find_index_template_matches_svc,
-            list_index_templates_svc,
-            delete_index_templates_svc,
-            get_cluster_identity_svc,
-        };
-        MetastoreServiceClient::new(tower_svc_stack)
-    }
-}
-#[derive(Debug, Clone)]
-pub struct MetastoreServiceGrpcClientAdapter<T> {
-    inner: T,
-    #[allow(dead_code)]
-    connection_addrs_rx: tokio::sync::watch::Receiver<
-        std::collections::HashSet<std::net::SocketAddr>,
-    >,
-}
-impl<T> MetastoreServiceGrpcClientAdapter<T> {
-    pub fn new(
-        instance: T,
-        connection_addrs_rx: tokio::sync::watch::Receiver<
-            std::collections::HashSet<std::net::SocketAddr>,
-        >,
-    ) -> Self {
-        Self {
-            inner: instance,
-            connection_addrs_rx,
-        }
-    }
-}
-#[async_trait::async_trait]
-impl<T> MetastoreService
-for MetastoreServiceGrpcClientAdapter<
-    metastore_service_grpc_client::MetastoreServiceGrpcClient<T>,
->
-where
-    T: tonic::client::GrpcService<tonic::body::Body> + std::fmt::Debug + Clone + Send
-        + Sync + 'static,
-    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
-    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError>
-        + Send,
-    T::Future: Send,
-{
-    async fn create_index(
-        &self,
-        request: CreateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<CreateIndexResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .create_index(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                CreateIndexRequest::rpc_name(),
-            ))
-    }
-    async fn update_index(
-        &self,
-        request: UpdateIndexRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .update_index(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                UpdateIndexRequest::rpc_name(),
-            ))
-    }
-    async fn index_metadata(
-        &self,
-        request: IndexMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexMetadataResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .index_metadata(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                IndexMetadataRequest::rpc_name(),
-            ))
-    }
-    async fn indexes_metadata(
-        &self,
-        request: IndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<IndexesMetadataResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .indexes_metadata(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                IndexesMetadataRequest::rpc_name(),
-            ))
-    }
-    async fn list_indexes_metadata(
-        &self,
-        request: ListIndexesMetadataRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexesMetadataResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_indexes_metadata(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListIndexesMetadataRequest::rpc_name(),
-            ))
-    }
-    async fn delete_index(
-        &self,
-        request: DeleteIndexRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .delete_index(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteIndexRequest::rpc_name(),
-            ))
-    }
-    async fn list_index_stats(
-        &self,
-        request: ListIndexStatsRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexStatsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_index_stats(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListIndexStatsRequest::rpc_name(),
-            ))
-    }
-    async fn list_splits(
-        &self,
-        request: ListSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<MetastoreServiceStream<ListSplitsResponse>> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_splits(tonic_request)
-            .await
-            .map(|response| {
-                let streaming: tonic::Streaming<_> = response.into_inner();
-                let stream = quickwit_common::ServiceStream::from(streaming);
-                stream
-                    .map_err(|status| crate::error::grpc_status_to_service_error(
-                        status,
-                        ListSplitsRequest::rpc_name(),
-                    ))
-            })
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn register_file_for_indexing(
-        &self,
-        request: RegisterFileForIndexing,
-    ) -> crate::metastore::MetastoreResult<RegisterFileForIndexingResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .register_file_for_indexing(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                RegisterFileForIndexing::rpc_name(),
-            ))
-    }
-    async fn assign_files_for_indexing(
-        &self,
-        request: AssignFilesForIndexing,
-    ) -> crate::metastore::MetastoreResult<AssignFilesForIndexingResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .assign_files_for_indexing(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                AssignFilesForIndexing::rpc_name(),
-            ))
-    }
-    async fn publish_file_splits(
-        &self,
-        request: PublishFileSplits,
-    ) -> crate::metastore::MetastoreResult<PublishFileSplitsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .publish_file_splits(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                PublishFileSplits::rpc_name(),
-            ))
-    }
-    async fn list_completed_files(
-        &self,
-        request: ListCompletedFilesRequest,
-    ) -> crate::metastore::MetastoreResult<ListCompletedFilesResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_completed_files(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListCompletedFilesRequest::rpc_name(),
-            ))
-    }
-    async fn stage_splits(
-        &self,
-        request: StageSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .stage_splits(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                StageSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn publish_splits(
-        &self,
-        request: PublishSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .publish_splits(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                PublishSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn mark_splits_for_deletion(
-        &self,
-        request: MarkSplitsForDeletionRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .mark_splits_for_deletion(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                MarkSplitsForDeletionRequest::rpc_name(),
-            ))
-    }
-    async fn delete_splits(
-        &self,
-        request: DeleteSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .delete_splits(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn add_source(
-        &self,
-        request: AddSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .add_source(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                AddSourceRequest::rpc_name(),
-            ))
-    }
-    async fn update_source(
-        &self,
-        request: UpdateSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .update_source(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                UpdateSourceRequest::rpc_name(),
-            ))
-    }
-    async fn toggle_source(
-        &self,
-        request: ToggleSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .toggle_source(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ToggleSourceRequest::rpc_name(),
-            ))
-    }
-    async fn delete_source(
-        &self,
-        request: DeleteSourceRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .delete_source(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteSourceRequest::rpc_name(),
-            ))
-    }
-    async fn last_delete_opstamp(
-        &self,
-        request: LastDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<LastDeleteOpstampResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .last_delete_opstamp(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                LastDeleteOpstampRequest::rpc_name(),
-            ))
-    }
-    async fn create_delete_task(
-        &self,
-        request: DeleteQuery,
-    ) -> crate::metastore::MetastoreResult<DeleteTask> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .create_delete_task(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteQuery::rpc_name(),
-            ))
-    }
-    async fn update_splits_delete_opstamp(
-        &self,
-        request: UpdateSplitsDeleteOpstampRequest,
-    ) -> crate::metastore::MetastoreResult<UpdateSplitsDeleteOpstampResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .update_splits_delete_opstamp(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                UpdateSplitsDeleteOpstampRequest::rpc_name(),
-            ))
-    }
-    async fn list_delete_tasks(
-        &self,
-        request: ListDeleteTasksRequest,
-    ) -> crate::metastore::MetastoreResult<ListDeleteTasksResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_delete_tasks(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListDeleteTasksRequest::rpc_name(),
-            ))
-    }
-    async fn list_stale_splits(
-        &self,
-        request: ListStaleSplitsRequest,
-    ) -> crate::metastore::MetastoreResult<ListSplitsResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_stale_splits(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListStaleSplitsRequest::rpc_name(),
-            ))
-    }
-    async fn create_index_template(
-        &self,
-        request: CreateIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .create_index_template(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                CreateIndexTemplateRequest::rpc_name(),
-            ))
-    }
-    async fn get_index_template(
-        &self,
-        request: GetIndexTemplateRequest,
-    ) -> crate::metastore::MetastoreResult<GetIndexTemplateResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .get_index_template(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                GetIndexTemplateRequest::rpc_name(),
-            ))
-    }
-    async fn find_index_template_matches(
-        &self,
-        request: FindIndexTemplateMatchesRequest,
-    ) -> crate::metastore::MetastoreResult<FindIndexTemplateMatchesResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .find_index_template_matches(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                FindIndexTemplateMatchesRequest::rpc_name(),
-            ))
-    }
-    async fn list_index_templates(
-        &self,
-        request: ListIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<ListIndexTemplatesResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .list_index_templates(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                ListIndexTemplatesRequest::rpc_name(),
-            ))
-    }
-    async fn delete_index_templates(
-        &self,
-        request: DeleteIndexTemplatesRequest,
-    ) -> crate::metastore::MetastoreResult<EmptyResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .delete_index_templates(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                DeleteIndexTemplatesRequest::rpc_name(),
-            ))
-    }
-    async fn get_cluster_identity(
-        &self,
-        request: GetClusterIdentityRequest,
-    ) -> crate::metastore::MetastoreResult<GetClusterIdentityResponse> {
-        let mut tonic_request = tonic::Request::new(request);
-        quickwit_common::tracing_utils::inject_current_context(
-            tonic_request.metadata_mut(),
-        );
-        self.inner
-            .clone()
-            .get_cluster_identity(tonic_request)
-            .await
-            .map(|response| response.into_inner())
-            .map_err(|status| crate::error::grpc_status_to_service_error(
-                status,
-                GetClusterIdentityRequest::rpc_name(),
-            ))
-    }
-    async fn check_connectivity(&self) -> anyhow::Result<()> {
-        if self.connection_addrs_rx.borrow().is_empty() {
-            anyhow::bail!("no server currently available")
-        }
-        Ok(())
-    }
-    fn endpoints(&self) -> Vec<quickwit_common::uri::Uri> {
-        self.connection_addrs_rx
-            .borrow()
-            .iter()
-            .flat_map(|addr| quickwit_common::uri::Uri::from_str(
-                &format!("grpc://{addr}/{}.{}", "quickwit.metastore", "MetastoreService"),
-            ))
-            .collect()
-    }
-}
-#[derive(Debug)]
-pub struct MetastoreServiceGrpcServerAdapter {
-    inner: InnerMetastoreServiceClient,
-}
-impl MetastoreServiceGrpcServerAdapter {
-    pub fn new<T>(instance: T) -> Self
-    where
-        T: MetastoreService,
-    {
-        Self {
-            inner: InnerMetastoreServiceClient(std::sync::Arc::new(instance)),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl metastore_service_grpc_server::MetastoreServiceGrpc
-for MetastoreServiceGrpcServerAdapter {
-    async fn create_index(
-        &self,
-        tonic_request: tonic::Request<CreateIndexRequest>,
-    ) -> Result<tonic::Response<CreateIndexResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.create_index");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .create_index(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn update_index(
-        &self,
-        tonic_request: tonic::Request<UpdateIndexRequest>,
-    ) -> Result<tonic::Response<IndexMetadataResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.update_index");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .update_index(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn index_metadata(
-        &self,
-        tonic_request: tonic::Request<IndexMetadataRequest>,
-    ) -> Result<tonic::Response<IndexMetadataResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.index_metadata");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .index_metadata(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn indexes_metadata(
-        &self,
-        tonic_request: tonic::Request<IndexesMetadataRequest>,
-    ) -> Result<tonic::Response<IndexesMetadataResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.indexes_metadata");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .indexes_metadata(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_indexes_metadata(
-        &self,
-        tonic_request: tonic::Request<ListIndexesMetadataRequest>,
-    ) -> Result<tonic::Response<ListIndexesMetadataResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_indexes_metadata");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_indexes_metadata(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn delete_index(
-        &self,
-        tonic_request: tonic::Request<DeleteIndexRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.delete_index");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .delete_index(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_index_stats(
-        &self,
-        tonic_request: tonic::Request<ListIndexStatsRequest>,
-    ) -> Result<tonic::Response<ListIndexStatsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_index_stats");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_index_stats(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    type ListSplitsStream = quickwit_common::ServiceStream<
-        tonic::Result<ListSplitsResponse>,
-    >;
-    async fn list_splits(
-        &self,
-        tonic_request: tonic::Request<ListSplitsRequest>,
-    ) -> Result<tonic::Response<Self::ListSplitsStream>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_splits(request)
-                .await
-                .map(|stream| tonic::Response::new(
-                    stream.map_err(crate::error::grpc_error_to_grpc_status),
-                ))
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn register_file_for_indexing(
-        &self,
-        tonic_request: tonic::Request<RegisterFileForIndexing>,
-    ) -> Result<tonic::Response<RegisterFileForIndexingResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.register_file_for_indexing");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .register_file_for_indexing(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn assign_files_for_indexing(
-        &self,
-        tonic_request: tonic::Request<AssignFilesForIndexing>,
-    ) -> Result<tonic::Response<AssignFilesForIndexingResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.assign_files_for_indexing");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .assign_files_for_indexing(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn publish_file_splits(
-        &self,
-        tonic_request: tonic::Request<PublishFileSplits>,
-    ) -> Result<tonic::Response<PublishFileSplitsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.publish_file_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .publish_file_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_completed_files(
-        &self,
-        tonic_request: tonic::Request<ListCompletedFilesRequest>,
-    ) -> Result<tonic::Response<ListCompletedFilesResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_completed_files");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_completed_files(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn stage_splits(
-        &self,
-        tonic_request: tonic::Request<StageSplitsRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.stage_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .stage_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn publish_splits(
-        &self,
-        tonic_request: tonic::Request<PublishSplitsRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.publish_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .publish_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn mark_splits_for_deletion(
-        &self,
-        tonic_request: tonic::Request<MarkSplitsForDeletionRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.mark_splits_for_deletion");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .mark_splits_for_deletion(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn delete_splits(
-        &self,
-        tonic_request: tonic::Request<DeleteSplitsRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.delete_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .delete_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn add_source(
-        &self,
-        tonic_request: tonic::Request<AddSourceRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.add_source");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .add_source(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn update_source(
-        &self,
-        tonic_request: tonic::Request<UpdateSourceRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.update_source");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .update_source(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn toggle_source(
-        &self,
-        tonic_request: tonic::Request<ToggleSourceRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.toggle_source");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .toggle_source(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn delete_source(
-        &self,
-        tonic_request: tonic::Request<DeleteSourceRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.delete_source");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .delete_source(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn last_delete_opstamp(
-        &self,
-        tonic_request: tonic::Request<LastDeleteOpstampRequest>,
-    ) -> Result<tonic::Response<LastDeleteOpstampResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.last_delete_opstamp");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .last_delete_opstamp(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn create_delete_task(
-        &self,
-        tonic_request: tonic::Request<DeleteQuery>,
-    ) -> Result<tonic::Response<DeleteTask>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.create_delete_task");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .create_delete_task(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn update_splits_delete_opstamp(
-        &self,
-        tonic_request: tonic::Request<UpdateSplitsDeleteOpstampRequest>,
-    ) -> Result<tonic::Response<UpdateSplitsDeleteOpstampResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.update_splits_delete_opstamp");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .update_splits_delete_opstamp(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_delete_tasks(
-        &self,
-        tonic_request: tonic::Request<ListDeleteTasksRequest>,
-    ) -> Result<tonic::Response<ListDeleteTasksResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_delete_tasks");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_delete_tasks(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_stale_splits(
-        &self,
-        tonic_request: tonic::Request<ListStaleSplitsRequest>,
-    ) -> Result<tonic::Response<ListSplitsResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_stale_splits");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_stale_splits(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn create_index_template(
-        &self,
-        tonic_request: tonic::Request<CreateIndexTemplateRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.create_index_template");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .create_index_template(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn get_index_template(
-        &self,
-        tonic_request: tonic::Request<GetIndexTemplateRequest>,
-    ) -> Result<tonic::Response<GetIndexTemplateResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.get_index_template");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .get_index_template(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn find_index_template_matches(
-        &self,
-        tonic_request: tonic::Request<FindIndexTemplateMatchesRequest>,
-    ) -> Result<tonic::Response<FindIndexTemplateMatchesResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.find_index_template_matches");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .find_index_template_matches(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn list_index_templates(
-        &self,
-        tonic_request: tonic::Request<ListIndexTemplatesRequest>,
-    ) -> Result<tonic::Response<ListIndexTemplatesResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.list_index_templates");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .list_index_templates(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn delete_index_templates(
-        &self,
-        tonic_request: tonic::Request<DeleteIndexTemplatesRequest>,
-    ) -> Result<tonic::Response<EmptyResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.delete_index_templates");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .delete_index_templates(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-    async fn get_cluster_identity(
-        &self,
-        tonic_request: tonic::Request<GetClusterIdentityRequest>,
-    ) -> Result<tonic::Response<GetClusterIdentityResponse>, tonic::Status> {
-        let parent_context = quickwit_common::tracing_utils::extract_context(
-            tonic_request.metadata(),
-        );
-        let request = tonic_request.into_inner();
-        let span = tracing::info_span!("metastore.get_cluster_identity");
-        let _ = <tracing::Span as tracing_opentelemetry::OpenTelemetrySpanExt>::set_parent(
-            &span,
-            parent_context,
-        );
-        let fut = async move {
-            self.inner
-                .0
-                .get_cluster_identity(request)
-                .await
-                .map(tonic::Response::new)
-                .map_err(crate::error::grpc_error_to_grpc_status)
-        };
-        <_ as tracing::Instrument>::instrument(fut, span).await
-    }
-}
 /// Generated client implementations.
-pub mod metastore_service_grpc_client {
+pub mod metastore_service_client {
     #![allow(
         unused_variables,
         dead_code,
@@ -5915,10 +683,10 @@ pub mod metastore_service_grpc_client {
     /// are created with a `delete_opstamp` equal the latest opstamp of the tasks of the
     /// corresponding index.
     #[derive(Debug, Clone)]
-    pub struct MetastoreServiceGrpcClient<T> {
+    pub struct MetastoreServiceClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl MetastoreServiceGrpcClient<tonic::transport::Channel> {
+    impl MetastoreServiceClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -5929,7 +697,7 @@ pub mod metastore_service_grpc_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> MetastoreServiceGrpcClient<T>
+    impl<T> MetastoreServiceClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::Body>,
         T::Error: Into<StdError>,
@@ -5947,7 +715,7 @@ pub mod metastore_service_grpc_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> MetastoreServiceGrpcClient<InterceptedService<T, F>>
+        ) -> MetastoreServiceClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -5961,7 +729,7 @@ pub mod metastore_service_grpc_client {
                 http::Request<tonic::body::Body>,
             >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
         {
-            MetastoreServiceGrpcClient::new(InterceptedService::new(inner, interceptor))
+            MetastoreServiceClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -6884,7 +1652,7 @@ pub mod metastore_service_grpc_client {
     }
 }
 /// Generated server implementations.
-pub mod metastore_service_grpc_server {
+pub mod metastore_service_server {
     #![allow(
         unused_variables,
         dead_code,
@@ -6893,9 +1661,9 @@ pub mod metastore_service_grpc_server {
         clippy::let_unit_value,
     )]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with MetastoreServiceGrpcServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with MetastoreServiceServer.
     #[async_trait]
-    pub trait MetastoreServiceGrpc: std::marker::Send + std::marker::Sync + 'static {
+    pub trait MetastoreService: std::marker::Send + std::marker::Sync + 'static {
         /// Creates an index.
         ///
         /// This API creates a new index in the metastore.
@@ -7178,14 +1946,14 @@ pub mod metastore_service_grpc_server {
     /// are created with a `delete_opstamp` equal the latest opstamp of the tasks of the
     /// corresponding index.
     #[derive(Debug)]
-    pub struct MetastoreServiceGrpcServer<T> {
+    pub struct MetastoreServiceServer<T> {
         inner: Arc<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
     }
-    impl<T> MetastoreServiceGrpcServer<T> {
+    impl<T> MetastoreServiceServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -7236,10 +2004,9 @@ pub mod metastore_service_grpc_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>>
-    for MetastoreServiceGrpcServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for MetastoreServiceServer<T>
     where
-        T: MetastoreServiceGrpc,
+        T: MetastoreService,
         B: Body + std::marker::Send + 'static,
         B::Error: Into<StdError> + std::marker::Send + 'static,
     {
@@ -7256,9 +2023,9 @@ pub mod metastore_service_grpc_server {
             match req.uri().path() {
                 "/quickwit.metastore.MetastoreService/CreateIndex" => {
                     #[allow(non_camel_case_types)]
-                    struct CreateIndexSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct CreateIndexSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::CreateIndexRequest>
                     for CreateIndexSvc<T> {
                         type Response = super::CreateIndexResponse;
@@ -7272,8 +2039,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::create_index(&inner, request)
-                                    .await
+                                <T as MetastoreService>::create_index(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -7302,9 +2068,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/UpdateIndex" => {
                     #[allow(non_camel_case_types)]
-                    struct UpdateIndexSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct UpdateIndexSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::UpdateIndexRequest>
                     for UpdateIndexSvc<T> {
                         type Response = super::IndexMetadataResponse;
@@ -7318,8 +2084,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::update_index(&inner, request)
-                                    .await
+                                <T as MetastoreService>::update_index(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -7348,9 +2113,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/IndexMetadata" => {
                     #[allow(non_camel_case_types)]
-                    struct IndexMetadataSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct IndexMetadataSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::IndexMetadataRequest>
                     for IndexMetadataSvc<T> {
                         type Response = super::IndexMetadataResponse;
@@ -7364,7 +2129,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::index_metadata(&inner, request)
+                                <T as MetastoreService>::index_metadata(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -7394,9 +2159,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/IndexesMetadata" => {
                     #[allow(non_camel_case_types)]
-                    struct IndexesMetadataSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct IndexesMetadataSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::IndexesMetadataRequest>
                     for IndexesMetadataSvc<T> {
                         type Response = super::IndexesMetadataResponse;
@@ -7410,10 +2175,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::indexes_metadata(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::indexes_metadata(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -7443,9 +2205,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListIndexesMetadata" => {
                     #[allow(non_camel_case_types)]
-                    struct ListIndexesMetadataSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListIndexesMetadataSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListIndexesMetadataRequest>
                     for ListIndexesMetadataSvc<T> {
                         type Response = super::ListIndexesMetadataResponse;
@@ -7459,7 +2221,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_indexes_metadata(
+                                <T as MetastoreService>::list_indexes_metadata(
                                         &inner,
                                         request,
                                     )
@@ -7492,9 +2254,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/DeleteIndex" => {
                     #[allow(non_camel_case_types)]
-                    struct DeleteIndexSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct DeleteIndexSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::DeleteIndexRequest>
                     for DeleteIndexSvc<T> {
                         type Response = super::EmptyResponse;
@@ -7508,8 +2270,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::delete_index(&inner, request)
-                                    .await
+                                <T as MetastoreService>::delete_index(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -7538,9 +2299,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListIndexStats" => {
                     #[allow(non_camel_case_types)]
-                    struct ListIndexStatsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListIndexStatsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListIndexStatsRequest>
                     for ListIndexStatsSvc<T> {
                         type Response = super::ListIndexStatsResponse;
@@ -7554,10 +2315,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_index_stats(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::list_index_stats(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -7587,9 +2345,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct ListSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::ServerStreamingService<super::ListSplitsRequest>
                     for ListSplitsSvc<T> {
                         type Response = super::ListSplitsResponse;
@@ -7604,8 +2362,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_splits(&inner, request)
-                                    .await
+                                <T as MetastoreService>::list_splits(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -7634,11 +2391,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/RegisterFileForIndexing" => {
                     #[allow(non_camel_case_types)]
-                    struct RegisterFileForIndexingSvc<T: MetastoreServiceGrpc>(
-                        pub Arc<T>,
-                    );
+                    struct RegisterFileForIndexingSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::RegisterFileForIndexing>
                     for RegisterFileForIndexingSvc<T> {
                         type Response = super::RegisterFileForIndexingResponse;
@@ -7652,7 +2407,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::register_file_for_indexing(
+                                <T as MetastoreService>::register_file_for_indexing(
                                         &inner,
                                         request,
                                     )
@@ -7685,11 +2440,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/AssignFilesForIndexing" => {
                     #[allow(non_camel_case_types)]
-                    struct AssignFilesForIndexingSvc<T: MetastoreServiceGrpc>(
-                        pub Arc<T>,
-                    );
+                    struct AssignFilesForIndexingSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::AssignFilesForIndexing>
                     for AssignFilesForIndexingSvc<T> {
                         type Response = super::AssignFilesForIndexingResponse;
@@ -7703,7 +2456,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::assign_files_for_indexing(
+                                <T as MetastoreService>::assign_files_for_indexing(
                                         &inner,
                                         request,
                                     )
@@ -7736,9 +2489,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/PublishFileSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct PublishFileSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct PublishFileSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::PublishFileSplits>
                     for PublishFileSplitsSvc<T> {
                         type Response = super::PublishFileSplitsResponse;
@@ -7752,7 +2505,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::publish_file_splits(
+                                <T as MetastoreService>::publish_file_splits(
                                         &inner,
                                         request,
                                     )
@@ -7785,9 +2538,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListCompletedFiles" => {
                     #[allow(non_camel_case_types)]
-                    struct ListCompletedFilesSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListCompletedFilesSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListCompletedFilesRequest>
                     for ListCompletedFilesSvc<T> {
                         type Response = super::ListCompletedFilesResponse;
@@ -7801,7 +2554,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_completed_files(
+                                <T as MetastoreService>::list_completed_files(
                                         &inner,
                                         request,
                                     )
@@ -7834,9 +2587,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/StageSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct StageSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct StageSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::StageSplitsRequest>
                     for StageSplitsSvc<T> {
                         type Response = super::EmptyResponse;
@@ -7850,8 +2603,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::stage_splits(&inner, request)
-                                    .await
+                                <T as MetastoreService>::stage_splits(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -7880,9 +2632,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/PublishSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct PublishSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct PublishSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::PublishSplitsRequest>
                     for PublishSplitsSvc<T> {
                         type Response = super::EmptyResponse;
@@ -7896,7 +2648,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::publish_splits(&inner, request)
+                                <T as MetastoreService>::publish_splits(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -7926,9 +2678,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/MarkSplitsForDeletion" => {
                     #[allow(non_camel_case_types)]
-                    struct MarkSplitsForDeletionSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct MarkSplitsForDeletionSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::MarkSplitsForDeletionRequest>
                     for MarkSplitsForDeletionSvc<T> {
                         type Response = super::EmptyResponse;
@@ -7942,7 +2694,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::mark_splits_for_deletion(
+                                <T as MetastoreService>::mark_splits_for_deletion(
                                         &inner,
                                         request,
                                     )
@@ -7975,9 +2727,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/DeleteSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct DeleteSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct DeleteSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::DeleteSplitsRequest>
                     for DeleteSplitsSvc<T> {
                         type Response = super::EmptyResponse;
@@ -7991,7 +2743,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::delete_splits(&inner, request)
+                                <T as MetastoreService>::delete_splits(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8021,9 +2773,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/AddSource" => {
                     #[allow(non_camel_case_types)]
-                    struct AddSourceSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct AddSourceSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::AddSourceRequest>
                     for AddSourceSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8037,8 +2789,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::add_source(&inner, request)
-                                    .await
+                                <T as MetastoreService>::add_source(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -8067,9 +2818,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/UpdateSource" => {
                     #[allow(non_camel_case_types)]
-                    struct UpdateSourceSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct UpdateSourceSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::UpdateSourceRequest>
                     for UpdateSourceSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8083,7 +2834,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::update_source(&inner, request)
+                                <T as MetastoreService>::update_source(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8113,9 +2864,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ToggleSource" => {
                     #[allow(non_camel_case_types)]
-                    struct ToggleSourceSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ToggleSourceSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ToggleSourceRequest>
                     for ToggleSourceSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8129,7 +2880,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::toggle_source(&inner, request)
+                                <T as MetastoreService>::toggle_source(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8159,9 +2910,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/DeleteSource" => {
                     #[allow(non_camel_case_types)]
-                    struct DeleteSourceSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct DeleteSourceSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::DeleteSourceRequest>
                     for DeleteSourceSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8175,7 +2926,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::delete_source(&inner, request)
+                                <T as MetastoreService>::delete_source(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8205,9 +2956,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/LastDeleteOpstamp" => {
                     #[allow(non_camel_case_types)]
-                    struct LastDeleteOpstampSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct LastDeleteOpstampSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::LastDeleteOpstampRequest>
                     for LastDeleteOpstampSvc<T> {
                         type Response = super::LastDeleteOpstampResponse;
@@ -8221,7 +2972,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::last_delete_opstamp(
+                                <T as MetastoreService>::last_delete_opstamp(
                                         &inner,
                                         request,
                                     )
@@ -8254,9 +3005,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/CreateDeleteTask" => {
                     #[allow(non_camel_case_types)]
-                    struct CreateDeleteTaskSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct CreateDeleteTaskSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::DeleteQuery>
                     for CreateDeleteTaskSvc<T> {
                         type Response = super::DeleteTask;
@@ -8270,10 +3021,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::create_delete_task(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::create_delete_task(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8303,11 +3051,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/UpdateSplitsDeleteOpstamp" => {
                     #[allow(non_camel_case_types)]
-                    struct UpdateSplitsDeleteOpstampSvc<T: MetastoreServiceGrpc>(
-                        pub Arc<T>,
-                    );
+                    struct UpdateSplitsDeleteOpstampSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<
                         super::UpdateSplitsDeleteOpstampRequest,
                     > for UpdateSplitsDeleteOpstampSvc<T> {
@@ -8324,7 +3070,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::update_splits_delete_opstamp(
+                                <T as MetastoreService>::update_splits_delete_opstamp(
                                         &inner,
                                         request,
                                     )
@@ -8357,9 +3103,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListDeleteTasks" => {
                     #[allow(non_camel_case_types)]
-                    struct ListDeleteTasksSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListDeleteTasksSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListDeleteTasksRequest>
                     for ListDeleteTasksSvc<T> {
                         type Response = super::ListDeleteTasksResponse;
@@ -8373,10 +3119,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_delete_tasks(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::list_delete_tasks(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8406,9 +3149,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListStaleSplits" => {
                     #[allow(non_camel_case_types)]
-                    struct ListStaleSplitsSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListStaleSplitsSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListStaleSplitsRequest>
                     for ListStaleSplitsSvc<T> {
                         type Response = super::ListSplitsResponse;
@@ -8422,10 +3165,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_stale_splits(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::list_stale_splits(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8455,9 +3195,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/CreateIndexTemplate" => {
                     #[allow(non_camel_case_types)]
-                    struct CreateIndexTemplateSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct CreateIndexTemplateSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::CreateIndexTemplateRequest>
                     for CreateIndexTemplateSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8471,7 +3211,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::create_index_template(
+                                <T as MetastoreService>::create_index_template(
                                         &inner,
                                         request,
                                     )
@@ -8504,9 +3244,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/GetIndexTemplate" => {
                     #[allow(non_camel_case_types)]
-                    struct GetIndexTemplateSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct GetIndexTemplateSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::GetIndexTemplateRequest>
                     for GetIndexTemplateSvc<T> {
                         type Response = super::GetIndexTemplateResponse;
@@ -8520,10 +3260,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::get_index_template(
-                                        &inner,
-                                        request,
-                                    )
+                                <T as MetastoreService>::get_index_template(&inner, request)
                                     .await
                             };
                             Box::pin(fut)
@@ -8553,11 +3290,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/FindIndexTemplateMatches" => {
                     #[allow(non_camel_case_types)]
-                    struct FindIndexTemplateMatchesSvc<T: MetastoreServiceGrpc>(
-                        pub Arc<T>,
-                    );
+                    struct FindIndexTemplateMatchesSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::FindIndexTemplateMatchesRequest>
                     for FindIndexTemplateMatchesSvc<T> {
                         type Response = super::FindIndexTemplateMatchesResponse;
@@ -8573,7 +3308,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::find_index_template_matches(
+                                <T as MetastoreService>::find_index_template_matches(
                                         &inner,
                                         request,
                                     )
@@ -8606,9 +3341,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/ListIndexTemplates" => {
                     #[allow(non_camel_case_types)]
-                    struct ListIndexTemplatesSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct ListIndexTemplatesSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::ListIndexTemplatesRequest>
                     for ListIndexTemplatesSvc<T> {
                         type Response = super::ListIndexTemplatesResponse;
@@ -8622,7 +3357,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::list_index_templates(
+                                <T as MetastoreService>::list_index_templates(
                                         &inner,
                                         request,
                                     )
@@ -8655,9 +3390,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/DeleteIndexTemplates" => {
                     #[allow(non_camel_case_types)]
-                    struct DeleteIndexTemplatesSvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct DeleteIndexTemplatesSvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::DeleteIndexTemplatesRequest>
                     for DeleteIndexTemplatesSvc<T> {
                         type Response = super::EmptyResponse;
@@ -8671,7 +3406,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::delete_index_templates(
+                                <T as MetastoreService>::delete_index_templates(
                                         &inner,
                                         request,
                                     )
@@ -8704,9 +3439,9 @@ pub mod metastore_service_grpc_server {
                 }
                 "/quickwit.metastore.MetastoreService/GetClusterIdentity" => {
                     #[allow(non_camel_case_types)]
-                    struct GetClusterIdentitySvc<T: MetastoreServiceGrpc>(pub Arc<T>);
+                    struct GetClusterIdentitySvc<T: MetastoreService>(pub Arc<T>);
                     impl<
-                        T: MetastoreServiceGrpc,
+                        T: MetastoreService,
                     > tonic::server::UnaryService<super::GetClusterIdentityRequest>
                     for GetClusterIdentitySvc<T> {
                         type Response = super::GetClusterIdentityResponse;
@@ -8720,7 +3455,7 @@ pub mod metastore_service_grpc_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as MetastoreServiceGrpc>::get_cluster_identity(
+                                <T as MetastoreService>::get_cluster_identity(
                                         &inner,
                                         request,
                                     )
@@ -8773,7 +3508,7 @@ pub mod metastore_service_grpc_server {
             }
         }
     }
-    impl<T> Clone for MetastoreServiceGrpcServer<T> {
+    impl<T> Clone for MetastoreServiceServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -8787,7 +3522,7 @@ pub mod metastore_service_grpc_server {
     }
     /// Generated gRPC service name
     pub const SERVICE_NAME: &str = "quickwit.metastore.MetastoreService";
-    impl<T> tonic::server::NamedService for MetastoreServiceGrpcServer<T> {
+    impl<T> tonic::server::NamedService for MetastoreServiceServer<T> {
         const NAME: &'static str = SERVICE_NAME;
     }
 }
