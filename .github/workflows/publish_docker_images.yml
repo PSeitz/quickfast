@@ -8,6 +8,7 @@ on:
       - main
     paths:
       - "quickwit/**"
+      - "Dockerfile"
     tags:
       - airmail
       - happy-plazza
@@ -18,7 +19,7 @@ permissions:
   contents: read
 
 env:
-  REGISTRY_IMAGE: quickwit/quickwit
+  REGISTRY_IMAGE: pseitz/quickfast
 
 jobs:
   build-lambda:
@@ -90,7 +91,7 @@ jobs:
           - os: ubuntu-24.04
             platform: linux/amd64
             platform_suffix: amd64
-          - os: gh-ubuntu-arm64
+          - os: ubuntu-24.04-arm
             platform: linux/arm64
             platform_suffix: arm64
     runs-on: ${{ matrix.os }}
@@ -132,9 +133,7 @@ jobs:
           images: |
             ${{ env.REGISTRY_IMAGE }}
           labels: |
-            org.opencontainers.image.title=Quickwit
-            maintainer=Quickwit, Inc. <hello@quickwit.io>
-            org.opencontainers.image.vendor=Quickwit, Inc.
+            org.opencontainers.image.title=Quickfast
             org.opencontainers.image.licenses=Apache-2.0
 
       - name: Retrieve commit date, hash, and tags

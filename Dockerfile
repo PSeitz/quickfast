@@ -55,9 +55,7 @@ RUN echo "Building workspace with feature(s) '$CARGO_FEATURES' and profile '$CAR
 
 FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS quickwit
 
-LABEL org.opencontainers.image.title="Quickwit"
-LABEL maintainer="Quickwit, Inc. <hello@quickwit.io>"
-LABEL org.opencontainers.image.vendor="Quickwit, Inc."
+LABEL org.opencontainers.image.title="Quickfast"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apt-get -y update \
