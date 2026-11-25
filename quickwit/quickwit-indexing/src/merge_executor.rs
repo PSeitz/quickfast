@@ -339,10 +339,6 @@ fn combine_partition_ids_aux(partition_ids: impl IntoIterator<Item = u64>) -> u6
     }
 }
 
-pub fn combine_partition_ids(splits: &[SplitMetadata]) -> u64 {
-    combine_partition_ids_aux(splits.iter().map(|split| split.partition_id))
-}
-
 pub fn merge_split_attrs(
     pipeline_id: MergePipelineId,
     merge_split_id: SplitId,

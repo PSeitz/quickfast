@@ -10,10 +10,6 @@ repository.workspace = true
 authors.workspace = true
 license.workspace = true
 
-[features]
-sqs-localstack-tests = [
-    "quickwit-indexing/sqs",
-]
 [dev-dependencies]
 anyhow = { workspace = true }
 futures-util = { workspace = true }
@@ -35,7 +31,6 @@ tracing = { workspace = true }
 quickwit-cli = { workspace = true }
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
-quickwit-indexing = { workspace = true, features = ["testsuite"] }
 quickwit-ingest = { workspace = true, features = ["testsuite"] }
 quickwit-metastore = { workspace = true, features = ["testsuite"] }
 quickwit-opentelemetry = { workspace = true, features = ["testsuite"] }

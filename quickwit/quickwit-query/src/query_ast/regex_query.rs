@@ -77,16 +77,6 @@ impl From<RegexQuery> for QueryAst {
 }
 
 impl RegexQuery {
-    #[cfg(test)]
-    pub fn from_field_value(field: impl ToString, regex: impl ToString) -> Self {
-        Self {
-            field: field.to_string(),
-            regex: regex.to_string(),
-        }
-    }
-}
-
-impl RegexQuery {
     /// Resolves this regex query against the given schema and optionally
     /// applies case-insensitive matching when the field's tokenizer lowercases.
     ///

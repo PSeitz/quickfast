@@ -188,13 +188,6 @@ impl StorageConfig {
         }
     }
 
-    pub fn as_file(&self) -> Option<&FileStorageConfig> {
-        match self {
-            Self::File(file_storage_config) => Some(file_storage_config),
-            _ => None,
-        }
-    }
-
     pub fn as_s3(&self) -> Option<&S3StorageConfig> {
         match self {
             Self::S3(s3_storage_config) => Some(s3_storage_config),

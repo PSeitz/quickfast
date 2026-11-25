@@ -116,13 +116,6 @@ impl MetastoreConfig {
         }
     }
 
-    pub fn as_file(&self) -> Option<&FileMetastoreConfig> {
-        match self {
-            Self::File(file_metastore_config) => Some(file_metastore_config),
-            _ => None,
-        }
-    }
-
     pub fn as_postgres(&self) -> Option<&PostgresMetastoreConfig> {
         match self {
             Self::PostgreSQL(postgres_metastore_config) => Some(postgres_metastore_config),

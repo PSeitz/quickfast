@@ -64,13 +64,6 @@ impl MergeOperation {
         }
     }
 
-    pub fn total_num_bytes(&self) -> u64 {
-        self.splits
-            .iter()
-            .map(|split: &SplitMetadata| split.footer_offsets.end)
-            .sum()
-    }
-
     pub fn new_delete_and_merge_operation(split: SplitMetadata) -> Self {
         let merge_split_id = SplitId::new();
         let merge_parent_span = info_span!("delete", merge_split_id=%merge_split_id, split_ids=?split.split_id(), typ=%MergeOperationType::DeleteAndMerge);
@@ -179,10 +172,6 @@ pub fn merge_policy_from_settings(settings: &IndexingSettings) -> Arc<dyn MergeP
 pub fn default_merge_policy() -> Arc<dyn MergePolicy> {
     let indexing_settings = IndexingSettings::default();
     merge_policy_from_settings(&indexing_settings)
-}
-
-pub fn nop_merge_policy() -> Arc<dyn MergePolicy> {
-    Arc::new(NopMergePolicy)
 }
 
 struct SplitShortDebug<'a>(&'a SplitMetadata);

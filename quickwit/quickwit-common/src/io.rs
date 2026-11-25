@@ -156,7 +156,6 @@ impl<A: IoControlsAccess, W: AsyncWrite> ControlledWrite<A, W> {
     /// that, the result is saved into this `Resource` instance (therefore
     /// different `poll_***` calls should not be interleaving), while returning
     /// `Pending` until the limiter has completely consumed the result.
-    #[allow(dead_code)]
     pub(crate) fn poll_limited(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,

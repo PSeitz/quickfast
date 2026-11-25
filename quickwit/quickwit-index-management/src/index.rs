@@ -525,30 +525,6 @@ impl IndexService {
             .clone();
         Ok(source)
     }
-
-    pub async fn get_source(
-        &mut self,
-        index_id: &str,
-        source_id: &str,
-    ) -> Result<SourceConfig, IndexServiceError> {
-        let index_metadata_request = IndexMetadataRequest::for_index_id(index_id.to_string());
-        let source_config = self
-            .metastore
-            .index_metadata(index_metadata_request)
-            .await?
-            .deserialize_index_metadata()?
-            .sources
-            .get(source_id)
-            .ok_or_else(|| {
-                IndexServiceError::Metastore(MetastoreError::NotFound(EntityKind::Source {
-                    index_id: index_id.to_string(),
-                    source_id: source_id.to_string(),
-                }))
-            })?
-            .clone();
-
-        Ok(source_config)
-    }
 }
 
 /// Clears the cache directory of a given source.

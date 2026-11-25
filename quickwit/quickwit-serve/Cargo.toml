@@ -114,9 +114,6 @@ jemalloc-profiled = [
   "quickwit-common/jemalloc-profiled"
 ]
 testsuite = []
-sqs-for-tests = [
-  "quickwit-indexing/sqs"
-]
 lambda = [
   "quickwit-lambda-client"
 ]

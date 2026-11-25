@@ -138,11 +138,6 @@ impl FindTraceIdsCollector {
             self.span_timestamp_field_name.clone(),
         ])
     }
-
-    /// The field names of the term dictionaries accessed by this collector.
-    pub fn term_dict_field_names(&self) -> HashSet<String> {
-        HashSet::from_iter([self.trace_id_field_name.clone()])
-    }
 }
 
 impl Collector for FindTraceIdsCollector {

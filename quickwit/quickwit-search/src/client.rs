@@ -19,13 +19,12 @@ use std::time::Duration;
 
 use bytesize::ByteSize;
 use futures::future::{BoxFuture, FutureExt, Shared};
-use http::Uri;
 use quickwit_common::tracing_utils::SpanContextInterceptor;
 use quickwit_proto::search::{GetKvRequest, PutKvRequest, ReportSplitsRequest};
 use quickwit_proto::tonic;
 use quickwit_proto::tonic::Request;
 use quickwit_proto::tonic::codegen::InterceptedService;
-use quickwit_proto::tonic::transport::{Channel, Endpoint};
+use quickwit_proto::tonic::transport::Channel;
 use tokio::time::Instant;
 use tower::timeout::Timeout;
 use tracing::warn;
@@ -379,24 +378,6 @@ async fn fetch_load_uncached(mut client_impl: SearchServiceClientImpl) -> crate:
             }
         }
     }
-}
-
-/// Creates a [`SearchServiceClient`] from a socket address.
-/// The underlying channel connects lazily and is set up to time out after 5 seconds. It reconnects
-/// automatically should the connection be dropped.
-pub fn create_search_client_from_grpc_addr(
-    grpc_addr: SocketAddr,
-    max_message_size: ByteSize,
-) -> SearchServiceClient {
-    let uri = Uri::builder()
-        .scheme("http")
-        .authority(grpc_addr.to_string().as_str())
-        .path_and_query("/")
-        .build()
-        .expect("The URI should be well-formed.");
-    let channel = Endpoint::from(uri).connect_lazy();
-    let timeout_channel = Timeout::new(channel, Duration::from_secs(5));
-    create_search_client_from_channel(grpc_addr, timeout_channel, max_message_size)
 }
 
 /// Creates a [`SearchServiceClient`] from a pre-established connection (channel).

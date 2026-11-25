@@ -25,7 +25,7 @@ pub use crate::doc_processor::{DocProcessorCounters, DocumentConverter};
 pub use crate::indexing_service::{INDEXING_DIR_NAME, IndexingService, IndexingServiceCounters};
 pub use crate::local_merge::run_local_merges;
 pub use crate::merge_executor::{
-    MergeExecutionContext, combine_partition_ids, execute_merge_operation, merge_split_attrs,
+    MergeExecutionContext, execute_merge_operation, merge_split_attrs,
 };
 pub use crate::packager::create_packaged_split;
 pub use crate::split_store::{IndexingSplitStore, get_tantivy_directory_from_split_bundle};
