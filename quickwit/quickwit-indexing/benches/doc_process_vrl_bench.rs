@@ -56,13 +56,7 @@ fn bench_converter(
             SourceInputFormat::Json,
         )
         .unwrap();
-        b.iter(|| {
-            let mut processed = Vec::with_capacity(lines.len());
-            for doc in &lines {
-                converter.process_raw_doc(doc.clone(), &mut processed);
-            }
-            processed
-        })
+        b.iter(|| converter.process_batch(lines.iter().cloned()))
     });
 }
 

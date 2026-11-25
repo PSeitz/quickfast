@@ -12,64 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::string::FromUtf8Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, bail};
 use bytes::Bytes;
+use itertools::Either;
 use quickwit_common::rate_limited_tracing::rate_limited_warn;
 use quickwit_config::{SourceInputFormat, TransformConfig};
-use quickwit_doc_mapper::{DocMapper, DocParsingError, JsonObject};
+use quickwit_doc_mapper::{DocMapper, DocParsingError, QuickwitDocBatch};
 use quickwit_metrics::{Counter, counter, labels};
 use quickwit_opentelemetry::otlp::{
-    JsonLogIterator, JsonSpanIterator, OtlpLogsError, OtlpTracesError, parse_otlp_logs_json,
-    parse_otlp_logs_protobuf, parse_otlp_spans_json, parse_otlp_spans_protobuf,
+    OtlpLogsError, OtlpTracesError, parse_otlp_logs_json, parse_otlp_logs_protobuf,
+    parse_otlp_spans_json, parse_otlp_spans_protobuf,
 };
 use quickwit_proto::types::{IndexId, SourceId};
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 use tantivy::schema::{Field, Value};
-use tantivy::{DateTime, TantivyDocument};
+use tantivy::{DateTime, Document};
 use thiserror::Error;
 
 #[cfg(feature = "vrl")]
 use super::vrl_processing::*;
 use crate::metrics::{PROCESSED_BYTES, PROCESSED_DOCS_TOTAL};
 use crate::models::ProcessedDoc;
-
-const PLAIN_TEXT: &str = "plain_text";
-pub(super) struct JsonDoc {
-    json_obj: JsonObject,
-    num_bytes: usize,
-}
-
-impl JsonDoc {
-    pub fn new(json_obj: JsonObject, num_bytes: usize) -> Self {
-        Self {
-            json_obj,
-            num_bytes,
-        }
-    }
-
-    pub fn try_from_json_value(
-        json_value: JsonValue,
-        num_bytes: usize,
-    ) -> Result<Self, DocProcessorError> {
-        match json_value {
-            JsonValue::Object(json_obj) => Ok(Self::new(json_obj, num_bytes)),
-            _ => Err(DocProcessorError::JsonParsing(
-                "document is not an object".to_string(),
-            )),
-        }
-    }
-
-    #[cfg(feature = "vrl")]
-    pub fn try_from_vrl_doc(vrl_doc: VrlDoc) -> Result<Self, DocProcessorError> {
-        let json_value = serde_json::to_value(vrl_doc.vrl_value)?;
-        Self::try_from_json_value(json_value, vrl_doc.num_bytes)
-    }
-}
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Error, Debug)]
@@ -108,155 +74,6 @@ impl From<DocParsingError> for DocProcessorError {
 impl From<serde_json::Error> for DocProcessorError {
     fn from(error: serde_json::Error) -> Self {
         Self::JsonParsing(error.to_string())
-    }
-}
-
-impl From<FromUtf8Error> for DocProcessorError {
-    fn from(error: FromUtf8Error) -> Self {
-        Self::JsonParsing(error.to_string())
-    }
-}
-
-#[cfg(feature = "vrl")]
-fn try_into_vrl_doc(
-    input_format: SourceInputFormat,
-    raw_doc: Bytes,
-    num_bytes: usize,
-) -> Result<VrlDoc, DocProcessorError> {
-    let vrl_value = match input_format {
-        SourceInputFormat::Json => serde_json::from_slice::<VrlValue>(&raw_doc)?,
-        SourceInputFormat::PlainText => {
-            let mut map = std::collections::BTreeMap::new();
-            let key = vrl::value::KeyString::from(PLAIN_TEXT);
-            let value = VrlValue::Bytes(raw_doc);
-            map.insert(key, value);
-            VrlValue::Object(map)
-        }
-        SourceInputFormat::OtlpLogsJson
-        | SourceInputFormat::OtlpLogsProtobuf
-        | SourceInputFormat::OtlpTracesJson
-        | SourceInputFormat::OtlpTracesProtobuf => {
-            panic!("OTP logs or traces do not support VRL transforms")
-        }
-    };
-    let vrl_doc = VrlDoc::new(vrl_value, num_bytes);
-    Ok(vrl_doc)
-}
-
-fn try_into_json_docs(
-    input_format: SourceInputFormat,
-    raw_doc: Bytes,
-    num_bytes: usize,
-) -> JsonDocIterator {
-    match input_format {
-        SourceInputFormat::Json => {
-            let json_doc_result = serde_json::from_slice::<JsonObject>(&raw_doc)
-                .map(|json_obj| JsonDoc::new(json_obj, num_bytes));
-            JsonDocIterator::from(json_doc_result)
-        }
-        SourceInputFormat::OtlpLogsJson => {
-            let logs = parse_otlp_logs_json(&raw_doc);
-            JsonDocIterator::from(logs)
-        }
-        SourceInputFormat::OtlpLogsProtobuf => {
-            let logs = parse_otlp_logs_protobuf(&raw_doc);
-            JsonDocIterator::from(logs)
-        }
-        SourceInputFormat::OtlpTracesJson => {
-            let spans = parse_otlp_spans_json(&raw_doc);
-            JsonDocIterator::from(spans)
-        }
-        SourceInputFormat::OtlpTracesProtobuf => {
-            let spans = parse_otlp_spans_protobuf(&raw_doc);
-            JsonDocIterator::from(spans)
-        }
-        SourceInputFormat::PlainText => {
-            let json_doc_result = String::from_utf8(raw_doc.to_vec()).map(|value| {
-                let mut json_obj = serde_json::Map::with_capacity(1);
-                let key = PLAIN_TEXT.to_string();
-                json_obj.insert(key, JsonValue::String(value));
-                JsonDoc::new(json_obj, num_bytes)
-            });
-            JsonDocIterator::from(json_doc_result)
-        }
-    }
-}
-
-#[cfg(feature = "vrl")]
-fn parse_raw_doc(
-    input_format: SourceInputFormat,
-    raw_doc: Bytes,
-    num_bytes: usize,
-    vrl_program_opt: Option<&mut VrlProgram>,
-) -> JsonDocIterator {
-    let Some(vrl_program) = vrl_program_opt else {
-        return try_into_json_docs(input_format, raw_doc, num_bytes);
-    };
-    let json_doc_result = try_into_vrl_doc(input_format, raw_doc, num_bytes)
-        .and_then(|vrl_doc| vrl_program.transform_doc(vrl_doc))
-        .and_then(JsonDoc::try_from_vrl_doc);
-
-    JsonDocIterator::from(json_doc_result)
-}
-
-#[cfg(not(feature = "vrl"))]
-fn parse_raw_doc(
-    input_format: SourceInputFormat,
-    raw_doc: Bytes,
-    num_bytes: usize,
-    _vrl_program_opt: Option<&mut VrlProgram>,
-) -> JsonDocIterator {
-    try_into_json_docs(input_format, raw_doc, num_bytes)
-}
-
-enum JsonDocIterator {
-    One(Option<Result<JsonDoc, DocProcessorError>>),
-    Logs(JsonLogIterator),
-    Spans(JsonSpanIterator),
-}
-
-impl Iterator for JsonDocIterator {
-    type Item = Result<JsonDoc, DocProcessorError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::One(opt) => opt.take(),
-            Self::Logs(logs) => logs
-                .next()
-                .map(|(json_value, num_bytes)| JsonDoc::try_from_json_value(json_value, num_bytes)),
-            Self::Spans(spans) => spans
-                .next()
-                .map(|(json_value, num_bytes)| JsonDoc::try_from_json_value(json_value, num_bytes)),
-        }
-    }
-}
-
-impl<E> From<Result<JsonDoc, E>> for JsonDocIterator
-where E: Into<DocProcessorError>
-{
-    fn from(result: Result<JsonDoc, E>) -> Self {
-        match result {
-            Ok(json_doc) => Self::One(Some(Ok(json_doc))),
-            Err(error) => Self::One(Some(Err(error.into()))),
-        }
-    }
-}
-
-impl From<Result<JsonLogIterator, OtlpLogsError>> for JsonDocIterator {
-    fn from(result: Result<JsonLogIterator, OtlpLogsError>) -> Self {
-        match result {
-            Ok(logs) => Self::Logs(logs),
-            Err(error) => Self::One(Some(Err(DocProcessorError::from(error)))),
-        }
-    }
-}
-
-impl From<Result<JsonSpanIterator, OtlpTracesError>> for JsonDocIterator {
-    fn from(result: Result<JsonSpanIterator, OtlpTracesError>) -> Self {
-        match result {
-            Ok(spans) => Self::Spans(spans),
-            Err(error) => Self::One(Some(Err(DocProcessorError::from(error)))),
-        }
     }
 }
 
@@ -435,68 +252,106 @@ impl DocumentConverter {
         &self.counters
     }
 
-    // Extract a timestamp from a tantivy document.
-    //
-    // If the timestamp is set up in the docmapper and the timestamp is missing,
-    // returns an PrepareDocumentError::MissingField error.
-    fn extract_timestamp(
-        &self,
-        doc: &TantivyDocument,
-    ) -> Result<Option<DateTime>, DocProcessorError> {
+    fn extract_timestamp(&self, doc: &impl Document) -> Result<Option<DateTime>, DocParsingError> {
         let Some(timestamp_field) = self.timestamp_field_opt else {
             return Ok(None);
         };
         let timestamp = doc
-            .get_first(timestamp_field)
-            .and_then(|val| val.as_datetime())
-            .ok_or(DocProcessorError::from(DocParsingError::RequiredField(
-                "timestamp field is required".to_string(),
-            )))?;
+            .iter_fields_and_values()
+            .find(|(field, _)| *field == timestamp_field)
+            .and_then(|(_, value)| value.as_datetime())
+            .ok_or_else(|| {
+                DocParsingError::RequiredField("timestamp field is required".to_string())
+            })?;
         Ok(Some(timestamp))
     }
 
-    pub fn process_raw_doc(&mut self, raw_doc: Bytes, processed_docs: &mut Vec<ProcessedDoc>) {
-        let num_bytes = raw_doc.len();
-
+    fn parse_into_batch(
+        &mut self,
+        raw_doc: Bytes,
+        batch: &mut QuickwitDocBatch,
+        otlp_payload_lens: &mut Vec<usize>,
+    ) -> Result<(), DocProcessorError> {
         #[cfg(feature = "vrl")]
-        let transform_opt = self.transform_opt.as_mut();
-        #[cfg(not(feature = "vrl"))]
-        let transform_opt: Option<&mut VrlProgram> = None;
+        if let Some(program) = &mut self.transform_opt {
+            return program.parse_into_batch(self.input_format, raw_doc, batch);
+        }
+        let records = match self.input_format {
+            SourceInputFormat::Json => return Ok(batch.parse(&raw_doc)?),
+            SourceInputFormat::PlainText => {
+                let text = std::str::from_utf8(&raw_doc)
+                    .map_err(|error| DocProcessorError::JsonParsing(error.to_string()))?;
+                return Ok(batch.push_plain_text(text)?);
+            }
+            SourceInputFormat::OtlpLogsJson => Either::Left(parse_otlp_logs_json(&raw_doc)?),
+            SourceInputFormat::OtlpLogsProtobuf => {
+                Either::Left(parse_otlp_logs_protobuf(&raw_doc)?)
+            }
+            SourceInputFormat::OtlpTracesJson => Either::Right(parse_otlp_spans_json(&raw_doc)?),
+            SourceInputFormat::OtlpTracesProtobuf => {
+                Either::Right(parse_otlp_spans_protobuf(&raw_doc)?)
+            }
+        };
+        // Successful records count their share of the payload. Rejections count the raw payload.
+        for (record, len) in records {
+            match batch.push_serialize(&record, len) {
+                Ok(()) => otlp_payload_lens.push(raw_doc.len()),
+                Err(error) => self.record_error(error.into(), raw_doc.len()),
+            }
+        }
+        Ok(())
+    }
 
-        for json_doc_result in parse_raw_doc(self.input_format, raw_doc, num_bytes, transform_opt) {
-            let processed_doc_result =
-                json_doc_result.and_then(|json_doc| self.process_json_doc(json_doc));
+    fn record_error(&self, error: DocProcessorError, num_bytes: usize) {
+        rate_limited_warn!(
+            limit_per_min = 10,
+            index_id = self.counters.index_id,
+            source_id = self.counters.source_id,
+            "{error}",
+        );
+        self.counters.record_error(error, num_bytes as u64);
+    }
 
-            match processed_doc_result {
-                Ok(processed_doc) => {
-                    self.counters.record_valid(processed_doc.num_bytes as u64);
-                    processed_docs.push(processed_doc);
+    pub fn process_batch(
+        &mut self,
+        raw_docs: impl IntoIterator<Item = Bytes>,
+    ) -> Vec<ProcessedDoc> {
+        let mut batch = QuickwitDocBatch::default();
+        let mut otlp_payload_lens = Vec::new();
+        for raw_doc in raw_docs {
+            let len = raw_doc.len();
+            if let Err(error) = self.parse_into_batch(raw_doc, &mut batch, &mut otlp_payload_lens) {
+                self.record_error(error, len);
+            }
+        }
+        let mapped = batch.map(&self.doc_mapper, |_| ());
+        let mut processed_docs = Vec::with_capacity(mapped.len());
+        for (i, (num_bytes, result)) in mapped.enumerate() {
+            let result = result.and_then(|((), partition, doc)| {
+                let timestamp_opt = self.extract_timestamp(&doc)?;
+                Ok(ProcessedDoc {
+                    doc,
+                    timestamp_opt,
+                    partition,
+                    num_bytes,
+                })
+            });
+            match result {
+                Ok(doc) => {
+                    self.counters.record_valid(num_bytes as u64);
+                    processed_docs.push(doc);
                 }
                 Err(error) => {
-                    rate_limited_warn!(
-                        limit_per_min = 10,
-                        index_id = self.counters.index_id,
-                        source_id = self.counters.source_id,
-                        "{error}",
-                    );
-                    self.counters.record_error(error, num_bytes as u64);
+                    let len = if otlp_payload_lens.is_empty() {
+                        num_bytes
+                    } else {
+                        otlp_payload_lens[i]
+                    };
+                    self.record_error(error.into(), len);
                 }
             }
         }
-    }
-
-    fn process_json_doc(&self, json_doc: JsonDoc) -> Result<ProcessedDoc, DocProcessorError> {
-        let num_bytes = json_doc.num_bytes;
-        let (partition, doc) = self
-            .doc_mapper
-            .doc_from_json_obj(json_doc.json_obj, num_bytes as u64)?;
-        let timestamp_opt = self.extract_timestamp(&doc)?;
-        Ok(ProcessedDoc {
-            doc,
-            timestamp_opt,
-            partition,
-            num_bytes,
-        })
+        processed_docs
     }
 }
 
@@ -510,9 +365,6 @@ fn extract_timestamp_field(doc_mapper: &DocMapper) -> anyhow::Result<Option<Fiel
         .context("failed to find timestamp field in schema")?;
     Ok(Some(timestamp_field))
 }
-
-#[cfg(not(feature = "vrl"))]
-struct VrlProgram {}
 
 #[cfg(test)]
 mod tests {
@@ -546,22 +398,30 @@ mod tests {
         )
         .unwrap();
         let raw_doc = Bytes::from_static(br#"{"body":"happy","timestamp":1628837062}"#);
+        let second_raw_doc = Bytes::from_static(br#"{"body":"happy2","timestamp":1628837063}"#);
         let missing_timestamp = Bytes::from_static(br#"{"body":"happy"}"#);
         let invalid_json = Bytes::from_static(b"{");
-        let num_bytes = raw_doc.len() + missing_timestamp.len() + invalid_json.len();
-        let mut processed_docs = Vec::new();
-        converter.process_raw_doc(raw_doc.clone(), &mut processed_docs);
-        converter.process_raw_doc(missing_timestamp, &mut processed_docs);
-        converter.process_raw_doc(invalid_json, &mut processed_docs);
+        let num_bytes =
+            raw_doc.len() + second_raw_doc.len() + missing_timestamp.len() + invalid_json.len();
+        let processed_docs = converter.process_batch([
+            raw_doc.clone(),
+            second_raw_doc.clone(),
+            missing_timestamp,
+            invalid_json,
+        ]);
 
-        assert_eq!(processed_docs.len(), 1);
+        assert_eq!(processed_docs.len(), 2);
+        assert!(std::ptr::eq(
+            processed_docs[0].doc.dictionary(),
+            processed_docs[1].doc.dictionary()
+        ));
         assert_eq!(processed_docs[0].num_bytes, raw_doc.len());
         assert_eq!(
             processed_docs[0].timestamp_opt,
             Some(DateTime::from_timestamp_secs(1628837062))
         );
         let counters = converter.counters();
-        assert_eq!(counters.valid.get_num_docs(), 1);
+        assert_eq!(counters.valid.get_num_docs(), 2);
         assert_eq!(counters.doc_mapper_errors.get_num_docs(), 1);
         assert_eq!(counters.json_parse_errors.get_num_docs(), 1);
         assert_eq!(
@@ -598,8 +458,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        let mut processed = Vec::new();
-        logs_converter.process_raw_doc(Bytes::from(log_req.encode_to_vec()), &mut processed);
+        let processed = logs_converter.process_batch([Bytes::from(log_req.encode_to_vec())]);
         assert_eq!(processed.len(), 1);
 
         let traces_cfg =
@@ -630,9 +489,8 @@ mod tests {
                 ..Default::default()
             }],
         };
-        let mut processed_spans = Vec::new();
-        traces_converter
-            .process_raw_doc(Bytes::from(trace_req.encode_to_vec()), &mut processed_spans);
+        let processed_spans =
+            traces_converter.process_batch([Bytes::from(trace_req.encode_to_vec())]);
         assert_eq!(processed_spans.len(), 1);
     }
 
@@ -650,8 +508,7 @@ mod tests {
             SourceInputFormat::PlainText,
         )
         .unwrap();
-        let mut processed = Vec::new();
-        converter.process_raw_doc(Bytes::from_static(b"hello world"), &mut processed);
+        let processed = converter.process_batch([Bytes::from_static(b"hello world")]);
         assert_eq!(processed.len(), 1);
         let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
         let json: JsonValue = serde_json::to_value(named).unwrap();
@@ -670,11 +527,9 @@ mod tests {
             SourceInputFormat::Json,
         )
         .unwrap();
-        let mut processed = Vec::new();
-        converter.process_raw_doc(
-            Bytes::from_static(br#"{"body":"hello","timestamp":1628837062}"#),
-            &mut processed,
-        );
+        let processed = converter.process_batch([Bytes::from_static(
+            br#"{"body":"hello","timestamp":1628837062}"#,
+        )]);
         assert_eq!(processed.len(), 1);
         let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
         let json: JsonValue = serde_json::to_value(named).unwrap();

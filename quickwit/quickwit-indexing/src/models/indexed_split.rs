@@ -21,14 +21,14 @@ use quickwit_common::io::IoControls;
 use quickwit_common::metrics::index_label;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::{DocsClusteringConfig, IndexingSettings};
-use quickwit_doc_mapper::DocMapper;
+use quickwit_doc_mapper::{DocMapper, QuickwitDoc};
 use quickwit_metrics::{histogram, label_values};
 use quickwit_proto::indexing::IndexingPipelineId;
 use quickwit_proto::types::{DocMappingUid, SplitId};
 use quickwit_query::get_quickwit_fastfield_normalizer_manager;
 use tantivy::directory::{Advice, RamDirectory};
 use tantivy::store::{Compressor, ZstdCompressor};
-use tantivy::{ClusteringConfig, DateTime, IndexBuilder, IndexSettings};
+use tantivy::{ClusteringConfig, DateTime, IndexBuilder, IndexSettings, SingleSegmentIndexWriter};
 use tracing::instrument;
 
 use crate::controlled_directory::ControlledDirectory;
@@ -38,7 +38,7 @@ use crate::no_fsync_mmap_directory::open_split_scratch_directory;
 
 pub struct IndexedSplitBuilder {
     pub split_attrs: SplitAttrs,
-    pub index_writer: tantivy::SingleSegmentIndexWriter,
+    pub index_writer: SingleSegmentIndexWriter<QuickwitDoc>,
     pub split_scratch_directory: TempDirectory,
     pub controlled_directory: ControlledDirectory,
     ram_directory_opt: Option<RamDirectory>,
@@ -285,8 +285,8 @@ fn record_timestamp(timestamp: DateTime, time_range: &mut Option<RangeInclusive<
 
 #[cfg(test)]
 mod tests {
+    use quickwit_doc_mapper::{DocMapper, QuickwitDocBatch};
     use quickwit_proto::types::{IndexUid, NodeId};
-    use tantivy::schema::{STORED, Schema};
     use tantivy::{Directory, DocAddress, TantivyDocument, doc};
 
     use super::*;
@@ -322,13 +322,17 @@ mod tests {
 
     #[test]
     fn test_finalize_ram_split_uses_disk() -> anyhow::Result<()> {
-        let mut schema = Schema::builder();
-        let id = schema.add_u64_field("id", STORED);
+        let mapper: DocMapper = serde_json::from_str(
+            r#"{"field_mappings":[{"name":"id","type":"u64","stored":true}]}"#,
+        )?;
         let ram_directory = RamDirectory::default();
         let mut index_writer = IndexBuilder::new()
-            .schema(schema.build())
+            .schema(mapper.schema())
             .single_segment_index_writer(ram_directory.clone(), 15_000_000)?;
-        index_writer.add_document(doc!(id => 42u64))?;
+        let mut batch = QuickwitDocBatch::default();
+        batch.parse(br#"{"id":42}"#)?;
+        let ((), _, doc) = batch.map(&mapper, |_| ()).next().unwrap().1?;
+        index_writer.add_document(doc)?;
         let split_scratch_directory = TempDirectory::for_test();
         let controlled_directory = ControlledDirectory::new(
             open_split_scratch_directory(split_scratch_directory.path(), Advice::Normal)?,

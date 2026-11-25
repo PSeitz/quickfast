@@ -41,13 +41,20 @@ mod tests {
     use quickwit_common::io::IoControls;
     use quickwit_common::temp_dir::TempDirectory;
     use quickwit_config::{DocsClusteringConfig, IndexingSettings};
-    use quickwit_doc_mapper::DocMapper;
+    use quickwit_doc_mapper::{DocMapper, QuickwitDoc, QuickwitDocBatch};
     use quickwit_proto::indexing::IndexingPipelineId;
     use quickwit_proto::types::{IndexUid, NodeId};
     use tantivy::schema::Value;
-    use tantivy::{DocAddress, Document, TantivyDocument, doc};
+    use tantivy::{DocAddress, Document, TantivyDocument};
 
     use crate::models::{IndexedSplitBuilder, ProcessedDoc};
+
+    fn map_doc(mapper: &DocMapper, json: &serde_json::Value) -> anyhow::Result<(u64, QuickwitDoc)> {
+        let mut batch = QuickwitDocBatch::default();
+        batch.push_serialize(json, 0)?;
+        let ((), partition, doc) = batch.map(mapper, |_| ()).next().unwrap().1?;
+        Ok((partition, doc))
+    }
 
     fn mapper() -> DocMapper {
         serde_json::from_value(serde_json::json!({
@@ -103,9 +110,9 @@ mod tests {
     fn test_clustering_finalization_propagates_cancellation() -> anyhow::Result<()> {
         let mapper = mapper();
         let mut builder = builder(&mapper, &["body"])?;
-        let body = mapper.schema().get_field("body")?;
+        let (_, doc) = map_doc(&mapper, &serde_json::json!({"body": "hello"}))?;
         builder.add_document(ProcessedDoc {
-            doc: doc!(body => "hello"),
+            doc,
             timestamp_opt: None,
             partition: 0,
             num_bytes: 5,
@@ -131,8 +138,7 @@ mod tests {
         ];
         for document in documents {
             let num_bytes = document.to_string().len();
-            let (partition, doc) = mapper
-                .doc_from_json_obj(document.as_object().unwrap().clone(), num_bytes as u64)?;
+            let (partition, doc) = map_doc(&mapper, &document)?;
             builder.add_document(ProcessedDoc {
                 doc,
                 partition,

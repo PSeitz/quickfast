@@ -150,27 +150,24 @@ impl SplitBuilders {
     }
 
     pub fn add_documents(&mut self, documents: Vec<Bytes>) -> anyhow::Result<()> {
-        let mut processed = Vec::new();
-        for document in documents {
+        self.io_controls.check_if_alive()?;
+        for document in self.converter.process_batch(documents) {
             self.io_controls.check_if_alive()?;
-            self.converter.process_raw_doc(document, &mut processed);
-            for document in processed.drain(..) {
-                let partition = document.partition;
-                if let Some(split) = self.splits.get_mut(&partition) {
-                    split.add_document(document)?;
-                } else if self.splits.len() < self.mapper.max_num_partitions().get() as usize {
-                    let mut split = self.create_split(partition)?;
-                    split.add_document(document)?;
-                    self.splits.insert(partition, split);
-                } else {
-                    if self.overflow.is_none() {
-                        self.overflow = Some(self.create_split(OTHER_PARTITION_ID)?);
-                    }
-                    self.overflow
-                        .as_mut()
-                        .context("missing overflow split")?
-                        .add_document(document)?;
+            let partition = document.partition;
+            if let Some(split) = self.splits.get_mut(&partition) {
+                split.add_document(document)?;
+            } else if self.splits.len() < self.mapper.max_num_partitions().get() as usize {
+                let mut split = self.create_split(partition)?;
+                split.add_document(document)?;
+                self.splits.insert(partition, split);
+            } else {
+                if self.overflow.is_none() {
+                    self.overflow = Some(self.create_split(OTHER_PARTITION_ID)?);
                 }
+                self.overflow
+                    .as_mut()
+                    .context("missing overflow split")?
+                    .add_document(document)?;
             }
         }
         Ok(())

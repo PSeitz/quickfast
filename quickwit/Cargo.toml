@@ -86,6 +86,7 @@ glob = "0.3"
 # so they can't be bumped past google-cloud-pubsub 0.30 (which requires google-cloud-auth ^0.17).
 google-cloud-auth = { version = "0.17", default-features = false, features = ["rustls-tls"] }
 google-cloud-pubsub = { version = "0.30", default-features = false, features = ["auth", "rustls-tls"] }
+hashbrown = { version = "0.16", default-features = false }
 hex = "0.4"
 home = "0.5"
 hostname = "0.4"
@@ -195,6 +196,7 @@ sea-query-sqlx = { version = "0.8.1", features = [
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_json_borrow = "0.9"
+simd-json = { version = "0.19", default-features = false, features = ["swar-number-parsing", "runtime-detection", "big-int-as-float"] }
 serde_qs = { version = "1.1" }
 serde_with = "3.24"
 serde_yaml = "0.9"

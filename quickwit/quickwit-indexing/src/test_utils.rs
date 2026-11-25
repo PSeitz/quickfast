@@ -134,10 +134,11 @@ impl TestSandbox {
             None,
             SourceInputFormat::Json,
         )?;
-        let mut processed_docs = Vec::new();
-        for json_doc in json_docs {
-            converter.process_raw_doc(Bytes::from(json_doc.to_string()), &mut processed_docs);
-        }
+        let processed_docs = converter.process_batch(
+            json_docs
+                .into_iter()
+                .map(|doc| Bytes::from(doc.to_string())),
+        );
 
         let delete_opstamp = self
             .metastore

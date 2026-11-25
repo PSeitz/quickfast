@@ -480,17 +480,12 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
     };
     let scratch_root = tempfile::tempdir()?;
     let mut builders: HashMap<u64, IndexedSplitBuilder> = HashMap::new();
-    let mut processed_docs = Vec::new();
     loop {
         let batch = reader.read_batch(BATCH_NUM_BYTES_LIMIT).await?;
         if batch.is_empty() {
             break;
         }
-        processed_docs.clear();
-        for doc in batch {
-            converter.process_raw_doc(doc, &mut processed_docs);
-        }
-        for doc in processed_docs.drain(..) {
+        for doc in converter.process_batch(batch) {
             let partition_id = doc.partition;
             let builder = match builders.entry(partition_id) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
