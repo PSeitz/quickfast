@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::collections::VecDeque;
 use std::fmt::Display;
-use std::num::NonZeroUsize;
 use std::ops::Div;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -27,7 +27,6 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use numfmt::{Formatter, Scales};
-use quickwit_common::tower::{Rate, RateEstimator, SmaRateEstimator};
 use quickwit_common::uri::Uri;
 use quickwit_config::{ConfigFormat, IndexConfig};
 use quickwit_metastore::{IndexMetadata, Split, SplitState};
@@ -994,13 +993,47 @@ impl Tabled for Quantiles {
     }
 }
 
+struct ThroughputWindow {
+    window: Duration,
+    samples: VecDeque<(Instant, u64)>,
+    total_bytes: u64,
+}
+
+impl ThroughputWindow {
+    fn new(window: Duration) -> Self {
+        Self {
+            window,
+            samples: VecDeque::new(),
+            total_bytes: 0,
+        }
+    }
+
+    fn record(&mut self, now: Instant, num_bytes: u64) {
+        self.samples.push_back((now, num_bytes));
+        self.total_bytes += num_bytes;
+        self.evict_expired(now);
+    }
+
+    fn bytes_per_sec(&mut self, now: Instant) -> f64 {
+        self.evict_expired(now);
+        self.total_bytes as f64 / self.window.as_secs_f64()
+    }
+
+    fn evict_expired(&mut self, now: Instant) {
+        while let Some(&(ts, bytes)) = self.samples.front() {
+            if now.saturating_duration_since(ts) > self.window {
+                self.samples.pop_front();
+                self.total_bytes -= bytes;
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 pub async fn ingest_docs_cli(args: IngestDocsArgs) -> anyhow::Result<()> {
     debug!(args=?args, "ingest-docs");
-    let mut rate_estimator = SmaRateEstimator::new(
-        NonZeroUsize::new(8).unwrap(),
-        Duration::from_millis(250),
-        Duration::from_secs(1),
-    );
+    let mut throughput_window = ThroughputWindow::new(Duration::from_secs(2));
     if let Some(input_path) = &args.input_path_opt {
         println!("❯ Ingesting documents from {}.", input_path.display());
     } else {
@@ -1016,17 +1049,16 @@ pub async fn ingest_docs_cli(args: IngestDocsArgs) -> anyhow::Result<()> {
     progress_bar.enable_steady_tick(Duration::from_millis(100));
     progress_bar.set_style(progress_bar_style());
     progress_bar.set_message("0MiB/s");
-    // It is not used by the rate estimator anyway.
-    let useless_start_time = Instant::now();
     let mut update_progress_bar = |ingest_event: IngestEvent| {
+        let now = Instant::now();
         match ingest_event {
             IngestEvent::IngestedDocBatch(num_bytes) => {
-                rate_estimator.update(useless_start_time, Instant::now(), num_bytes as u64);
+                throughput_window.record(now, num_bytes as u64);
                 progress_bar.inc(num_bytes as u64)
             }
-            IngestEvent::Sleep => {} // To
+            IngestEvent::Sleep => {}
         };
-        let throughput = rate_estimator.work() as f64 / (1024 * 1024) as f64;
+        let throughput = throughput_window.bytes_per_sec(now) / (1024 * 1024) as f64;
         progress_bar.set_message(format!("{throughput:.1} MiB/s"));
     };
 
