@@ -105,9 +105,7 @@ impl IndexedSplitBuilder {
             docstore_compress_dedicated_thread: true,
             manual_doc_id_mapping: false,
         };
-        let doc_clusterer_opt = clustering_config
-            .map(|config| DocClusterer::new(&doc_mapper.schema(), config))
-            .transpose()?;
+        let doc_clusterer_opt = clustering_config.map(DocClusterer::new).transpose()?;
         let index_builder = IndexBuilder::new()
             .settings(index_settings)
             .schema(doc_mapper.schema())

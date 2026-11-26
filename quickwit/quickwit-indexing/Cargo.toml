@@ -88,6 +88,7 @@ proptest = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
+unicode-segmentation = { workspace = true }
 
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
