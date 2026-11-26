@@ -32,10 +32,10 @@ ulid = { workspace = true }
 zstd = { workspace = true }
 
 quickwit-cluster = { workspace = true }
-quickwit-common = { workspace = true, features = ["testsuite"] }
+quickwit-common = { workspace = true }
 quickwit-metrics = { workspace = true }
 quickwit-config = { workspace = true }
-quickwit-doc-mapper = { workspace = true, features = ["testsuite"] }
+quickwit-doc-mapper = { workspace = true }
 quickwit-metastore = { workspace = true }
 quickwit-proto = { workspace = true }
 quickwit-storage = { workspace = true }
@@ -50,6 +50,7 @@ tokio = { workspace = true, features = ["test-util"]}
 quickwit-cluster = { workspace = true, features = ["testsuite"] }
 quickwit-common = { workspace = true, features = ["testsuite"] }
 quickwit-config = { workspace = true, features = ["testsuite"] }
+quickwit-doc-mapper = { workspace = true, features = ["testsuite"] }
 quickwit-proto = { workspace = true, features = ["testsuite"] }
 quickwit-storage = { workspace = true, features = ["testsuite"] }
 
