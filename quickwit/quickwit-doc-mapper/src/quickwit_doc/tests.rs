@@ -393,3 +393,103 @@ fn stored_source_dynamic_concatenate_and_batch_dedup() -> anyhow::Result<()> {
     assert_error_parity(&strict_tb, r#"{"sequence":[null]}"#);
     Ok(())
 }
+
+#[test]
+fn mapped_iterators_report_exact_size() -> anyhow::Result<()> {
+    let mapper: DocMapper = serde_json::from_value(json!({
+        "mode": "dynamic",
+        "store_source": true,
+        "field_mappings": [
+            {
+                "name": "nested",
+                "type": "object",
+                "field_mappings": [
+                    {"name": "mapped", "type": "text"}
+                ]
+            }
+        ]
+    }))?;
+    let input = json!({
+        "nested": {
+            "mapped": "keep",
+            "extra_a": [1, 2, 3],
+            "extra_b": {"x": true, "y": []}
+        },
+        "top_dynamic": {"k1": "v1", "k2": "v2"}
+    })
+    .to_string();
+    let mut batch = QuickwitDocBatch::default();
+    batch.parse(input.as_bytes())?;
+    let (_, doc) = batch.map(&mapper).next().unwrap().1?;
+    let schema = mapper.schema();
+
+    let mut fields = doc.iter_fields_and_values();
+    let total_fields = fields.len();
+    assert_eq!(fields.size_hint(), (total_fields, Some(total_fields)));
+    let mut seen_fields = 0;
+    while let Some((field, value)) = fields.next() {
+        seen_fields += 1;
+        let rem = total_fields - seen_fields;
+        assert_eq!(fields.len(), rem);
+        assert_eq!(fields.size_hint(), (rem, Some(rem)));
+
+        let field_name = schema.get_field_name(field);
+        if field_name == DYNAMIC_FIELD_NAME {
+            let mut dyn_obj = value.as_object().unwrap();
+            assert_eq!(dyn_obj.len(), 2);
+            assert_eq!(dyn_obj.size_hint(), (2, Some(2)));
+            let mut seen = 0;
+            while let Some((key, child)) = dyn_obj.next() {
+                seen += 1;
+                assert_eq!(dyn_obj.len(), 2 - seen);
+                if key == "nested" {
+                    // PartialObject projection: only `extra_a` and `extra_b` remain dynamic.
+                    let mut partial = child.as_object().unwrap();
+                    assert_eq!(partial.len(), 2);
+                    assert_eq!(partial.size_hint(), (2, Some(2)));
+                    let mut p_seen = 0;
+                    while let Some((pkey, pval)) = partial.next() {
+                        p_seen += 1;
+                        assert_eq!(partial.len(), 2 - p_seen);
+                        if pkey == "extra_a" {
+                            let mut arr = pval.as_array().unwrap();
+                            assert_eq!(arr.len(), 3);
+                            assert_eq!(arr.size_hint(), (3, Some(3)));
+                            assert!(arr.next().is_some());
+                            assert_eq!(arr.len(), 2);
+                            assert_eq!(arr.count(), 2);
+                        } else if pkey == "extra_b" {
+                            let mut enc = pval.as_object().unwrap();
+                            assert_eq!(enc.len(), 2);
+                            assert_eq!(enc.size_hint(), (2, Some(2)));
+                            assert!(enc.next().is_some());
+                            assert_eq!(enc.len(), 1);
+                            assert_eq!(enc.count(), 1);
+                        }
+                    }
+                } else if key == "top_dynamic" {
+                    let enc = child.as_object().unwrap();
+                    assert_eq!(enc.len(), 2);
+                    assert_eq!(enc.count(), 2);
+                }
+            }
+        }
+    }
+    assert_eq!(seen_fields, total_fields);
+
+    // Round-trip through Tantivy's StoreWriter to exercise BinaryValueSerializer directly.
+    let index = tantivy::Index::create_in_ram(schema.clone());
+    let mut writer: tantivy::IndexWriter<QuickwitDoc> =
+        index.writer_with_num_threads(1, 15_000_000)?;
+    writer.add_document(doc)?;
+    writer.commit()?;
+    let reader = index.reader()?;
+    let searcher = reader.searcher();
+    let stored: tantivy::TantivyDocument = searcher.doc(tantivy::DocAddress::new(0, 0))?;
+    let (_, expected_doc) = mapper.doc_from_json_str(&input)?;
+    assert_eq!(
+        named_fields(&stored, &schema),
+        named_fields(&expected_doc, &schema)
+    );
+    Ok(())
+}

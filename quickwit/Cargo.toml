@@ -371,8 +371,8 @@ quickwit-storage = { path = "quickwit-storage" }
 quickwit-telemetry-exporters = { path = "quickwit-telemetry-exporters" }
 quickwit-transport = { path = "quickwit-transport" }
 
-# This is the tip of tantivy main.
-tantivy = { git = "https://github.com/quickwit-oss/tantivy/", rev = "dae3ca812cb5aaaa740d489d91c4cfd2b159974e", default-features = false, features = [
+# Tantivy branch requiring ExactSizeIterator on Value::ArrayIter / ObjectIter.
+tantivy = { git = "https://github.com/PSeitz/tantivy", rev = "66b9425f4f15153a684259a3a0c3f4045231978b", default-features = false, features = [
   "jitexpr",
   "lz4-compression",
   "mmap",
@@ -381,7 +381,7 @@ tantivy = { git = "https://github.com/quickwit-oss/tantivy/", rev = "dae3ca812cb
   "columnar-zstd-compression",
 ] }
 # Must stay on the same rev as `tantivy`.
-tantivy-common = { git = "https://github.com/quickwit-oss/tantivy/", rev = "dae3ca812cb5aaaa740d489d91c4cfd2b159974e" }
+tantivy-common = { git = "https://github.com/PSeitz/tantivy", rev = "66b9425f4f15153a684259a3a0c3f4045231978b" }
 tantivy-fst = "0.5"
 
 # This is actually not used directly the goal is to fix the version

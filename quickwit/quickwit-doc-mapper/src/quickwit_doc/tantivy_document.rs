@@ -114,8 +114,9 @@ impl<'a> Iterator for MappedFields<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let &(field, binding) = self.bindings.next()?;
         let view = match binding {
-            Binding::Original { offset, is_json } => View::Value {
-                value: decode_value(&self.nodes[offset as usize..], offset).0,
+            Binding::Original { offset, is_json } => View::Original {
+                nodes: self.nodes,
+                offset,
                 is_json,
             },
             Binding::Computed(leaf) => View::Value {
@@ -128,6 +129,18 @@ impl<'a> Iterator for MappedFields<'a> {
             },
         };
         Some((field, MappedValue::new(view, self.dictionary)))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.bindings.size_hint()
+    }
+}
+
+impl ExactSizeIterator for MappedFields<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.bindings.len()
     }
 }
 
@@ -167,6 +180,11 @@ impl<'a> MappedValue<'a> {
 
 #[derive(Clone, Copy, Debug)]
 enum View<'a> {
+    Original {
+        nodes: &'a [u8],
+        offset: u32,
+        is_json: bool,
+    },
     Value {
         value: QuickwitValue<'a>,
         is_json: bool,
@@ -183,34 +201,54 @@ impl<'a> Value<'a> for MappedValue<'a> {
 
     #[inline]
     fn as_value(&self) -> ReferenceValue<'a, Self> {
-        match self.view {
+        let (value, is_json) = match self.view {
             View::Dynamic { entries, nodes } => {
-                ReferenceValue::Object(MappedObject(MappedObjectInner::Dynamic {
+                return ReferenceValue::Object(MappedObject(MappedObjectInner::Dynamic {
                     entries,
                     nodes,
                     dictionary: self.dictionary,
-                }))
+                    remaining: count_dynamic_children(entries),
+                }));
             }
-            View::Value { value, is_json } => match value {
-                QuickwitValue::Leaf(leaf) => {
-                    let leaf = tantivy_leaf(leaf, self.dictionary);
-                    ReferenceValue::Leaf(if is_json { json_leaf(leaf) } else { leaf })
-                }
-                QuickwitValue::Array(array) => ReferenceValue::Array(MappedArray {
-                    array,
+            View::Original {
+                nodes,
+                offset,
+                is_json,
+            } => (decode_value(&nodes[offset as usize..], offset).0, is_json),
+            View::Value { value, is_json } => (value, is_json),
+        };
+        match value {
+            QuickwitValue::Leaf(leaf) => {
+                let leaf = tantivy_leaf(leaf, self.dictionary);
+                ReferenceValue::Leaf(if is_json { json_leaf(leaf) } else { leaf })
+            }
+            QuickwitValue::Array(array) => ReferenceValue::Array(MappedArray {
+                array,
+                dictionary: self.dictionary,
+                is_json,
+            }),
+            QuickwitValue::Object(object) => {
+                ReferenceValue::Object(MappedObject(MappedObjectInner::Encoded {
+                    object,
                     dictionary: self.dictionary,
                     is_json,
-                }),
-                QuickwitValue::Object(object) => {
-                    ReferenceValue::Object(MappedObject(MappedObjectInner::Encoded {
-                        object,
-                        dictionary: self.dictionary,
-                        is_json,
-                    }))
-                }
-            },
+                }))
+            }
         }
     }
+}
+
+#[inline]
+fn count_dynamic_children(mut entries: &[DynamicEntry]) -> usize {
+    let mut count = 0;
+    while let Some((&entry, rest)) = entries.split_first() {
+        count += 1;
+        entries = match entry {
+            DynamicEntry::Whole(_) => rest,
+            DynamicEntry::PartialObject { subtree_len, .. } => &rest[subtree_len as usize..],
+        };
+    }
+    count
 }
 
 #[inline]
@@ -275,6 +313,19 @@ impl<'a> Iterator for MappedArray<'a> {
             self.dictionary,
         ))
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.array.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for MappedArray<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.array.len()
+    }
 }
 
 /// Borrows all fields of a mapped object or the subset selected for `_dynamic`.
@@ -290,6 +341,7 @@ enum MappedObjectInner<'a> {
         entries: &'a [DynamicEntry],
         nodes: &'a [u8],
         dictionary: &'a ByteDictionary,
+        remaining: usize,
     },
 }
 
@@ -314,8 +366,10 @@ impl<'a> Iterator for MappedObject<'a> {
                 entries,
                 nodes,
                 dictionary,
+                remaining,
             } => {
                 let (&entry, rest) = entries.split_first()?;
+                *remaining -= 1;
                 match entry {
                     DynamicEntry::Whole(entry_offset) => {
                         *entries = rest;
@@ -332,8 +386,8 @@ impl<'a> Iterator for MappedObject<'a> {
                         key_id,
                         subtree_len,
                     } => {
-                        let (children, remaining) = rest.split_at(subtree_len as usize);
-                        *entries = remaining;
+                        let (children, rest_after_subtree) = rest.split_at(subtree_len as usize);
+                        *entries = rest_after_subtree;
                         Some((
                             dictionary.get_str(key_id),
                             MappedValue::new(
@@ -347,6 +401,22 @@ impl<'a> Iterator for MappedObject<'a> {
                     }
                 }
             }
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for MappedObject<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        match &self.0 {
+            MappedObjectInner::Encoded { object, .. } => object.len(),
+            MappedObjectInner::Dynamic { remaining, .. } => *remaining,
         }
     }
 }

@@ -324,6 +324,7 @@ impl<'a> QuickwitObject<'a> {
         let step = 4 + value_size;
         self.body = &self.body[step..];
         self.body_offset += step as u32;
+        self.len -= 1;
         Some((key_id, entry_offset, value_offset, value))
     }
 
@@ -387,6 +388,7 @@ impl<'a> QuickwitArray<'a> {
         let (value, value_size) = decode_value(self.body, value_offset);
         self.body = &self.body[value_size..];
         self.body_offset += value_size as u32;
+        self.len -= 1;
         Some((value_offset, value))
     }
 
