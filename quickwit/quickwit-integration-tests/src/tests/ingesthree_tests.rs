@@ -218,32 +218,8 @@ async fn test_ingesthree_guards_reject_before_writes() {
     let local = sandbox.node_configs[1].0.data_dir_path.join("ingesthree");
     let endpoint = format!("http://{}", sandbox.node_configs[1].0.grpc_listen_addr);
     let mut client = IngesthreeServiceClient::connect(endpoint).await.unwrap();
-    for version in [None, Some("v2"), Some("INGESTHREE")] {
-        let mut request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
-        if let Some(version) = version {
-            request
-                .metadata_mut()
-                .insert("ingest-version", version.parse().unwrap());
-        }
-        let status = client.ingest(request).await.unwrap_err();
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-        assert!(status.message().contains("ingest-version"));
-    }
-    let mut duplicate = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
-    for _ in 0..2 {
-        duplicate
-            .metadata_mut()
-            .append("ingest-version", "ingesthree".parse().unwrap());
-    }
-    assert_eq!(
-        client.ingest(duplicate).await.unwrap_err().code(),
-        tonic::Code::FailedPrecondition
-    );
     for commit in [CommitTypeV2::Force, CommitTypeV2::WaitFor] {
-        let mut request = tonic::Request::new(payload(index_id, commit));
-        request
-            .metadata_mut()
-            .insert("ingest-version", "ingesthree".parse().unwrap());
+        let request = tonic::Request::new(payload(index_id, commit));
         let status = client.ingest(request).await.unwrap_err();
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
         assert!(status.message().contains("Auto"));
@@ -275,10 +251,7 @@ async fn test_ingesthree_guards_reject_before_writes() {
     assert!(input_files(&upload_directory(&sandbox)).is_empty());
     sandbox.assert_hit_count(index_id, "*", 0).await;
 
-    let mut request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
-    request
-        .metadata_mut()
-        .insert("ingest-version", "ingesthree".parse().unwrap());
+    let request = tonic::Request::new(payload(index_id, CommitTypeV2::Auto));
     let response = client.ingest(request).await.unwrap().into_inner();
     assert!(response.failures.is_empty());
     assert_eq!(response.successes.len(), 1);

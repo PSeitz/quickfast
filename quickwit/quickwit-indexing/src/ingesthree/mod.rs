@@ -27,7 +27,7 @@ mod tests;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, ensure};
+use anyhow::Context;
 use quickwit_common::KillSwitch;
 use quickwit_common::io::{IoControls, Limiter};
 use quickwit_common::retry::Retryable;
@@ -100,10 +100,6 @@ impl S3Indexer {
         assignment: AssignFilesForIndexing,
         active_assignments: &Gauge,
     ) -> anyhow::Result<Option<FilePublication>> {
-        ensure!(
-            self.max_concurrent_split_uploads > 0,
-            "split upload limit must be positive"
-        );
         let files = self
             .metastore
             .assign_files_for_indexing(assignment)
@@ -118,12 +114,6 @@ impl S3Indexer {
             .index_uid
             .clone()
             .context("assigned file has no index UID")?;
-        ensure!(
-            files
-                .iter()
-                .all(|file| file.index_uid.as_ref() == Some(&index_uid)),
-            "assigned files span index incarnations"
-        );
         let config = self
             .metastore
             .index_metadata(IndexMetadataRequest {
@@ -181,10 +171,7 @@ impl S3Indexer {
                 .await
         });
         let ((), prepared) = tokio::join!(downloading, indexing);
-        let prepared = prepared?;
-        let mut splits = Vec::new();
-        self.upload_splits(prepared, &split_store, &mut splits)
-            .await?;
+        let mut splits = self.upload_splits(prepared?, &split_store).await?;
         let publication = PublishFileSplits {
             index_uid: Some(index_uid.clone()),
             file_ids: files.into_iter().map(|file| file.file_id).collect(),
@@ -216,8 +203,8 @@ impl S3Indexer {
         &mut self,
         prepared: Vec<PreparedSplit>,
         split_store: &IndexingSplitStore,
-        uploaded: &mut Vec<SplitMetadata>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<SplitMetadata>> {
+        let mut uploaded = Vec::with_capacity(prepared.len());
         for PreparedSplit {
             scratch_directory,
             metadata,
@@ -260,7 +247,7 @@ impl S3Indexer {
             }
             uploaded.push(metadata);
         }
-        Ok(())
+        Ok(uploaded)
     }
 }
 

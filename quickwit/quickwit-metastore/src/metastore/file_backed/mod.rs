@@ -21,7 +21,6 @@ mod file_backed_metastore_factory;
 mod index_id_matcher;
 mod lazy_file_backed_index;
 pub(crate) mod manifest;
-mod staged_files;
 mod state;
 mod store_operations;
 
@@ -272,6 +271,17 @@ impl FileBackedMetastore {
             cause: join_error.to_string(),
         })??;
         Ok(value)
+    }
+
+    async fn active_index_ids(&self) -> Vec<IndexId> {
+        self.state
+            .read()
+            .await
+            .indexes
+            .iter()
+            .filter(|(_, status)| matches!(status, LazyIndexStatus::Active(_)))
+            .map(|(index_id, _)| index_id.clone())
+            .collect()
     }
 
     async fn read<T, F>(&self, index_uid: &IndexUid, view: F) -> MetastoreResult<T>
@@ -664,7 +674,6 @@ impl MetastoreService for FileBackedMetastore {
         &self,
         request: RegisterFileForIndexing,
     ) -> MetastoreResult<RegisterFileForIndexingResponse> {
-        crate::metastore::staged_file::validate_registration(&request)?;
         let index_uid = request.index_uid().clone();
         let staged_file = self
             .mutate(&index_uid, |index| {
@@ -681,8 +690,45 @@ impl MetastoreService for FileBackedMetastore {
         &self,
         request: AssignFilesForIndexing,
     ) -> MetastoreResult<AssignFilesForIndexingResponse> {
-        crate::metastore::staged_file::validate_assignment(&request)?;
-        let staged_files = self.assign_files_for_indexing_inner(&request).await?;
+        // Freeze registration, publication, deletion and other claims across the global scan
+        // and persistence. Use the same clock/cutoff for selection and claiming.
+        let guard = self.mutation_lock.clone().write_owned().await;
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let retry_before = now - i64::from(request.retry_after_secs);
+        let mut oldest: Option<((i64, String), IndexUid)> = None;
+        for index_id in self.active_index_ids().await {
+            let candidate = self
+                .read_any(&index_id, None, |index| {
+                    Ok(index
+                        .ready_assignment_files(&request, now, retry_before)
+                        .first()
+                        .map(|file| {
+                            (
+                                (file.create_timestamp, file.file_id.clone()),
+                                index.index_uid().clone(),
+                            )
+                        }))
+                })
+                .await?;
+            if let Some(candidate) = candidate
+                && oldest
+                    .as_ref()
+                    .map(|oldest| candidate.0 < oldest.0)
+                    .unwrap_or(true)
+            {
+                oldest = Some(candidate);
+            }
+        }
+        let Some((_, index_uid)) = oldest else {
+            return Ok(AssignFilesForIndexingResponse::default());
+        };
+        let staged_files = self
+            .mutate_with_guard(
+                &index_uid,
+                |index| Ok(index.assign_files_for_indexing(&request, now, retry_before)),
+                guard,
+            )
+            .await?;
         Ok(AssignFilesForIndexingResponse { staged_files })
     }
 
@@ -691,7 +737,6 @@ impl MetastoreService for FileBackedMetastore {
         &self,
         request: ListCompletedFilesRequest,
     ) -> MetastoreResult<ListCompletedFilesResponse> {
-        crate::metastore::staged_file::validate_completed_files_request(&request)?;
         // Pin indexes against deletion. Concurrent completions may appear on a later scan.
         let _guard = self.mutation_lock.read().await;
         let mut staged_files = Vec::new();
@@ -716,7 +761,6 @@ impl MetastoreService for FileBackedMetastore {
         &self,
         request: PublishFileSplits,
     ) -> MetastoreResult<PublishFileSplitsResponse> {
-        crate::metastore::staged_file::validate_publication(&request)?;
         let index_uid = request.index_uid().clone();
         let published = self
             .mutate(&index_uid, |index| index.publish_file_splits(request))

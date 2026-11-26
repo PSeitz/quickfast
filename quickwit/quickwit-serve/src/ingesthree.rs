@@ -48,8 +48,8 @@ impl<E: Event> EventSubscriber<E> for MetadataChangePublisher {
 }
 
 /// Subscribe on every node: a primary metastore need not enable ingesthree itself.
-/// Keep these handles alive for the server lifetime. Missed events are repaired by
-/// intake reconciliation. Mutations do not wait for remote invalidation.
+/// Keep these handles alive for the server lifetime. Missed events expire after the
+/// intake metadata TTL. Mutations do not wait for remote invalidation.
 pub(crate) fn publish_metadata_changes(
     cluster: &Cluster,
     broker: &EventBroker,

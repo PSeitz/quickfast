@@ -16,20 +16,12 @@ use std::io::Cursor;
 
 use proptest::prelude::*;
 
-use super::compressed_batch::DecodedBatch;
-use super::documents_staged_for_upload::MAGIC_V1;
+use super::documents_staged_for_upload::{DecodedBatch, MAGIC_V1};
 use super::*;
 
 fn file_header(magic: &[u8; 8], index_uid: &IndexUid) -> Vec<u8> {
     let mut data = magic.to_vec();
-    write_record(&mut data, &encode_metadata(index_uid).unwrap()).unwrap();
-    data
-}
-
-fn payload(num_docs: u64, serialized: &[u8]) -> Vec<u8> {
-    let mut data = num_docs.to_le_bytes().to_vec();
-    data.extend_from_slice(&(serialized.len() as u64).to_le_bytes());
-    data.extend(zstd::bulk::compress(serialized, 1).unwrap());
+    write_record(&mut data, &encode_metadata(index_uid)).unwrap();
     data
 }
 
@@ -96,7 +88,7 @@ fn test_one_record_per_batch_preserves_opaque_empty_and_duplicate_documents() {
     let header_len = file_header(MAGIC, &index_uid).len();
     assert_eq!(
         input.num_bytes,
-        header_len as u64 + 2 * record_size(batch.data.len()).unwrap()
+        header_len as u64 + 2 * record_size(batch.data.len())
     );
     assert_eq!(input.num_docs, 8);
     let contents = fs::read(&input.path).unwrap();
@@ -116,48 +108,22 @@ fn test_one_record_per_batch_preserves_opaque_empty_and_duplicate_documents() {
 }
 
 #[test]
-fn test_malformed_complete_batches_are_fatal_even_with_valid_outer_checksums() {
+fn test_corrupt_complete_batches_are_fatal_even_with_valid_outer_checksums() {
     let valid = CompressedBatch::new([b"first".as_slice(), b"last".as_slice()])
         .unwrap()
         .data;
-    let mut cases = vec![
-        Vec::new(),
-        valid[..15].to_vec(),
-        payload(0, &[]),
-        payload(1, &[0, 0, 0]),                // Missing document length byte.
-        payload(1, &[5, 0, 0, 0, b'x']),       // Document exceeds decoded size.
-        payload(1, &[0, 0, 0, 0, 42]),         // Trailing decoded data.
-        payload(2, &[0, 0, 0, 0]),             // Missing document.
-        payload(1, &[0, 0, 0, 0, 0, 0, 0, 0]), // Extra document.
-    ];
+    let mut cases = vec![Vec::new(), valid[..15].to_vec()];
     let mut truncated_zstd = valid.clone();
     truncated_zstd.pop();
     cases.push(truncated_zstd);
     let mut bad_zstd = valid.clone();
     bad_zstd[16] ^= 1;
     cases.push(bad_zstd);
-    let mut trailing_compressed = valid.clone();
-    trailing_compressed.push(0);
-    cases.push(trailing_compressed);
-    let mut two_frames = valid.clone();
-    two_frames.extend_from_slice(&valid[16..]);
-    cases.push(two_frames);
-    for count in [0u64, 1, 3, u64::MAX] {
-        let mut wrong_count = valid.clone();
-        wrong_count[..8].copy_from_slice(&count.to_le_bytes());
-        cases.push(wrong_count);
-    }
-    for size in [0u64, 8, 1000, u64::MAX] {
+    for size in [0u64, 8, 1000] {
         let mut wrong_size = valid.clone();
         wrong_size[8..16].copy_from_slice(&size.to_le_bytes());
         cases.push(wrong_size);
     }
-    // A syntactically valid frame advertises a 2 GiB window for a 304-byte batch.
-    let mut huge_window = CompressedBatch::new([vec![0u8; 300]]).unwrap().data;
-    assert_eq!(huge_window[20], 0x60); // Single segment, two-byte content size.
-    huge_window[20] = 0x40;
-    huge_window.insert(21, 0xa8); // Window_Log = 10 + (0xa8 >> 3) = 31.
-    cases.push(huge_window);
 
     let index_uid = IndexUid::for_test("malformed-batch", 1);
     for (case, batch) in cases.into_iter().enumerate() {
@@ -188,18 +154,7 @@ fn test_malformed_complete_batches_are_fatal_even_with_valid_outer_checksums() {
 }
 
 #[test]
-fn test_decoder_window_limit_is_independent_of_batch_size() {
-    // Both headers claim 64 MiB, but the tiny frame must fail before allocating its window.
-    let decoded_len = 64 * 1024 * 1024u32;
-    let mut data = 1u64.to_le_bytes().to_vec();
-    data.extend_from_slice(&u64::from(decoded_len).to_le_bytes());
-    data.extend_from_slice(&[0x28, 0xb5, 0x2f, 0xfd, 0x80, 0x80]);
-    data.extend_from_slice(&decoded_len.to_le_bytes());
-    data.extend_from_slice(&[1, 0, 0]); // Final empty raw block.
-    let error = DecodedBatch::decode(&data).err().unwrap();
-    assert!(error.to_string().contains("too much memory"), "{error:#}");
-
-    // The window limit still permits batches larger than 8 MiB.
+fn test_large_batch_roundtrip() {
     let document = vec![42u8; 8 * 1024 * 1024 + 1];
     let batch = CompressedBatch::new([&document]).unwrap();
     let mut decoded = DecodedBatch::decode(&batch.data).unwrap();

@@ -175,7 +175,7 @@ Worker metrics use the `quickwit_indexing_ingesthree_` prefix:
 | `configured_supervisors` | Supervisors owned by the indexing service, including restart backoff. |
 | `live_supervisors` | Supervisor tasks from their first poll until destruction, including idle polling and backoff. |
 | `active_assignments` | Nonempty assigned groups from metadata lookup through publication, including blocking work still exiting after cancellation. |
-| `worker_failures_total{reason}` | Runs ending with `error`, `panic`, or `unexpected_exit`. |
+| `worker_failures_total{reason}` | Runs ending with `error` or `panic`. |
 | `worker_restarts_total` | Restarts begun after failure backoff completes. |
 
 Shutdown cancellation increments neither failure nor restart counters. Active
@@ -193,7 +193,7 @@ overflow, clustering across batches, and heap flushing. A held synchronous opera
 scratch ownership after cancellation. Reader tests reject wrong size/incarnation, damaged
 checksums, oversized frame lengths, and truncation without modifying input.
 
-Supervisor tests cover empty polling, idle/restart backoff, errors, panics, unexpected exits,
+Supervisor tests cover empty polling, idle/restart backoff, errors, panics,
 cancellation, and stop/drop behavior. Service tests use the file-backed metastore and RAM
 storage to exercise opt-in, rejection of local-merge mode, CPU-based worker count,
 publication without local merges, and idempotent shutdown. Both suites live in their implementation modules. Packager tests

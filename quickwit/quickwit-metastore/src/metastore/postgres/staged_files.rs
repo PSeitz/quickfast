@@ -25,8 +25,7 @@ use time::OffsetDateTime;
 use super::pool::TrackedPool;
 use crate::SplitState;
 use crate::metastore::staged_file::{
-    assignment_file_count, assignment_is_ready, publication_outcome, validate_assignment,
-    validate_completed_files_request, validate_publication, validate_registration,
+    assignment_file_count, assignment_is_ready, publication_outcome,
 };
 
 #[derive(sqlx::FromRow)]
@@ -63,7 +62,6 @@ pub(super) async fn register_file_for_indexing(
     pool: &TrackedPool<Postgres>,
     request: RegisterFileForIndexing,
 ) -> MetastoreResult<RegisterFileForIndexingResponse> {
-    validate_registration(&request)?;
     let index_uid = request.index_uid();
     let mut tx = pool.begin().await?;
 
@@ -110,7 +108,6 @@ pub(super) async fn assign_files_for_indexing(
     pool: &TrackedPool<Postgres>,
     request: AssignFilesForIndexing,
 ) -> MetastoreResult<AssignFilesForIndexingResponse> {
-    validate_assignment(&request)?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let retry_before = now - i64::from(request.retry_after_secs);
     let mut waiting_indexes: Vec<String> = Vec::new();
@@ -193,7 +190,6 @@ pub(super) async fn list_completed_files(
     pool: &TrackedPool<Postgres>,
     request: ListCompletedFilesRequest,
 ) -> MetastoreResult<ListCompletedFilesResponse> {
-    validate_completed_files_request(&request)?;
     let staged_files = sqlx::query_as::<_, PgStagedFile>(
         "SELECT * FROM staged_files
          WHERE completed_timestamp IS NOT NULL AND file_id > $1
@@ -213,7 +209,6 @@ pub(super) async fn publish_file_splits(
     pool: &TrackedPool<Postgres>,
     request: PublishFileSplits,
 ) -> MetastoreResult<PublishFileSplitsResponse> {
-    validate_publication(&request)?;
     let index_uid = request.index_uid();
     let mut tx = pool.begin().await?;
 

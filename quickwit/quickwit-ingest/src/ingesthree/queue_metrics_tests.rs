@@ -131,8 +131,8 @@ async fn test_admission_metrics_count_queue_storage_and_unavailable_rejections_o
     assert_eq!(usage(&queue), (queue_bytes, disk_bytes, 0));
     let writer = append_batch(writer, request).await.unwrap();
     first.await.unwrap();
-    assert!(writer.disk_bytes < disk_bytes);
-    assert_eq!(usage(&queue), (0, 0, writer.disk_bytes));
+    assert!(writer.ingester.disk_bytes < disk_bytes);
+    assert_eq!(usage(&queue), (0, 0, writer.ingester.disk_bytes));
     assert!(matches!(
         queue.append(index(), batch(), None).await,
         Err(IngestError::StorageFull)

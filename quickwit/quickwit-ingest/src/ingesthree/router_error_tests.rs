@@ -39,16 +39,15 @@ pub(super) fn index_response(
 }
 
 #[tokio::test]
-async fn test_ingesthree_terminal_errors_and_malformed_responses_are_not_retried() {
-    let healthy = destination("healthy", true, true, "zone-a", None, false).await;
+async fn test_ingesthree_terminal_errors_are_not_retried() {
+    let healthy = destination("healthy", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("terminal_errors");
-    for (error, malformed, expected) in [
-        (Some(Code::Internal), false, 500),
-        (Some(Code::DeadlineExceeded), false, 500),
-        (Some(Code::InvalidArgument), false, 400),
-        (None, true, 500),
+    for (error, expected) in [
+        (Some(Code::Internal), 500),
+        (Some(Code::DeadlineExceeded), 500),
+        (Some(Code::InvalidArgument), 400),
     ] {
-        let bad = destination("bad", true, true, "zone-a", error, malformed).await;
+        let bad = destination("bad", true, true, "zone-a", error).await;
         let response = route_subrequest(
             &subrequest(),
             vec![&bad.node, &healthy.node],
@@ -67,15 +66,15 @@ async fn test_ingesthree_terminal_errors_and_malformed_responses_are_not_retried
         metrics.record_response(&response);
     }
     assert_eq!(healthy.calls.load(Ordering::SeqCst), 0);
-    assert_eq!(metrics.attempt_count("az_unaware"), 4);
-    assert_eq!(metrics.result_count("internal"), 2);
+    assert_eq!(metrics.attempt_count("az_unaware"), 3);
+    assert_eq!(metrics.result_count("internal"), 1);
     assert_eq!(metrics.result_count("timeout"), 1);
     assert_eq!(metrics.result_count("bad_request"), 1);
 }
 
 #[tokio::test]
 async fn test_ingesthree_client_preserves_partial_results_and_backend_errors() {
-    let node = destination("intake", true, true, "zone-a", None, false).await;
+    let node = destination("intake", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("partial_results");
     let mut router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));
     router.metrics = metrics.clone();
@@ -136,7 +135,7 @@ async fn test_ingesthree_client_preserves_partial_results_and_backend_errors() {
 
 #[tokio::test]
 async fn test_ingesthree_client_rejects_request_errors_before_any_write() {
-    let node = destination("intake", true, true, "zone-a", None, false).await;
+    let node = destination("intake", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("request_errors");
     let mut router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));
     router.metrics = metrics.clone();

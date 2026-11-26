@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
 
-use anyhow::{Context, ensure};
+use anyhow::ensure;
 use bytes::Bytes;
 use quickwit_common::io::IoControls;
 use quickwit_common::metrics::{IN_FLIGHT_INDEX_WRITER, index_label};
@@ -30,7 +30,8 @@ use quickwit_ingest::ingesthree::DocumentFileReader;
 use quickwit_metastore::SplitMetadata;
 use quickwit_metrics::{Counter, Gauge, GaugeGuard, counter};
 use quickwit_proto::indexing::IndexingPipelineId;
-use quickwit_storage::{OwnedBytes, SplitPayload};
+use quickwit_storage::SplitPayload;
+use tantivy::directory::OwnedBytes;
 
 use super::downloads::DownloadedFile;
 use super::metrics::MEMORY_FLUSHES;
@@ -161,13 +162,11 @@ impl SplitBuilders {
                 split.add_document(document)?;
                 self.splits.insert(partition, split);
             } else {
-                if self.overflow.is_none() {
-                    self.overflow = Some(self.create_split(OTHER_PARTITION_ID)?);
-                }
-                self.overflow
-                    .as_mut()
-                    .context("missing overflow split")?
-                    .add_document(document)?;
+                let overflow = match &mut self.overflow {
+                    Some(split) => split,
+                    None => self.overflow.insert(self.create_split(OTHER_PARTITION_ID)?),
+                };
+                overflow.add_document(document)?;
             }
         }
         Ok(())
@@ -220,10 +219,10 @@ impl SplitBuilders {
             prepared.len() + splits.len() <= 1000,
             "assigned group exceeds the publication split limit"
         );
+        let tags = self.mapper.tag_named_fields()?;
         for split in splits {
             let io_controls = self.io_controls.clone().set_component("index_serializer");
             io_controls.check_if_alive()?;
-            let tags = self.tag_fields()?;
             split
                 .builder
                 .controlled_directory
@@ -254,10 +253,6 @@ impl SplitBuilders {
             .map(|(_, split)| split)
             .chain(self.overflow.take())
             .collect()
-    }
-
-    pub fn tag_fields(&self) -> anyhow::Result<Vec<quickwit_doc_mapper::NamedField>> {
-        self.mapper.tag_named_fields()
     }
 }
 

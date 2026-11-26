@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use quickwit_proto::metastore::{
-    AssignFilesForIndexing, DocumentsStagedForUpload, MetastoreError, MetastoreService,
+    AssignFilesForIndexing, DocumentsStagedForUpload, MetastoreService,
 };
 use time::OffsetDateTime;
 
@@ -260,55 +260,7 @@ pub async fn test_assign_files_concurrent<M: MetastoreService + DefaultForTest>(
     delete_index(&mut metastore, index_uid).await;
 }
 
-pub async fn test_assign_files_invalid_request<M: MetastoreService + DefaultForTest>() {
-    let mut metastore = M::default_for_test().await;
-    let index_uid = create_index(&mut metastore).await;
-    let files = register_files(&metastore, &index_uid, &[100]).await;
-    for invalid in [
-        AssignFilesForIndexing {
-            max_num_files: 0,
-            ..assignment_request()
-        },
-        AssignFilesForIndexing {
-            max_num_files: 1001,
-            ..assignment_request()
-        },
-        AssignFilesForIndexing {
-            max_num_bytes: 0,
-            ..assignment_request()
-        },
-        AssignFilesForIndexing {
-            max_num_bytes: i64::MAX as u64 + 1,
-            ..assignment_request()
-        },
-        AssignFilesForIndexing {
-            retry_after_secs: 0,
-            ..assignment_request()
-        },
-    ] {
-        assert!(matches!(
-            metastore
-                .assign_files_for_indexing(invalid)
-                .await
-                .unwrap_err(),
-            MetastoreError::InvalidArgument { .. }
-        ));
-        assert_eq!(read_file(&metastore, &files[0]).await, files[0]);
-    }
-    assert_eq!(
-        metastore
-            .assign_files_for_indexing(assignment_request())
-            .await
-            .unwrap()
-            .staged_files
-            .len(),
-        1
-    );
-    delete_index(&mut metastore, index_uid).await;
-}
-
 #[tokio::test]
 async fn test_assign_files_grpc() {
     test_assign_files_concurrent::<GrpcMetastore>().await;
-    test_assign_files_invalid_request::<GrpcMetastore>().await;
 }

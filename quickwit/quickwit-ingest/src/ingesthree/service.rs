@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use quickwit_cluster::Cluster;
+use quickwit_cluster::{Cluster, ListenerHandle};
 use quickwit_common::tower::GrpcMetricsLayer;
 use quickwit_config::INGEST_V2_SOURCE_ID;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_server::{
@@ -28,12 +28,9 @@ use quickwit_proto::ingest::{
 use quickwit_proto::metastore::MetastoreServiceClient;
 use tonic::{Request, Response, Status};
 
-use super::metadata_cache::{MetadataCache, MetadataWatch, ResolveError};
+use super::metadata_cache::{MetadataCache, ResolveError};
 use super::{IngestError, WriteQueue};
 use crate::IngestServiceError;
-
-pub(super) const VERSION_HEADER: &str = "ingest-version";
-pub(super) const VERSION: &str = "ingesthree";
 
 /// Caches each index incarnation, its source checks, and its document mapper.
 /// Document validation follows the index's ingest settings.
@@ -44,7 +41,7 @@ pub struct IngesthreeService {
     queue: WriteQueue,
     grpc_metrics: GrpcMetricsLayer,
     metadata_cache: MetadataCache,
-    _metadata_watch: Option<Arc<MetadataWatch>>,
+    _metadata_listener: Option<Arc<ListenerHandle>>,
 }
 
 impl IngesthreeService {
@@ -54,22 +51,17 @@ impl IngesthreeService {
             queue,
             grpc_metrics: GrpcMetricsLayer::new("ingesthree", "server"),
             metadata_cache: MetadataCache::default(),
-            _metadata_watch: None,
+            _metadata_listener: None,
         }
     }
 
-    /// Install lifecycle notifications and reconciliation before exposing production intake.
+    /// Install lifecycle notifications before exposing production intake.
     pub async fn with_metadata_updates(mut self, cluster: &Cluster) -> Self {
-        self._metadata_watch = Some(Arc::new(
-            self.metadata_cache
-                .watch(cluster, self.metastore.clone())
-                .await,
-        ));
+        self._metadata_listener = Some(Arc::new(self.metadata_cache.watch(cluster).await));
         self
     }
 
-    /// Mount separately from the public router and v2 ingester services. The metadata
-    /// guard lives in the handler, so every mounting path enforces the same contract.
+    /// Mount separately from the public router and v2 ingester services.
     pub fn into_grpc_server(self) -> IngesthreeServiceServer<Self> {
         IngesthreeServiceServer::new(self)
     }
@@ -124,15 +116,6 @@ impl IngesthreeService {
         &self,
         request: Request<IngestRequestV2>,
     ) -> Result<Response<IngestResponseV2>, Status> {
-        // Check before consuming the payload, resolving indexes, or admitting writes.
-        let mut versions = request.metadata().get_all(VERSION_HEADER).iter();
-        if versions.next().map(|value| value.as_bytes()) != Some(VERSION.as_bytes())
-            || versions.next().is_some()
-        {
-            return Err(Status::failed_precondition(
-                "required metadata: ingest-version: ingesthree",
-            ));
-        }
         let request = request.into_inner();
         validate_request(&request).map_err(|error| Status::invalid_argument(error.to_string()))?;
         // The router splits a public request into individual index batches. A status
@@ -231,14 +214,6 @@ mod tests {
         }
     }
 
-    fn request(payload: IngestRequestV2) -> Request<IngestRequestV2> {
-        let mut request = Request::new(payload);
-        request
-            .metadata_mut()
-            .insert(VERSION_HEADER, VERSION.parse().unwrap());
-        request
-    }
-
     fn metadata() -> IndexMetadata {
         let mut config = IndexConfig::for_test("logs", "ram:///logs");
         config.doc_mapping.timestamp_field = None;
@@ -295,7 +270,7 @@ mod tests {
             .intercept_index_metadata(|_inner, _request| std::future::pending());
         let mut service = IngesthreeService::new(metastore, queue.clone());
         let (requests, in_flight) = service_metrics(&mut service, "service_cancellation");
-        let mut response = Box::pin(service.ingest(request(payload())));
+        let mut response = Box::pin(service.ingest(Request::new(payload())));
         assert!(futures::poll!(&mut response).is_pending());
         assert_eq!(in_flight.get(), 1.0);
         drop(response);
@@ -304,44 +279,6 @@ mod tests {
             counter!(parent: requests, "status" => "cancelled", "code" => "cancelled").get(),
             1
         );
-        assert!(queue.finish().await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_ingesthree_metadata_guard_precedes_lookup_and_writes() {
-        let directory = tempfile::tempdir().unwrap();
-        let queue = WriteQueue::open(directory.path().into(), 100_000, 100_000, None)
-            .await
-            .unwrap();
-        // Any unexpected metastore lookup fails this mock.
-        let mut service = IngesthreeService::new(
-            MetastoreServiceClient::from_mock(MockMetastoreService::new()),
-            queue.clone(),
-        );
-        let (requests, in_flight) = service_metrics(&mut service, "metadata_guard");
-        for version in [None, Some("v2"), Some("INGESTHREE"), Some("ingesthree ")] {
-            let mut request = Request::new(payload());
-            if let Some(version) = version {
-                request
-                    .metadata_mut()
-                    .insert(VERSION_HEADER, version.parse().unwrap());
-            }
-            let status = service.ingest(request).await.unwrap_err();
-            assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-        }
-        let mut duplicate = request(payload());
-        duplicate
-            .metadata_mut()
-            .append(VERSION_HEADER, VERSION.parse().unwrap());
-        assert_eq!(
-            service.ingest(duplicate).await.unwrap_err().code(),
-            tonic::Code::FailedPrecondition
-        );
-        assert_eq!(
-            counter!(parent: requests, "status" => "error", "code" => "failed_precondition").get(),
-            5
-        );
-        assert_eq!(in_flight.get(), 0.0);
         assert!(queue.finish().await.unwrap().is_empty());
     }
 
@@ -364,7 +301,11 @@ mod tests {
             let mut payload = payload();
             payload.commit_type = commit_type;
             assert_eq!(
-                service.ingest(request(payload)).await.unwrap_err().code(),
+                service
+                    .ingest(Request::new(payload))
+                    .await
+                    .unwrap_err()
+                    .code(),
                 tonic::Code::InvalidArgument
             );
         }
@@ -375,7 +316,11 @@ mod tests {
             .unwrap()
             .doc_lengths[0] = 999;
         assert_eq!(
-            service.ingest(request(malformed)).await.unwrap_err().code(),
+            service
+                .ingest(Request::new(malformed))
+                .await
+                .unwrap_err()
+                .code(),
             tonic::Code::InvalidArgument
         );
         let mut multiple = payload();
@@ -383,7 +328,11 @@ mod tests {
         second.subrequest_id += 1;
         multiple.subrequests.push(second);
         assert_eq!(
-            service.ingest(request(multiple)).await.unwrap_err().code(),
+            service
+                .ingest(Request::new(multiple))
+                .await
+                .unwrap_err()
+                .code(),
             tonic::Code::InvalidArgument
         );
         assert!(queue.finish().await.unwrap().is_empty());
@@ -414,7 +363,11 @@ mod tests {
             );
             let mut payload = payload();
             payload.subrequests[0].doc_batch = Some(DocBatchV2::for_test(documents));
-            let response = service.ingest(request(payload)).await.unwrap().into_inner();
+            let response = service
+                .ingest(Request::new(payload))
+                .await
+                .unwrap()
+                .into_inner();
             assert!(response.failures.is_empty());
             assert_eq!(response.successes.len(), 1);
             let success = &response.successes[0];
@@ -452,7 +405,7 @@ mod tests {
         let mut wrong_source = payload();
         wrong_source.subrequests[0].source_id = "other".into();
         let response = service
-            .ingest(request(wrong_source))
+            .ingest(Request::new(wrong_source))
             .await
             .unwrap()
             .into_inner();
@@ -469,7 +422,7 @@ mod tests {
             .enabled = false;
         let service = IngesthreeService::new(metastore(disabled, 1), queue.clone());
         let response = service
-            .ingest(request(payload()))
+            .ingest(Request::new(payload()))
             .await
             .unwrap()
             .into_inner();
@@ -487,7 +440,7 @@ mod tests {
         let service =
             IngesthreeService::new(MetastoreServiceClient::from_mock(missing), queue.clone());
         let response = service
-            .ingest(request(payload()))
+            .ingest(Request::new(payload()))
             .await
             .unwrap()
             .into_inner();
@@ -504,7 +457,11 @@ mod tests {
             .input_format = SourceInputFormat::PlainText;
         let service = IngesthreeService::new(metastore(non_json, 1), queue.clone());
         assert_eq!(
-            service.ingest(request(payload())).await.unwrap_err().code(),
+            service
+                .ingest(Request::new(payload()))
+                .await
+                .unwrap_err()
+                .code(),
             tonic::Code::InvalidArgument
         );
         assert!(queue.finish().await.unwrap().is_empty());
@@ -519,12 +476,20 @@ mod tests {
                 .unwrap();
             let service = IngesthreeService::new(metastore(metadata(), 1), queue.clone());
             assert_eq!(
-                service.ingest(request(payload())).await.unwrap_err().code(),
+                service
+                    .ingest(Request::new(payload()))
+                    .await
+                    .unwrap_err()
+                    .code(),
                 tonic::Code::ResourceExhausted
             );
             assert!(queue.finish().await.unwrap().is_empty());
             assert_eq!(
-                service.ingest(request(payload())).await.unwrap_err().code(),
+                service
+                    .ingest(Request::new(payload()))
+                    .await
+                    .unwrap_err()
+                    .code(),
                 tonic::Code::Unavailable
             );
         }

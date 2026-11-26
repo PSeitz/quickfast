@@ -98,18 +98,22 @@ impl FileBackedIndex {
         now: i64,
         retry_before: i64,
     ) -> MutationOccurred<Vec<DocumentsStagedForUpload>> {
-        let mut files: Vec<_> = self
+        let file_ids: Vec<String> = self
             .ready_assignment_files(request, now, retry_before)
             .into_iter()
-            .cloned()
+            .map(|file| file.file_id.clone())
             .collect();
-        if files.is_empty() {
-            return MutationOccurred::No(files);
+        if file_ids.is_empty() {
+            return MutationOccurred::No(Vec::new());
         }
-        for file in &mut files {
-            file.processing_started_timestamp = Some(now);
-            self.staged_files.insert(file.file_id.clone(), file.clone());
-        }
+        let files = file_ids
+            .iter()
+            .map(|file_id| {
+                let file = self.staged_files.get_mut(file_id).unwrap();
+                file.processing_started_timestamp = Some(now);
+                file.clone()
+            })
+            .collect();
         MutationOccurred::Yes(files)
     }
 
@@ -129,7 +133,7 @@ impl FileBackedIndex {
                     message: format!("staged file `{file_id}` does not exist"),
                 }
             })?;
-            files.push(file.clone());
+            files.push(file);
         }
         // Retained completion rows recognize retries even after output splits are deleted.
         if let Some(published) = publication_outcome(&files, &request.publication_id) {
@@ -137,10 +141,10 @@ impl FileBackedIndex {
         }
         self.mark_splits_as_published_helper(request.staged_split_ids)?;
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        for mut file in files {
+        for file_id in &request.file_ids {
+            let file = self.staged_files.get_mut(file_id).unwrap();
             file.completed_timestamp = Some(now);
             file.publication_id = Some(request.publication_id.clone());
-            self.staged_files.insert(file.file_id.clone(), file);
         }
         Ok(MutationOccurred::Yes(true))
     }

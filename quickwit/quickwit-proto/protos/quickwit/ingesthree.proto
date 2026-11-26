@@ -20,10 +20,9 @@ import "quickwit/common.proto";
 
 // Internal file intake service.
 service IngesthreeService {
-  // Requires exactly one `ingest-version: ingesthree` metadata value. The server
-  // checks it before index lookup or queue admission. Exactly one subrequest,
-  // Auto commits, and the INGEST_V2_SOURCE_ID source are supported. Success means
-  // a local kernel write with no fsync, replication or search-visibility guarantee.
+  // Exactly one subrequest, Auto commits, and the INGEST_V2_SOURCE_ID source are
+  // supported. Success means a local kernel write with no fsync, replication or
+  // search-visibility guarantee. Shard and position fields in successes are absent.
   // Capacity failures return RESOURCE_EXHAUSTED, which public routers map to LOAD_SHEDDING.
   // Retrying after an unavailable response is at-least-once and may duplicate data.
   rpc Ingest(IngestRequestV2) returns (IngestResponseV2);

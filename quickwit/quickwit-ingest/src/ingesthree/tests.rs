@@ -244,7 +244,7 @@ fn test_recovery_distinguishes_incomplete_metadata_from_missing_documents() {
     let file_id = Ulid::generate();
     let index_uid = IndexUid::for_test("logs", 1);
     let mut bytes = MAGIC.to_vec();
-    write_record(&mut bytes, &encode_metadata(&index_uid).unwrap()).unwrap();
+    write_record(&mut bytes, &encode_metadata(&index_uid)).unwrap();
     let header_len = bytes.len();
     let batch = CompressedBatch::new([b"first document"]).unwrap();
     write_record(&mut bytes, &batch.data).unwrap();
@@ -355,7 +355,7 @@ fn test_budget_includes_framing_and_recovered_files() {
     ingester.append(&index, documents()).unwrap();
     let used = ingester.disk_bytes;
     let batch = CompressedBatch::new([b"x"]).unwrap();
-    let extra = record_size(batch.data.len()).unwrap();
+    let extra = record_size(batch.data.len());
     ingester.max_disk_bytes = used + extra - 1;
     assert!(
         ingester
@@ -387,9 +387,7 @@ fn test_rejections_create_no_input_files() {
         fs::read_dir(dir.path().join("ingesthree")).unwrap().count(),
         1
     ); // LOCK only
-    let invalid_index = IndexUid::for_test(&"x".repeat(20_000), 1);
     ingester.max_disk_bytes = DISK_BUDGET;
-    assert!(ingester.append(&invalid_index, documents()).is_err());
     // Rejections do not poison subsequent valid writes.
     ingester.append(&index, documents()).unwrap();
 }

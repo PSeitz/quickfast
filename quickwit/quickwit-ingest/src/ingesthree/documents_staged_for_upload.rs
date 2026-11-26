@@ -16,12 +16,10 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::ensure;
-use bytes::Bytes;
+use anyhow::{Context, ensure};
+use bytes::{Buf, Bytes};
 use quickwit_proto::types::IndexUid;
 use ulid::Ulid;
-
-use super::compressed_batch::DecodedBatch;
 
 /// Documents staged for upload in a local file belonging to one index.
 #[derive(Clone, Debug)]
@@ -42,30 +40,109 @@ pub struct DocumentsStagedForUpload {
 pub(super) const MAGIC: &[u8; 8] = b"QWINPUT\x02";
 pub(super) const MAGIC_V1: &[u8; 8] = b"QWINPUT\x01";
 pub(super) const FRAME_OVERHEAD: u64 = 12;
+const BATCH_HEADER_LEN: usize = 16;
 const MAX_METADATA_BYTES: usize = 16 * 1024;
 
-pub(super) fn encode_metadata(index_uid: &IndexUid) -> anyhow::Result<Vec<u8>> {
-    let payload = index_uid.to_string().into_bytes();
-    ensure!(
-        payload.len() <= MAX_METADATA_BYTES,
-        "input metadata too large"
-    );
-    Ok(payload)
+/// One request's documents, serialized as repeated u32 LE lengths and opaque bytes,
+/// compressed together at level 1. The outer record payload starts with a u64 LE
+/// document count and u64 LE uncompressed length, followed by one zstd frame.
+/// The outer record checksum covers this entire payload.
+pub(crate) struct CompressedBatch {
+    pub(super) num_docs: u64,
+    pub(super) data: Vec<u8>,
 }
 
-pub(super) fn record_size(len: usize) -> io::Result<u64> {
-    let len = u32::try_from(len).map_err(|_| {
+impl CompressedBatch {
+    pub(super) fn new(documents: impl IntoIterator<Item: AsRef<[u8]>>) -> anyhow::Result<Self> {
+        let mut serialized = Vec::new();
+        let mut num_docs = 0u64;
+        for document in documents {
+            let document = document.as_ref();
+            let len = u32::try_from(document.len()).context("document exceeds u32 length")?;
+            serialized.extend_from_slice(&len.to_le_bytes());
+            serialized.extend_from_slice(document);
+            num_docs += 1;
+        }
+        ensure!(num_docs > 0, "empty document batch");
+        ensure!(serialized.len() <= u32::MAX as usize, "batch size overflow");
+        let max_len = BATCH_HEADER_LEN + zstd::zstd_safe::compress_bound(serialized.len());
+        ensure!(max_len <= u32::MAX as usize, "batch size overflow");
+        let mut data = vec![0u8; max_len];
+        data[..8].copy_from_slice(&num_docs.to_le_bytes());
+        data[8..16].copy_from_slice(&(serialized.len() as u64).to_le_bytes());
+        let compressed_len = zstd::bulk::Compressor::new(1)?
+            .compress_to_buffer(&serialized, &mut data[BATCH_HEADER_LEN..])?;
+        data.truncate(BATCH_HEADER_LEN + compressed_len);
+        Ok(Self { num_docs, data })
+    }
+
+    /// Conservative payload bound, including metadata and incompressible zstd
+    /// overhead. The caller separately reserves the outer frame and file header.
+    pub(super) fn max_encoded_len(document_bytes: usize, num_docs: usize) -> anyhow::Result<usize> {
+        ensure!(num_docs > 0, "empty document batch");
+        let serialized_len = num_docs
+            .checked_mul(4)
+            .and_then(|lengths| document_bytes.checked_add(lengths))
+            .context("batch size overflow")?;
+        ensure!(serialized_len <= u32::MAX as usize, "batch size overflow");
+        let max_len = zstd::zstd_safe::compress_bound(serialized_len) + BATCH_HEADER_LEN;
+        ensure!(max_len <= u32::MAX as usize, "batch size overflow");
+        Ok(max_len)
+    }
+}
+
+/// Holds one decoded batch. Documents are slices of the decoded allocation.
+#[derive(Default)]
+pub(super) struct DecodedBatch {
+    data: Bytes,
+    pub(super) num_docs: u64,
+}
+
+impl DecodedBatch {
+    pub(super) fn decode(payload: &[u8]) -> anyhow::Result<Self> {
+        let (header, compressed) = payload
+            .split_at_checked(BATCH_HEADER_LEN)
+            .context("incomplete batch header")?;
+        let num_docs = u64::from_le_bytes(header[..8].try_into().unwrap());
+        let decoded_len = u64::from_le_bytes(header[8..16].try_into().unwrap()) as usize;
+        let data = zstd::bulk::decompress(compressed, decoded_len)
+            .context("failed to decompress batch")?;
+        ensure!(
+            data.len() == decoded_len,
+            "batch decompressed size mismatch"
+        );
+        Ok(Self {
+            data: Bytes::from(data),
+            num_docs,
+        })
+    }
+
+    pub(super) fn next_document(&mut self) -> Option<Bytes> {
+        if self.num_docs == 0 {
+            return None;
+        }
+        let len = self.data.get_u32_le() as usize;
+        self.num_docs -= 1;
+        Some(self.data.split_to(len))
+    }
+}
+
+pub(super) fn encode_metadata(index_uid: &IndexUid) -> Vec<u8> {
+    index_uid.to_string().into_bytes()
+}
+
+pub(super) fn record_size(len: usize) -> u64 {
+    len as u64 + FRAME_OVERHEAD
+}
+
+pub(super) fn write_record(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
+    let len = u32::try_from(payload.len()).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "input record exceeds u32 length",
         )
     })?;
-    Ok(u64::from(len) + FRAME_OVERHEAD)
-}
-
-pub(super) fn write_record(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
-    record_size(payload.len())?;
-    let len_bytes = (payload.len() as u32).to_le_bytes();
+    let len_bytes = len.to_le_bytes();
     writer.write_all(&len_bytes)?;
     writer.write_all(&crc32fast::hash(&len_bytes).to_le_bytes())?;
     writer.write_all(payload)?;
@@ -120,11 +197,7 @@ fn read_record(reader: &mut impl Read, remaining_bytes: u64) -> io::Result<Vec<u
             "input record exceeds file size",
         ));
     }
-    let mut payload = Vec::new();
-    payload
-        .try_reserve_exact(len as usize)
-        .map_err(io::Error::other)?;
-    payload.resize(len as usize, 0);
+    let mut payload = vec![0u8; len as usize];
     reader.read_exact(&mut payload)?;
     check_payload_crc(reader, crc32fast::hash(&payload))?;
     Ok(payload)
@@ -155,9 +228,7 @@ impl<R: Read + Seek> DocumentFileReader<R> {
         reader.rewind()?;
         let (stored_index_uid, compressed) = read_metadata(&mut reader)?;
         ensure!(stored_index_uid == *index_uid, "input index UID mismatch");
-        let remaining_bytes = num_bytes
-            .checked_sub(reader.stream_position()?)
-            .ok_or_else(|| invalid_data("input metadata exceeds file size"))?;
+        let remaining_bytes = num_bytes - reader.stream_position()?;
         Ok(Self {
             reader,
             remaining_bytes,
@@ -176,7 +247,7 @@ impl<R: Read + Seek> DocumentFileReader<R> {
             return Ok(None);
         }
         let payload = read_record(&mut self.reader, self.remaining_bytes)?;
-        self.remaining_bytes -= record_size(payload.len())?;
+        self.remaining_bytes -= record_size(payload.len());
         if self.compressed {
             self.batch = DecodedBatch::decode(&payload)?;
             Ok(self.batch.next_document())
@@ -223,7 +294,7 @@ pub(super) fn recover(
                 let batch = DecodedBatch::decode(&payload).map_err(|error| {
                     invalid_data(&format!("invalid compressed batch: {error:#}"))
                 })?;
-                Ok((record_size(payload.len())?, batch.num_docs))
+                Ok((record_size(payload.len()), batch.num_docs))
             })
         } else {
             scan_record(&mut reader).map(|num_bytes| (num_bytes, 1))
@@ -257,7 +328,7 @@ mod tests {
     fn test_document_reader_from_memory() {
         let index_uid = IndexUid::for_test("memory-reader", 1);
         let mut contents = MAGIC_V1.to_vec();
-        write_record(&mut contents, &encode_metadata(&index_uid).unwrap()).unwrap();
+        write_record(&mut contents, &encode_metadata(&index_uid)).unwrap();
         write_record(&mut contents, b"document").unwrap();
         let num_bytes = contents.len() as u64;
         let open = |data: Vec<u8>, uid: &IndexUid, size| {
@@ -288,7 +359,7 @@ mod tests {
     fn test_document_reader_checks_frames_and_identity() {
         let index_uid = IndexUid::for_test("reader", 1);
         let mut contents = MAGIC_V1.to_vec();
-        write_record(&mut contents, &encode_metadata(&index_uid).unwrap()).unwrap();
+        write_record(&mut contents, &encode_metadata(&index_uid)).unwrap();
         let document_offset = contents.len();
         write_record(&mut contents, b"first\0document\n").unwrap();
         write_record(&mut contents, b"").unwrap();

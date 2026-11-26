@@ -21,31 +21,25 @@ use quickwit_cluster::{Cluster, ListenerHandle};
 use quickwit_common::thread_pool::run_cpu_intensive;
 use quickwit_config::{INGEST_V2_SOURCE_ID, SourceInputFormat, SourceParams, build_doc_mapper};
 use quickwit_doc_mapper::DocMapper;
-use quickwit_metastore::{IndexMetadata, IndexMetadataResponseExt, IndexesMetadataResponseExt};
+use quickwit_metastore::IndexMetadataResponseExt;
 use quickwit_proto::ServiceError;
 use quickwit_proto::ingest::IngestFailureReason;
 use quickwit_proto::metastore::{
-    EntityKind, IndexMetadataRequest, IndexMetadataSubrequest, IndexesMetadataRequest,
-    MetastoreError, MetastoreService, MetastoreServiceClient,
+    EntityKind, IndexMetadataRequest, MetastoreError, MetastoreService, MetastoreServiceClient,
 };
 use quickwit_proto::types::IndexUid;
-use tokio::task::JoinHandle;
 use tonic::Status;
-use tracing::warn;
 
 /// Metastore nodes change this gossip value after index/source mutations. Each change
 /// invalidates intake metadata. The value is a notification token, not an ordered revision.
 pub const METADATA_CHANGE_KEY: &str = "ingesthree_metadata_change";
 const MAX_CACHED_INDEXES: usize = 1_024;
-// Like v2's background shard repair, reconciliation runs outside the write path.
-// This is a repair cadence, not an expiration or a freshness guarantee.
-const RECONCILE_INTERVAL: Duration = Duration::from_secs(60);
+const METADATA_TTL: Duration = Duration::from_secs(60);
 
-/// An index incarnation, its validated configuration, and its compiled document mapper.
+/// An index incarnation and its compiled document mapper.
 pub(super) struct IntakeIndex {
     pub index_uid: IndexUid,
     pub mapper: Option<Arc<DocMapper>>,
-    configuration: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -62,9 +56,9 @@ impl From<Status> for ResolveError {
 
 type Lookup = Shared<BoxFuture<'static, Result<Arc<IntakeIndex>, ResolveError>>>;
 
-/// A shared lookup and the last time an intake request used it.
 struct IndexLookup {
     lookup: Arc<Lookup>,
+    created_at: Instant,
     last_used: Instant,
 }
 
@@ -72,18 +66,6 @@ struct IndexLookup {
 #[derive(Clone, Default)]
 pub(super) struct MetadataCache {
     indexes: Arc<Mutex<HashMap<String, IndexLookup>>>,
-}
-
-/// Owns the gossip subscription and background reconciliation for an intake service.
-pub(super) struct MetadataWatch {
-    _listener: ListenerHandle,
-    reconciliation: JoinHandle<()>,
-}
-
-impl Drop for MetadataWatch {
-    fn drop(&mut self) {
-        self.reconciliation.abort();
-    }
 }
 
 impl MetadataCache {
@@ -94,10 +76,14 @@ impl MetadataCache {
     ) -> Result<Arc<IntakeIndex>, ResolveError> {
         let lookup = {
             let mut indexes = self.indexes.lock().unwrap();
-            if let Some(index) = indexes.get_mut(index_id) {
-                index.last_used = Instant::now();
+            let now = Instant::now();
+            if let Some(index) = indexes.get_mut(index_id)
+                && now.saturating_duration_since(index.created_at) < METADATA_TTL
+            {
+                index.last_used = now;
                 index.lookup.clone()
             } else {
+                indexes.remove(index_id);
                 if indexes.len() >= MAX_CACHED_INDEXES {
                     let oldest = indexes
                         .iter()
@@ -136,7 +122,8 @@ impl MetadataCache {
                     index_id.to_string(),
                     IndexLookup {
                         lookup: lookup.clone(),
-                        last_used: Instant::now(),
+                        created_at: now,
+                        last_used: now,
                     },
                 );
                 let completion = lookup.clone();
@@ -191,99 +178,12 @@ impl MetadataCache {
         self.indexes.lock().unwrap().clear();
     }
 
-    pub async fn watch(
-        &self,
-        cluster: &Cluster,
-        metastore: MetastoreServiceClient,
-    ) -> MetadataWatch {
+    pub async fn watch(&self, cluster: &Cluster) -> ListenerHandle {
         let cache = self.clone();
-        let listener = cluster
+        cluster
             .subscribe(METADATA_CHANGE_KEY, move |_| cache.invalidate())
-            .await;
-        let cache = self.clone();
-        let reconciliation = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(RECONCILE_INTERVAL).await;
-                cache.reconcile(metastore.clone()).await;
-            }
-        });
-        MetadataWatch {
-            _listener: listener,
-            reconciliation,
-        }
+            .await
     }
-
-    async fn reconcile(&self, metastore: MetastoreServiceClient) {
-        let lookups: Vec<_> = self
-            .indexes
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(index_id, index)| (index_id.clone(), index.lookup.clone()))
-            .collect();
-        for batch in lookups.chunks(100) {
-            let result = tokio::time::timeout(Duration::from_secs(30), async {
-                let response = metastore.indexes_metadata(IndexesMetadataRequest {
-                    subrequests: batch.iter().map(|(index_id, _)| IndexMetadataSubrequest {
-                        index_id: Some(index_id.clone()), index_uid: None,
-                    }).collect(),
-                }).await.map_err(|error| Status::internal(error.to_string()))?;
-                if !response.failures.is_empty() {
-                    warn!(failures=?response.failures, "ingesthree metadata reconciliation rejected indexes");
-                }
-                let metadata = response.deserialize_indexes_metadata().await
-                    .map_err(|error| Status::internal(error.to_string()))?;
-                let mut configurations = HashMap::new();
-                for metadata in metadata {
-                    let configuration = configuration(&metadata)?;
-                    configurations.insert(metadata.index_uid.index_id, configuration);
-                }
-                Ok::<_, Status>(configurations)
-            }).await;
-            let configurations = match result {
-                Ok(Ok(configurations)) => Some(configurations),
-                error => {
-                    // New intake must resolve unverifiable metadata through the metastore.
-                    warn!(
-                        ?error,
-                        "failed to reconcile ingesthree metadata; invalidating batch"
-                    );
-                    None
-                }
-            };
-            let mut indexes = self.indexes.lock().unwrap();
-            for (index_id, lookup) in batch {
-                let unchanged = match (
-                    lookup.peek(),
-                    configurations
-                        .as_ref()
-                        .and_then(|configs| configs.get(index_id)),
-                ) {
-                    (Some(Ok(index)), Some(configuration)) => index.configuration == *configuration,
-                    _ => false,
-                };
-                if !unchanged
-                    && indexes
-                        .get(index_id)
-                        .map(|index| Arc::ptr_eq(&index.lookup, lookup))
-                        .unwrap_or(false)
-                {
-                    indexes.remove(index_id);
-                }
-            }
-        }
-    }
-}
-
-fn configuration(metadata: &IndexMetadata) -> Result<serde_json::Value, Status> {
-    // Compare values, not serialized map order. Include all index settings and the
-    // built-in source, including mapping UID and eligibility/validation settings.
-    serde_json::to_value((
-        &metadata.index_uid,
-        &metadata.index_config,
-        metadata.sources.get(INGEST_V2_SOURCE_ID),
-    ))
-    .map_err(|error| Status::internal(error.to_string()))
 }
 
 async fn load_index(
@@ -307,9 +207,6 @@ async fn load_index(
     let metadata = response
         .deserialize_index_metadata()
         .map_err(|error| Status::internal(error.to_string()))?;
-    if metadata.index_uid.index_id != index_id || metadata.index_config.index_id != index_id {
-        return Err(Status::internal("metastore returned a different index").into());
-    }
     let Some(source) = metadata
         .sources
         .get(INGEST_V2_SOURCE_ID)
@@ -323,7 +220,6 @@ async fn load_index(
         )
         .into());
     }
-    let configuration = configuration(&metadata)?;
     let index_config = metadata.index_config;
     let mapper = if index_config.ingest_settings.validate_docs {
         Some(
@@ -340,6 +236,5 @@ async fn load_index(
     Ok(IntakeIndex {
         index_uid: metadata.index_uid,
         mapper,
-        configuration,
     })
 }

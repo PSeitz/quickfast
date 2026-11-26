@@ -271,10 +271,9 @@ pub mod ingesthree_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Requires exactly one `ingest-version: ingesthree` metadata value. The server
-        /// checks it before index lookup or queue admission. Exactly one subrequest,
-        /// Auto commits, and the INGEST_V2_SOURCE_ID source are supported. Success means
-        /// a local kernel write with no fsync, replication or search-visibility guarantee.
+        /// Exactly one subrequest, Auto commits, and the INGEST_V2_SOURCE_ID source are
+        /// supported. Success means a local kernel write with no fsync, replication or
+        /// search-visibility guarantee. Shard and position fields in successes are absent.
         /// Capacity failures return RESOURCE_EXHAUSTED, which public routers map to LOAD_SHEDDING.
         /// Retrying after an unavailable response is at-least-once and may duplicate data.
         pub async fn ingest(
@@ -321,10 +320,9 @@ pub mod ingesthree_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with IngesthreeServiceServer.
     #[async_trait]
     pub trait IngesthreeService: std::marker::Send + std::marker::Sync + 'static {
-        /// Requires exactly one `ingest-version: ingesthree` metadata value. The server
-        /// checks it before index lookup or queue admission. Exactly one subrequest,
-        /// Auto commits, and the INGEST_V2_SOURCE_ID source are supported. Success means
-        /// a local kernel write with no fsync, replication or search-visibility guarantee.
+        /// Exactly one subrequest, Auto commits, and the INGEST_V2_SOURCE_ID source are
+        /// supported. Success means a local kernel write with no fsync, replication or
+        /// search-visibility guarantee. Shard and position fields in successes are absent.
         /// Capacity failures return RESOURCE_EXHAUSTED, which public routers map to LOAD_SHEDDING.
         /// Retrying after an unavailable response is at-least-once and may duplicate data.
         async fn ingest(

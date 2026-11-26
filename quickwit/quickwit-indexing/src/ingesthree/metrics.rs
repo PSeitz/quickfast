@@ -38,14 +38,13 @@ pub(super) struct SupervisorMetrics {
     pub live: Gauge,
     pub errors: Counter,
     pub panics: Counter,
-    pub unexpected_exits: Counter,
     pub restarts: Counter,
 }
 
 pub(super) static SUPERVISOR_METRICS: LazyLock<SupervisorMetrics> = LazyLock::new(|| {
     let failures = counter!(
         name: "ingesthree_worker_failures_total",
-        description: "Worker runs ending with an error, panic, or unexpected exit, by reason.",
+        description: "Worker runs ending with an error or panic, by reason.",
         subsystem: "indexing",
     );
     SupervisorMetrics {
@@ -61,7 +60,6 @@ pub(super) static SUPERVISOR_METRICS: LazyLock<SupervisorMetrics> = LazyLock::ne
         ),
         errors: counter!(parent: failures, "reason" => "error"),
         panics: counter!(parent: failures, "reason" => "panic"),
-        unexpected_exits: counter!(parent: failures, "reason" => "unexpected_exit"),
         restarts: counter!(
             name: "ingesthree_worker_restarts_total",
             description: "Worker restarts begun after failure backoff.",
@@ -78,7 +76,6 @@ impl SupervisorMetrics {
             live: Gauge::local(),
             errors: Counter::local(),
             panics: Counter::local(),
-            unexpected_exits: Counter::local(),
             restarts: Counter::local(),
         }
     }

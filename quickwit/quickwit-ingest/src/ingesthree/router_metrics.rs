@@ -20,7 +20,6 @@ use quickwit_proto::types::AvailabilityZone;
 use crate::IngestServiceError;
 use crate::router_client::IngestResponse;
 
-// Identical name and labels share the v2 counters through quickwit-metrics registration.
 static INGEST_RESULT_TOTAL: LazyCounter = lazy_counter!(
     name: "ingest_result_total",
     description: "Number of ingest requests by result",
@@ -122,32 +121,6 @@ impl RouterMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_ingesthree_counters_share_registration() {
-        // Reproduce v2's independent declaration and child label, without accessing its module.
-        let v2_results = counter!(
-            name: "ingest_result_total",
-            description: "Number of ingest requests by result",
-            subsystem: "ingest",
-        );
-        let v2_success = counter!(parent: v2_results, "result" => "success");
-        let metrics = RouterMetrics::default();
-        assert_eq!(
-            v2_success,
-            counter!(parent: metrics.results, "result" => "success")
-        );
-        let v2_attempts = counter!(
-            name: "ingest_attempts",
-            description: "Number of routing attempts by AZ locality",
-            subsystem: "ingest",
-        );
-        assert_eq!(
-            counter!(parent: v2_attempts, "az_routing" => "same_az"),
-            counter!(parent: metrics.attempts, "az_routing" => "same_az"),
-        );
-        assert_eq!(metrics.in_flight_bytes, *IN_FLIGHT_INGEST_ROUTER);
-    }
 
     #[test]
     fn test_ingesthree_results_count_subrequests_including_all_invalid_batches() {

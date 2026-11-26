@@ -21,8 +21,7 @@ use super::*;
 async fn test_single_index_spreads_across_sampled_destinations() {
     let mut servers = Vec::new();
     for index in 0..8 {
-        servers
-            .push(destination(&format!("node-{index}"), true, true, "zone-a", None, false).await);
+        servers.push(destination(&format!("node-{index}"), true, true, "zone-a", None).await);
     }
     let nodes: Vec<_> = servers.iter().map(|server| server.node.clone()).collect();
     let zone: AvailabilityZone = "zone-a".into();
@@ -71,9 +70,9 @@ async fn test_single_index_spreads_across_sampled_destinations() {
 
 #[tokio::test]
 async fn test_selection_preserves_az_capacity_affinity_and_distinct_retries() {
-    let preferred = destination("preferred", true, true, "zone-a", None, false).await;
-    let other = destination("other", true, true, "zone-a", None, false).await;
-    let remote = destination("remote", true, true, "zone-b", None, false).await;
+    let preferred = destination("preferred", true, true, "zone-a", None).await;
+    let other = destination("other", true, true, "zone-a", None).await;
+    let remote = destination("remote", true, true, "zone-b", None).await;
     let low_capacity = update_capacity(&preferred, Some(1)).await;
     let medium_capacity = update_capacity(&other, Some(5)).await;
     let zone: AvailabilityZone = "zone-a".into();

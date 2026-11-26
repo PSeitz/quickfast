@@ -325,8 +325,7 @@ scans published splits in the metastore, including after restart, independently 
 indexer that published them.
 
 The normal ingest and Elasticsearch bulk endpoints use the selected router. OTLP also
-uses it when its endpoint is enabled. Internal ingesthree RPCs require
-`ingest-version: ingesthree`; public clients continue using the existing APIs.
+uses it when its endpoint is enabled. Public clients continue using the existing APIs.
 Gossip keeps ingesthree destinations separate from v2. Requests never fall back to v2.
 
 Local input lives in `<data_dir>/ingesthree`. Uploaded input lives under

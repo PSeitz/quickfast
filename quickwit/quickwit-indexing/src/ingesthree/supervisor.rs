@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
@@ -49,7 +50,7 @@ impl S3IndexerSupervisor {
     fn supervise<F, Fut>(mut run: F, metrics: SupervisorMetrics) -> Self
     where
         F: FnMut() -> Fut + Send + 'static,
-        Fut: Future<Output = anyhow::Result<()>> + Send,
+        Fut: Future<Output = anyhow::Result<Infallible>> + Send,
     {
         let configured = GaugeGuard::new(&metrics.configured, 1.0);
         let task = tokio::spawn(async move {
@@ -62,10 +63,7 @@ impl S3IndexerSupervisor {
                         metrics.errors.inc();
                         error!(error = %format!("{error:#}"), "S3 indexer failed, restarting");
                     }
-                    Ok(Ok(())) => {
-                        metrics.unexpected_exits.inc();
-                        error!("S3 indexer exited unexpectedly, restarting");
-                    }
+                    Ok(Ok(never)) => match never {},
                     Err(_) => {
                         metrics.panics.inc();
                         error!("S3 indexer panicked, restarting");
@@ -105,7 +103,11 @@ fn retry_after_secs(max_num_bytes: u64) -> u32 {
         .clamp(120, u32::MAX as u64) as u32
 }
 
-async fn run(mut worker: S3Indexer, max_num_bytes: u64, max_wait_secs: u32) -> anyhow::Result<()> {
+async fn run(
+    mut worker: S3Indexer,
+    max_num_bytes: u64,
+    max_wait_secs: u32,
+) -> anyhow::Result<Infallible> {
     let retry_after_secs = retry_after_secs(max_num_bytes);
     let mut idle_delay = IDLE_MIN;
     loop {
@@ -158,7 +160,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn errors_panics_and_unexpected_exits_restart_with_backoff() {
+    async fn errors_and_panics_restart_with_backoff() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let count = attempts.clone();
         let metrics = SupervisorMetrics::for_test();
@@ -167,9 +169,8 @@ mod tests {
                 let attempt = count.fetch_add(1, Ordering::SeqCst);
                 async move {
                     match attempt {
-                        0 => anyhow::bail!("injected error"),
                         1 => panic!("injected panic"),
-                        _ => Ok(()),
+                        _ => anyhow::bail!("injected error"),
                     }
                 }
             },
@@ -195,9 +196,8 @@ mod tests {
         supervisor.stop().await;
         assert_eq!(metrics.configured.get(), 0.0);
         assert_eq!(metrics.live.get(), 0.0);
-        assert_eq!(metrics.errors.get(), 1);
+        assert_eq!(metrics.errors.get(), 3);
         assert_eq!(metrics.panics.get(), 1);
-        assert_eq!(metrics.unexpected_exits.get(), 2);
         assert_eq!(metrics.restarts.get(), 3);
         tokio::time::advance(Duration::from_secs(100)).await;
         assert_eq!(attempts.load(Ordering::SeqCst), 4);
@@ -208,7 +208,7 @@ mod tests {
     async fn stop_before_first_poll_releases_configured_supervisor() {
         let metrics = SupervisorMetrics::for_test();
         let supervisor = S3IndexerSupervisor::supervise(
-            std::future::pending::<anyhow::Result<()>>,
+            std::future::pending::<anyhow::Result<Infallible>>,
             metrics.clone(),
         );
         assert_eq!(metrics.configured.get(), 1.0);
@@ -219,7 +219,6 @@ mod tests {
         assert_eq!(metrics.restarts.get(), 0);
         assert_eq!(metrics.errors.get(), 0);
         assert_eq!(metrics.panics.get(), 0);
-        assert_eq!(metrics.unexpected_exits.get(), 0);
     }
 
     #[tokio::test]
@@ -259,7 +258,6 @@ mod tests {
             assert_eq!(metrics.live.get(), 0.0);
             assert_eq!(metrics.errors.get(), 0);
             assert_eq!(metrics.panics.get(), 0);
-            assert_eq!(metrics.unexpected_exits.get(), 0);
             assert_eq!(metrics.restarts.get(), 0);
         }
     }

@@ -22,7 +22,7 @@ use quickwit_config::service::QuickwitService;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_server::{
     IngesthreeService, IngesthreeServiceServer,
 };
-use quickwit_proto::ingest::{DocBatchV2, IngestSuccess};
+use quickwit_proto::ingest::{DocBatchV2, IngestResponseV2, IngestSuccess};
 use quickwit_proto::types::{IndexUid, NodeId};
 use quickwit_proto::{ServiceError, ServiceErrorCode};
 use tokio::net::TcpListener;
@@ -43,7 +43,6 @@ mod selection_tests;
 struct Intake {
     calls: Arc<AtomicUsize>,
     error: Option<Code>,
-    malformed: bool,
 }
 
 #[async_trait::async_trait]
@@ -52,13 +51,9 @@ impl IngesthreeService for Intake {
         &self,
         request: Request<IngestRequestV2>,
     ) -> Result<Response<IngestResponseV2>, Status> {
-        assert_eq!(request.metadata().get(VERSION_HEADER).unwrap(), VERSION);
         self.calls.fetch_add(1, Ordering::SeqCst);
         if let Some(code) = self.error {
             return Err(Status::new(code, "test intake error"));
-        }
-        if self.malformed {
-            return Ok(Response::new(IngestResponseV2::default()));
         }
         let request = request.into_inner();
         assert_eq!(request.subrequests.len(), 1);
@@ -101,7 +96,6 @@ async fn destination(
     ready: bool,
     zone: &str,
     error: Option<Code>,
-    malformed: bool,
 ) -> Destination {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -109,7 +103,6 @@ async fn destination(
     let intake = Intake {
         calls: calls.clone(),
         error,
-        malformed,
     };
     let connections = futures::stream::unfold(listener, |listener| async {
         let accepted = listener.accept().await.map(|(socket, _)| socket);
@@ -170,10 +163,10 @@ fn subrequest() -> IngestSubrequest {
 
 #[tokio::test]
 async fn test_ingesthree_destinations_require_capability_readiness_and_prefer_same_az() {
-    let remote = destination("remote", true, true, "zone-b", None, false).await;
-    let same_zone = destination("same-zone", true, true, "zone-a", None, false).await;
-    let v2 = destination("v2", false, true, "zone-a", None, false).await;
-    let unready = destination("unready", true, false, "zone-a", None, false).await;
+    let remote = destination("remote", true, true, "zone-b", None).await;
+    let same_zone = destination("same-zone", true, true, "zone-a", None).await;
+    let v2 = destination("v2", false, true, "zone-a", None).await;
+    let unready = destination("unready", true, false, "zone-a", None).await;
     let nodes = vec![
         remote.node.clone(),
         same_zone.node.clone(),
@@ -200,7 +193,7 @@ async fn test_ingesthree_destinations_require_capability_readiness_and_prefer_sa
 
 #[tokio::test]
 async fn test_ingesthree_router_rejects_when_no_ready_indexer_exists() {
-    let node = destination("searcher", false, true, "zone-a", None, false).await;
+    let node = destination("searcher", false, true, "zone-a", None).await;
     let router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));
     let request = IngestRequestV2 {
         subrequests: vec![subrequest()],
@@ -246,8 +239,8 @@ async fn update_capacity(destination: &Destination, score: Option<usize>) -> Clu
 
 #[tokio::test]
 async fn test_ingesthree_capacity_filter_preserves_affinity_and_recovers() {
-    let local = destination("local", true, true, "zone-a", None, false).await;
-    let remote = destination("remote", true, true, "zone-b", None, false).await;
+    let local = destination("local", true, true, "zone-a", None).await;
+    let remote = destination("remote", true, true, "zone-b", None).await;
     let zone: AvailabilityZone = "zone-a".into();
     let mut router =
         IngesthreeRouter::new(local.cluster.clone(), Some(zone.clone()), ByteSize::mb(1));
@@ -296,7 +289,7 @@ async fn test_ingesthree_capacity_filter_preserves_affinity_and_recovers() {
     assert_eq!(local.calls.load(Ordering::SeqCst), 0);
 
     // Gossip overload evidence survives an unavailable destination's response.
-    let down = destination("down", true, true, "zone-b", Some(Code::Unavailable), false).await;
+    let down = destination("down", true, true, "zone-b", Some(Code::Unavailable)).await;
     let result = route_subrequest(
         &subrequest(),
         vec![&nodes[0], &down.node],
@@ -335,17 +328,9 @@ async fn test_ingesthree_capacity_filter_preserves_affinity_and_recovers() {
 
 #[tokio::test]
 async fn test_ingesthree_retries_capacity_and_unavailable_then_succeeds() {
-    let full = destination(
-        "full",
-        true,
-        true,
-        "zone-a",
-        Some(Code::ResourceExhausted),
-        false,
-    )
-    .await;
-    let down = destination("down", true, true, "zone-a", Some(Code::Unavailable), false).await;
-    let healthy = destination("healthy", true, true, "zone-b", None, false).await;
+    let full = destination("full", true, true, "zone-a", Some(Code::ResourceExhausted)).await;
+    let down = destination("down", true, true, "zone-a", Some(Code::Unavailable)).await;
+    let healthy = destination("healthy", true, true, "zone-b", None).await;
     let metrics = RouterMetrics::for_test("retry_success");
     let zone: AvailabilityZone = "zone-a".into();
     let response = route_subrequest(
@@ -384,26 +369,10 @@ async fn test_ingesthree_retries_capacity_and_unavailable_then_succeeds() {
 
 #[tokio::test]
 async fn test_ingesthree_exhausted_capacity_is_429_compatible_and_retries_are_limited() {
-    let full = destination(
-        "full",
-        true,
-        true,
-        "zone-a",
-        Some(Code::ResourceExhausted),
-        false,
-    )
-    .await;
-    let down = destination("down", true, true, "zone-a", Some(Code::Unavailable), false).await;
-    let third = destination(
-        "third",
-        true,
-        true,
-        "zone-a",
-        Some(Code::Unavailable),
-        false,
-    )
-    .await;
-    let fourth = destination("fourth", true, true, "zone-a", None, false).await;
+    let full = destination("full", true, true, "zone-a", Some(Code::ResourceExhausted)).await;
+    let down = destination("down", true, true, "zone-a", Some(Code::Unavailable)).await;
+    let third = destination("third", true, true, "zone-a", Some(Code::Unavailable)).await;
+    let fourth = destination("fourth", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("retry_limit");
     let response = route_subrequest(
         &subrequest(),
@@ -454,8 +423,8 @@ async fn test_ingesthree_exhausted_capacity_is_429_compatible_and_retries_are_li
 
 #[tokio::test]
 async fn test_ingesthree_prefers_own_node_with_positive_capacity() {
-    let local = destination("local", true, true, "zone-a", None, false).await;
-    let peer = destination("peer", true, true, "zone-a", None, false).await;
+    let local = destination("local", true, true, "zone-a", None).await;
+    let peer = destination("peer", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("local_first");
     for capacity in [Some(1), Some(10), Some(0), None] {
         let local_node = update_capacity(&local, capacity).await;
@@ -486,16 +455,8 @@ async fn test_ingesthree_prefers_own_node_with_positive_capacity() {
 
 #[tokio::test]
 async fn test_ingesthree_retries_peer_after_own_node_rejects() {
-    let local = destination(
-        "local",
-        true,
-        true,
-        "zone-a",
-        Some(Code::ResourceExhausted),
-        false,
-    )
-    .await;
-    let peer = destination("peer", true, true, "zone-a", None, false).await;
+    let local = destination("local", true, true, "zone-a", Some(Code::ResourceExhausted)).await;
+    let peer = destination("peer", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("local_rejected");
     let response = route_subrequest(
         &subrequest(),

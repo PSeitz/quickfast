@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use quickwit_proto::metastore::{
-    DocumentsStagedForUpload, ListCompletedFilesRequest, MetastoreError, MetastoreService,
+    DocumentsStagedForUpload, ListCompletedFilesRequest, MetastoreService,
 };
 
 use super::DefaultForTest;
@@ -104,25 +104,7 @@ pub async fn test_list_completed_files<M: MetastoreService + DefaultForTest>() {
     }
 }
 
-pub async fn test_list_completed_files_validation<M: MetastoreService + DefaultForTest>() {
-    let metastore = M::default_for_test().await;
-    for max_num_files in [0, 1001, u32::MAX] {
-        let result = metastore
-            .list_completed_files(ListCompletedFilesRequest {
-                max_num_files,
-                ..Default::default()
-            })
-            .await;
-        assert!(matches!(
-            result,
-            Err(MetastoreError::InvalidArgument { .. })
-        ));
-    }
-    assert!(list(&metastore, "after-all-ulids", 1).await.is_empty());
-}
-
 #[tokio::test]
 async fn test_list_completed_files_grpc() {
     test_list_completed_files::<GrpcMetastore>().await;
-    test_list_completed_files_validation::<GrpcMetastore>().await;
 }

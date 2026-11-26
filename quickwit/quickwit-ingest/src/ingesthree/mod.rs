@@ -19,7 +19,6 @@
 //! and age, and limits open files. An optional [`Uploader`] hands finished files to
 //! storage and the metastore before the writer deletes them and releases disk charges.
 
-mod compressed_batch;
 #[cfg(test)]
 mod compressed_batch_tests;
 mod documents_staged_for_upload;
@@ -48,7 +47,7 @@ use quickwit_proto::types::IndexUid;
 use tokio::time::Instant;
 use ulid::Ulid;
 
-pub(super) use self::compressed_batch::CompressedBatch;
+pub(super) use self::documents_staged_for_upload::CompressedBatch;
 pub use self::documents_staged_for_upload::{DocumentFileReader, DocumentsStagedForUpload};
 use self::documents_staged_for_upload::{
     MAGIC, encode_metadata, record_size, recover, write_record,
@@ -195,9 +194,7 @@ impl Ingester {
                 fs::rename(&path, &finished_path)?;
                 input.path = finished_path;
             }
-            disk_bytes = disk_bytes
-                .checked_add(input.num_bytes)
-                .context("input size overflow")?;
+            disk_bytes += input.num_bytes;
             finished.push(input);
         }
         finished.sort_by_key(|input| input.file_id);
@@ -223,7 +220,7 @@ impl Ingester {
     pub fn append(
         &mut self,
         index_uid: &IndexUid,
-        documents: impl IntoIterator<Item: AsRef<[u8]>, IntoIter: Clone>,
+        documents: impl IntoIterator<Item: AsRef<[u8]>>,
     ) -> anyhow::Result<Ulid> {
         let batch = CompressedBatch::new(documents)?;
         self.append_compressed(index_uid, &batch)
@@ -240,8 +237,8 @@ impl Ingester {
             !self.requires_recovery,
             "ingester requires recovery after an IO failure"
         );
-        ensure!(batch.num_docs > 0, "empty document batch");
-        let mut added_bytes = record_size(batch.data.len())?;
+        let batch_bytes = record_size(batch.data.len());
+        let mut added_bytes = batch_bytes;
         let new_header = if self.active.contains_key(index_uid) {
             None
         } else {
@@ -249,16 +246,11 @@ impl Ingester {
                 self.active.len() < self.file_limits.max_open_files,
                 OpenFileLimit
             );
-            let header = encode_metadata(index_uid)?;
-            added_bytes = added_bytes
-                .checked_add(MAGIC.len() as u64 + record_size(header.len())?)
-                .context("input size overflow")?;
+            let header = encode_metadata(index_uid);
+            added_bytes += MAGIC.len() as u64 + record_size(header.len());
             Some(header)
         };
-        let disk_bytes = self
-            .disk_bytes
-            .checked_add(added_bytes)
-            .context("input size overflow")?;
+        let disk_bytes = self.disk_bytes + added_bytes;
         ensure!(
             disk_bytes <= self.max_disk_bytes,
             "ingesthree local storage budget exhausted"
@@ -287,7 +279,7 @@ impl Ingester {
                         file_id,
                         index_uid: index_uid.clone(),
                         path: open_path,
-                        num_bytes: MAGIC.len() as u64 + record_size(header.len())?,
+                        num_bytes: MAGIC.len() as u64 + record_size(header.len()),
                         num_docs: 0,
                     },
                     finish_at,
@@ -300,7 +292,7 @@ impl Ingester {
             .get_mut(index_uid)
             .expect("active file just created");
         write_record(&mut active.writer, &batch.data)?;
-        active.input.num_bytes += record_size(batch.data.len())?;
+        active.input.num_bytes += batch_bytes;
         active.input.num_docs += batch.num_docs;
         // This is the acknowledgment boundary, including for small writes that
         // fit entirely inside BufWriter. flush is deliberately distinct from fsync.

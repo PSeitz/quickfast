@@ -211,89 +211,8 @@ pub async fn test_publish_file_splits_missing_inputs_and_index<
     cleanup_index(&mut metastore, other_uid).await;
 }
 
-pub async fn test_publish_file_splits_invalid_request<M: MetastoreServiceExt + DefaultForTest>() {
-    let mut metastore = M::default_for_test().await;
-    let index_uid = create_index(&mut metastore).await;
-    let files = register_files(&metastore, &index_uid, &[100, 100]).await;
-    stage_splits(&metastore, &index_uid, &["good"]).await;
-    let publication = publication_request(&index_uid, &files, &["good"]);
-    let invalid_requests = [
-        PublishFileSplits {
-            index_uid: None,
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            index_uid: Some(IndexUid::new_with_random_ulid("")),
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            file_ids: vec![],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            file_ids: (0..1001).map(|_| Ulid::generate().to_string()).collect(),
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            file_ids: vec![files[0].file_id.clone(), files[0].file_id.clone()],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            file_ids: vec!["invalid".to_string()],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            file_ids: vec!["01arz3ndektsv4rrffq69g5fav".to_string()],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            publication_id: String::new(),
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            publication_id: "invalid".to_string(),
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            publication_id: "01arz3ndektsv4rrffq69g5fav".to_string(),
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            staged_split_ids: vec!["good".to_string(), "good".to_string()],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            staged_split_ids: vec![String::new()],
-            ..publication.clone()
-        },
-        PublishFileSplits {
-            staged_split_ids: (0..1001).map(|i| format!("split-{i}")).collect(),
-            ..publication.clone()
-        },
-    ];
-    for invalid in invalid_requests {
-        assert!(matches!(
-            metastore.publish_file_splits(invalid).await.unwrap_err(),
-            MetastoreError::InvalidArgument { .. }
-        ));
-        for file in &files {
-            assert_eq!(read_file(&metastore, file).await, *file);
-        }
-        assert_split_states(&metastore, &index_uid, &[("good", SplitState::Staged)]).await;
-    }
-    assert!(
-        metastore
-            .publish_file_splits(publication)
-            .await
-            .unwrap()
-            .published
-    );
-    cleanup_index(&mut metastore, index_uid).await;
-}
-
 #[tokio::test]
 async fn test_publish_file_splits_validation_grpc() {
     test_publish_file_splits_output_rollback::<GrpcMetastore>().await;
     test_publish_file_splits_missing_inputs_and_index::<GrpcMetastore>().await;
-    test_publish_file_splits_invalid_request::<GrpcMetastore>().await;
 }

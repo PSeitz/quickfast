@@ -37,7 +37,7 @@ pub(super) fn client_metrics(test: &'static str) -> (Counter, Gauge) {
 
 #[tokio::test]
 async fn test_ingesthree_router_cancellation_releases_memory_and_grpc_in_flight() {
-    let node = destination("pending", true, true, "zone-a", None, false).await;
+    let node = destination("pending", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("router_cancellation");
     let (requests, in_flight) = client_metrics("router_cancellation");
     let mut router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));
@@ -79,7 +79,7 @@ async fn test_ingesthree_router_cancellation_releases_memory_and_grpc_in_flight(
 
 #[tokio::test]
 async fn test_ingesthree_router_deadline_counts_timeout_and_releases_memory() {
-    let node = destination("pending", true, true, "zone-a", None, false).await;
+    let node = destination("pending", true, true, "zone-a", None).await;
     let metrics = RouterMetrics::for_test("router_deadline");
     let (requests, in_flight) = client_metrics("router_deadline");
     let mut router = IngesthreeRouter::new(node.cluster.clone(), None, ByteSize::mb(1));

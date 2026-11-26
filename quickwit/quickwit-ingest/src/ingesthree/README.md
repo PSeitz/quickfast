@@ -17,7 +17,7 @@ host-loss durability, upload, or searchability. Delivery is at least once.
   Compactor workers handle later merges. Initial split publication works without them.
 - Use the built-in JSON ingest source without a transform. Only `Auto` commits are supported.
 - Existing ingest, Elasticsearch bulk, and enabled OTLP endpoints need no new client header.
-  Internal RPCs require exactly one `ingest-version: ingesthree` value. There is no v2 fallback.
+  There is no v2 fallback.
 
 | Storage | Location |
 | --- | --- |
@@ -90,7 +90,7 @@ Incoming wire compression is decoded before validation; staging recompresses acc
 Readers and recovery still support `QWINPUT\x01` files. Older binaries cannot read V2.
 Stop intake and upgrade all ingesthree indexing workers before admitting V2 data.
 Rollback requires draining V2 local and remote inputs with a V2-capable binary first.
-See [file framing/recovery](documents_staged_for_upload.rs) and [batch codec](compressed_batch.rs).
+See [file framing, recovery, and batch codec](documents_staged_for_upload.rs).
 
 ## Startup and shutdown
 

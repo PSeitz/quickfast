@@ -180,12 +180,6 @@ macro_rules! metastore_test_suite {
 
             #[tokio::test]
             #[serial_test::file_serial]
-            async fn test_register_file_for_indexing_invalid_request() {
-                $crate::tests::staged_file::test_register_file_for_indexing_invalid_request::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
             async fn test_register_file_for_indexing_index_incarnation() {
                 $crate::tests::staged_file::test_register_file_for_indexing_index_incarnation::<$metastore_type>().await;
             }
@@ -206,12 +200,6 @@ macro_rules! metastore_test_suite {
             #[serial_test::file_serial]
             async fn test_list_completed_files() {
                 $crate::tests::completed_files::test_list_completed_files::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_list_completed_files_validation() {
-                $crate::tests::completed_files::test_list_completed_files_validation::<$metastore_type>().await;
             }
 
             #[tokio::test]
@@ -264,12 +252,6 @@ macro_rules! metastore_test_suite {
 
             #[tokio::test]
             #[serial_test::file_serial]
-            async fn test_assign_files_invalid_request() {
-                $crate::tests::file_assignment::test_assign_files_invalid_request::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
             async fn test_publish_file_splits_atomic_and_retry() {
                 $crate::tests::file_publication::test_publish_file_splits_atomic_and_retry::<$metastore_type>().await;
             }
@@ -308,12 +290,6 @@ macro_rules! metastore_test_suite {
             #[serial_test::file_serial]
             async fn test_publish_file_splits_missing_inputs_and_index() {
                 $crate::tests::file_publication_validation::test_publish_file_splits_missing_inputs_and_index::<$metastore_type>().await;
-            }
-
-            #[tokio::test]
-            #[serial_test::file_serial]
-            async fn test_publish_file_splits_invalid_request() {
-                $crate::tests::file_publication_validation::test_publish_file_splits_invalid_request::<$metastore_type>().await;
             }
 
             // Index API tests

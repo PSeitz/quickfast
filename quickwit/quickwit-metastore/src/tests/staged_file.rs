@@ -192,81 +192,6 @@ pub async fn test_register_file_for_indexing<M: MetastoreService + DefaultForTes
     delete_index(&mut metastore, index_uid).await;
 }
 
-pub async fn test_register_file_for_indexing_invalid_request<
-    M: MetastoreService + DefaultForTest,
->() {
-    let mut metastore = M::default_for_test().await;
-    let index_uid = create_index(&mut metastore).await;
-    let request = registration_request(index_uid.clone());
-    let invalid_requests = [
-        RegisterFileForIndexing {
-            index_uid: None,
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            index_uid: Some(IndexUid::new_with_random_ulid("")),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_id: "invalid".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_id: "01arz3ndektsv4rrffq69g5fav".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            num_bytes: 0,
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            num_bytes: i64::MAX as u64 + 1,
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_uri: "".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_uri: "relative/path".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_uri: "unknown://bucket/file".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_uri: "grpc://localhost:1234".to_string(),
-            ..request.clone()
-        },
-        RegisterFileForIndexing {
-            file_uri: "s3://bucket".to_string(),
-            ..request.clone()
-        },
-    ];
-    for invalid in invalid_requests {
-        assert!(matches!(
-            metastore
-                .register_file_for_indexing(invalid)
-                .await
-                .unwrap_err(),
-            MetastoreError::InvalidArgument { .. }
-        ));
-    }
-    // Reusing this identity proves invalid requests did not create a partial record.
-    let input = metastore
-        .register_file_for_indexing(RegisterFileForIndexing {
-            num_bytes: i64::MAX as u64,
-            ..request
-        })
-        .await
-        .unwrap()
-        .staged_file
-        .unwrap();
-    assert_eq!(input.num_bytes, i64::MAX as u64);
-    delete_index(&mut metastore, index_uid).await;
-}
-
 pub async fn test_register_file_for_indexing_index_incarnation<
     M: MetastoreService + DefaultForTest,
 >() {
@@ -429,7 +354,6 @@ pub async fn test_register_file_for_indexing_preserves_progress<
 #[tokio::test]
 async fn test_register_file_for_indexing_grpc() {
     test_register_file_for_indexing::<GrpcMetastore>().await;
-    test_register_file_for_indexing_invalid_request::<GrpcMetastore>().await;
     test_register_file_for_indexing_index_incarnation::<GrpcMetastore>().await;
     test_register_file_for_indexing_concurrent_retries::<GrpcMetastore>().await;
     test_register_file_for_indexing_preserves_progress::<GrpcMetastore>().await;

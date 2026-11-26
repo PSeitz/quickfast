@@ -223,7 +223,7 @@ async fn test_validation_can_be_disabled() {
     use crate::ingesthree::documents_staged_for_upload::write_record;
     let compressed = CompressedBatch::new([b"invalid JSON".as_slice(), b""]).unwrap();
     let mut expected = MAGIC.to_vec();
-    write_record(&mut expected, &encode_metadata(&index()).unwrap()).unwrap();
+    write_record(&mut expected, &encode_metadata(&index())).unwrap();
     write_record(&mut expected, &compressed.data).unwrap();
     assert_eq!(fs::read(&files[0].path).unwrap(), expected);
 }
@@ -339,7 +339,7 @@ async fn test_disk_budget_includes_queued_requests() {
     first.await.unwrap();
     let actual_bytes = MAGIC.len() as u64
         + FRAME_OVERHEAD
-        + encode_metadata(&index()).unwrap().len() as u64
+        + encode_metadata(&index()).len() as u64
         + record_bytes(&batch());
     assert!(actual_bytes < disk_bytes);
     assert_eq!(byte_usage(&queue), (0, 0, actual_bytes));
@@ -359,10 +359,8 @@ async fn test_reservations_settle_to_file_growth() {
         .unwrap();
     let (_, reserved_bytes) = num_bytes(&index(), &batch()).unwrap();
     let doc_size = record_bytes(&batch());
-    let disk_bytes = MAGIC.len() as u64
-        + FRAME_OVERHEAD
-        + encode_metadata(&index()).unwrap().len() as u64
-        + doc_size;
+    let disk_bytes =
+        MAGIC.len() as u64 + FRAME_OVERHEAD + encode_metadata(&index()).len() as u64 + doc_size;
     assert!(disk_bytes < reserved_bytes);
     let first_id = queue.append(index(), batch(), None).await.unwrap().file_id;
     assert_eq!(byte_usage(&queue), (0, 0, disk_bytes));
@@ -397,7 +395,7 @@ async fn test_incompressible_batch_reserves_capacity_and_settles_actual_bytes() 
     let capacity = CompressedBatch::max_encoded_len(batch.doc_buffer.len(), 2).unwrap();
     assert!(compressed.data.capacity() <= capacity);
     let (queue_bytes, disk_bytes) = num_bytes(&index(), &batch).unwrap();
-    let metadata = encode_metadata(&index()).unwrap();
+    let metadata = encode_metadata(&index());
     assert_eq!(
         queue_bytes,
         (size_of::<AppendRequest>()

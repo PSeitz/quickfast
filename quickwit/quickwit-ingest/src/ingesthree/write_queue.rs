@@ -25,9 +25,11 @@ use quickwit_proto::types::{DocUid, IndexUid};
 use tokio::sync::{mpsc, oneshot};
 use ulid::Ulid;
 
+#[cfg(test)]
+use super::DocumentsStagedForUpload;
 use super::documents_staged_for_upload::{FRAME_OVERHEAD, MAGIC, encode_metadata};
 use super::handoff::FileHandoffs;
-use super::{CompressedBatch, DocumentsStagedForUpload, Ingester, Uploader};
+use super::{CompressedBatch, Ingester, Uploader};
 
 #[path = "capacity_tracker.rs"]
 mod capacity_tracker;
@@ -35,17 +37,13 @@ use capacity_tracker::CapacityTracker;
 
 #[path = "write_queue_worker.rs"]
 mod worker;
-use worker::write_batches;
+use worker::{FileWriter, delete_finished_file, write_batches};
 #[cfg(test)]
 use worker::{append_batch, append_prepared, validate_documents};
 
 #[path = "queue_metrics.rs"]
 mod queue_metrics;
 use queue_metrics::{QueueMetrics, ValidationMetrics};
-
-#[path = "queue_file_writer.rs"]
-mod queue_file_writer;
-use queue_file_writer::FileWriter;
 
 /// Distinguishes admission failures so a router can retry another destination.
 #[derive(Debug, thiserror::Error)]
@@ -184,6 +182,7 @@ struct PreparedRequest {
 // Requests that the writer append a batch, finish locally, or drain handoff.
 enum WriterRequest {
     Append(AppendRequest),
+    #[cfg(test)]
     Finish(oneshot::Sender<Result<Vec<DocumentsStagedForUpload>, IngestError>>),
     Drain(oneshot::Sender<Result<(), IngestError>>),
 }
@@ -214,10 +213,14 @@ impl WriteQueue {
         if let Some(uploader) = &uploader {
             // Keep ownership until every handoff is stopped, including when local
             // deletion fails or startup is cancelled during blocking filesystem work.
-            let directory_lock = ingester.directory_lock.clone();
+            let directory_lock = ingester.ingester.directory_lock.clone();
             let mut handoffs = FileHandoffs::default();
-            handoffs.schedule_uploads(uploader, &directory_lock, ingester.finished_files());
-            while !ingester.finished_files().is_empty() {
+            handoffs.schedule_uploads(
+                uploader,
+                &directory_lock,
+                ingester.ingester.finished_files(),
+            );
+            while !ingester.ingester.finished_files().is_empty() {
                 let file_id = match handoffs.next_delete().await {
                     Ok(file_id) => file_id,
                     Err(error) => {
@@ -225,20 +228,7 @@ impl WriteQueue {
                         return Err(error.into());
                     }
                 };
-                let (writer, result) = tokio::task::spawn_blocking(move || {
-                    let result = ingester.delete_finished_file(file_id);
-                    (ingester, result)
-                })
-                .await
-                .map_err(anyhow::Error::from)?;
-                ingester = writer;
-                match result {
-                    Ok(_) => handoffs.deleted(file_id),
-                    Err(error) => {
-                        tracing::warn!(%file_id, ?error, "failed to delete finished ingesthree file; retrying");
-                        handoffs.retry_delete(file_id);
-                    }
-                }
+                ingester = delete_finished_file(ingester, &mut handoffs, file_id).await?;
             }
         }
         let admission = queue.admission.clone();
@@ -382,6 +372,7 @@ impl WriteQueue {
     /// Stops admission across all clones, cancels pending handoff, drains queued
     /// writes, and finishes files locally. Returns files still retained on disk.
     /// Use `drain()` for decommissioning.
+    #[cfg(test)]
     pub async fn finish(&self) -> Result<Vec<DocumentsStagedForUpload>, IngestError> {
         let (reply, response) = oneshot::channel();
         {
@@ -426,37 +417,22 @@ fn num_bytes(index_uid: &IndexUid, batch: &DocBatchV2) -> Result<(u64, u64), Ing
             "empty or inconsistent document batch".into(),
         ));
     }
-    let metadata = encode_metadata(index_uid)
-        .map_err(|error| IngestError::InvalidRequest(error.to_string()))?;
+    let metadata_len = encode_metadata(index_uid).len() as u64;
     let compressed_capacity =
         CompressedBatch::max_encoded_len(batch.doc_buffer.len(), batch.doc_lengths.len())
-            .map_err(|error| IngestError::InvalidRequest(error.to_string()))?;
+            .map_err(|error| IngestError::InvalidRequest(error.to_string()))? as u64;
     // Input, validation copy/descriptors, serialization, and the full compressed
     // allocation coexist during preparation. zstd's working context is separate.
-    let mut queue_bytes = size_of::<AppendRequest>() as u64 + metadata.len() as u64;
-    for (count, size) in [
-        (batch.doc_buffer.len(), 3),
-        (batch.doc_lengths.len(), size_of::<u32>()),
-        (compressed_capacity, 1),
-        (batch.doc_lengths.capacity(), size_of::<u32>()),
-        (batch.doc_uids.capacity(), size_of::<DocUid>()),
-        // Filtering grows descriptor vectors geometrically while retaining the input.
-        (
-            batch.doc_lengths.len(),
-            2 * (size_of::<u32>() + size_of::<DocUid>()),
-        ),
-    ] {
-        queue_bytes = (count as u64)
-            .checked_mul(size as u64)
-            .and_then(|bytes| queue_bytes.checked_add(bytes))
-            .ok_or_else(|| IngestError::InvalidRequest("request size overflow".into()))?;
-    }
-    let disk_bytes = (compressed_capacity as u64)
-        .checked_add(FRAME_OVERHEAD)
-        .and_then(|total| {
-            total.checked_add(MAGIC.len() as u64 + FRAME_OVERHEAD + metadata.len() as u64)
-        })
-        .ok_or_else(|| IngestError::InvalidRequest("input size overflow".into()))?;
+    // Filtering grows descriptor vectors geometrically while retaining the input.
+    let queue_bytes = size_of::<AppendRequest>() as u64
+        + metadata_len
+        + batch.doc_buffer.len() as u64 * 3
+        + batch.doc_lengths.len() as u64 * (size_of::<u32>() * 3 + size_of::<DocUid>() * 2) as u64
+        + compressed_capacity
+        + batch.doc_lengths.capacity() as u64 * size_of::<u32>() as u64
+        + batch.doc_uids.capacity() as u64 * size_of::<DocUid>() as u64;
+    let disk_bytes =
+        compressed_capacity + FRAME_OVERHEAD + MAGIC.len() as u64 + FRAME_OVERHEAD + metadata_len;
     Ok((queue_bytes, disk_bytes))
 }
 

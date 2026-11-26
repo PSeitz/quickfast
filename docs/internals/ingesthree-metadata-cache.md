@@ -28,24 +28,16 @@ complete using the configuration they acquired. Inputs keep their exact index UI
 so deletion/recreation cannot retarget old inputs to the new incarnation.
 
 The cache starts empty after restart. Production intake installs its gossip subscription
-and background reconciliation before accepting traffic. Reconciliation starts every
-minute after the previous pass completes, reads cached names in batches of 100 from
-the primary metastore, and compares configurations. Unchanged configurations retain
-their compiled mapper. Changed, deleted, failed, or unfinished lookups are evicted.
-Reconciliation failures are logged and invalidate the affected batch, requiring later
-intake to resolve through the metastore rather than silently keep unverifiable metadata.
-This repairs missed notifications, including a mutation committed before an ambiguous
-RPC error or a publisher restart. It also works during rolling upgrades before every
-metastore publishes notifications.
+before accepting traffic. Entries expire after a 60-second TTL so missed notifications
+(such as a mutation committed before an ambiguous RPC error, publisher restart, or rolling
+upgrade) recover automatically without a background task.
 
-The one-minute interval is a repair cadence, not a TTL or a guaranteed maximum stale
-window. RPC latency and partitions affect convergence. Initialization and reconciliation
-RPC work have a 30-second timeout including client readiness waits. Cache capacity is
-1,024 index names. Completed least-recently-used lookups are evicted when capacity is
+Metadata lookups have a 30-second timeout including client readiness waits. Cache capacity
+is 1,024 index names. Completed least-recently-used lookups are evicted when capacity is
 needed. If all lookups are pending, a new name receives resource exhaustion. Initialization
 continues after caller cancellation, without retaining its document batch, so completion
 and failed-lookup cleanup do not depend on a surviving caller. Service shutdown drops
-its gossip listener and aborts reconciliation.
+its gossip listener.
 
 ## Relationship to v2
 
@@ -56,7 +48,7 @@ to stop writes. V2 also has startup/control-plane synchronization and background
 repair. Neither path establishes a per-write authoritative metadata freshness barrier.
 
 Ingesthree keeps the reusable information per index instead of per shard. It refreshes
-that information through mutation notifications and authoritative reconciliation.
+that information through mutation notifications and TTL expiry.
 It can update validation policy for subsequent batches without replacing a shard.
 V2's existing shards retain their installed mapper/policy until their lifecycle replaces
 them. Ingesthree files carry the index incarnation, not a pinned mapping version; file

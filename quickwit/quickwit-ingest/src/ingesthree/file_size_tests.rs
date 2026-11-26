@@ -22,9 +22,8 @@ fn test_file_target_and_disk_budget_count_compressed_bytes() {
     let index_uid = IndexUid::for_test("compressed-size", 1);
     let documents = [vec![b'x'; 32_768], vec![b'x'; 32_768]];
     let batch = CompressedBatch::new(&documents).unwrap();
-    let header_bytes =
-        MAGIC.len() as u64 + record_size(encode_metadata(&index_uid).unwrap().len()).unwrap();
-    let target_bytes = header_bytes + 2 * record_size(batch.data.len()).unwrap();
+    let header_bytes = MAGIC.len() as u64 + record_size(encode_metadata(&index_uid).len());
+    let target_bytes = header_bytes + 2 * record_size(batch.data.len());
     assert!(target_bytes < 1_000);
     let mut ingester = Ingester::open(directory.path(), target_bytes).unwrap();
     ingester.file_limits.target_file_bytes = target_bytes;

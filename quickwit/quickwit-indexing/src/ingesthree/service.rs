@@ -59,7 +59,6 @@ impl IndexingService {
         let max_num_bytes = indexer_batch_bytes()?;
         let max_wait_secs = indexer_max_wait_secs()?;
         let num_workers = quickwit_common::num_cpus();
-        ensure!(num_workers > 0, "S3 indexing requires at least one CPU");
         let scratch_directory = temp_dir::Builder::default()
             .join("ingesthree")
             .tempdir_in(&self.inner.indexing_root_directory)?;

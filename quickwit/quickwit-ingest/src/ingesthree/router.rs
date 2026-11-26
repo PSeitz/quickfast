@@ -21,8 +21,7 @@ use quickwit_common::rendezvous_hasher::node_affinity;
 use quickwit_metrics::GaugeGuard;
 use quickwit_proto::ingest::ingesthree::ingesthree_service_client::IngesthreeServiceClient;
 use quickwit_proto::ingest::{
-    CommitTypeV2, IngestFailureReason, IngestRequestV2, IngestResponseV2, IngestSubrequest,
-    RateLimitingCause,
+    CommitTypeV2, IngestFailureReason, IngestRequestV2, IngestSubrequest, RateLimitingCause,
 };
 use quickwit_proto::types::{AvailabilityZone, NodeId};
 use tonic::{Code, Request, Status};
@@ -32,7 +31,7 @@ mod metrics;
 
 use metrics::RouterMetrics;
 
-use super::service::{VERSION, VERSION_HEADER, validate_request};
+use super::service::validate_request;
 use crate::IngestServiceError;
 use crate::router_client::{IngestFailure, IngestResponse};
 
@@ -186,9 +185,6 @@ async fn route_subrequest(
             subrequests: vec![subrequest.clone()],
             commit_type: CommitTypeV2::Auto as i32,
         });
-        request
-            .metadata_mut()
-            .insert(VERSION_HEADER, VERSION.parse().unwrap());
         request.set_timeout(Duration::from_secs(5));
         let result = metrics
             .grpc_client
@@ -209,9 +205,7 @@ async fn route_subrequest(
         let attempt_error = match result {
             Ok(response) => {
                 let response = response.into_inner();
-                if !valid_response(subrequest, &response) {
-                    IngestServiceError::Internal("malformed ingesthree intake response".into())
-                } else if matches!(response.failures.first(), Some(failure) if failure.reason() == IngestFailureReason::LoadShedding)
+                if matches!(response.failures.first(), Some(failure) if failure.reason() == IngestFailureReason::LoadShedding)
                 {
                     IngestServiceError::RateLimited(RateLimitingCause::LoadShedding)
                 } else {
@@ -264,30 +258,6 @@ async fn route_subrequest(
             index_id: subrequest.index_id.clone(),
             error,
         }],
-    }
-}
-
-// A malformed remote response is an internal failure, never an empty success.
-fn valid_response(subrequest: &IngestSubrequest, response: &IngestResponseV2) -> bool {
-    if response.successes.len() + response.failures.len() != 1 {
-        return false;
-    }
-    if let Some(success) = response.successes.first() {
-        success.subrequest_id == subrequest.subrequest_id
-            && matches!(&success.index_uid, Some(uid) if uid.index_id == subrequest.index_id)
-            && success.source_id == subrequest.source_id
-            && success.num_ingested_docs as usize + success.parse_failures.len()
-                == subrequest
-                    .doc_batch
-                    .as_ref()
-                    .map(|batch| batch.num_docs())
-                    .unwrap_or_default()
-    } else {
-        let failure = &response.failures[0];
-        failure.subrequest_id == subrequest.subrequest_id
-            && failure.index_id == subrequest.index_id
-            && failure.source_id == subrequest.source_id
-            && failure.reason() != IngestFailureReason::Unspecified
     }
 }
 
