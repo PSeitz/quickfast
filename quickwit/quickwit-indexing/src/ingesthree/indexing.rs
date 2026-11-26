@@ -367,7 +367,11 @@ mod tests {
             let is_overflow = split.builder.split_attrs.partition_id == OTHER_PARTITION_ID;
             let expected_groups = if is_overflow { vec![1, 1] } else { vec![2] };
             assert_eq!(
-                split.builder.index_writer.clustering_group_sizes(),
+                split
+                    .builder
+                    .doc_clusterer_opt
+                    .as_ref()
+                    .map(|clusterer| clusterer.group_sizes()),
                 Some(expected_groups)
             );
             let memory_before = writer_memory.get();

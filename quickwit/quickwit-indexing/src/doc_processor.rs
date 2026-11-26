@@ -222,6 +222,7 @@ pub struct DocumentConverter {
     #[cfg(feature = "vrl")]
     transform_opt: Option<VrlProgram>,
     input_format: SourceInputFormat,
+    doc_batch: QuickwitDocBatch,
 }
 
 impl DocumentConverter {
@@ -245,6 +246,7 @@ impl DocumentConverter {
                 .map(VrlProgram::try_from_transform_config)
                 .transpose()?,
             input_format,
+            doc_batch: QuickwitDocBatch::default(),
         })
     }
 
@@ -269,19 +271,18 @@ impl DocumentConverter {
     fn parse_into_batch(
         &mut self,
         raw_doc: Bytes,
-        batch: &mut QuickwitDocBatch,
         otlp_payload_lens: &mut Vec<usize>,
     ) -> Result<(), DocProcessorError> {
         #[cfg(feature = "vrl")]
         if let Some(program) = &mut self.transform_opt {
-            return program.parse_into_batch(self.input_format, raw_doc, batch);
+            return program.parse_into_batch(self.input_format, raw_doc, &mut self.doc_batch);
         }
         let records = match self.input_format {
-            SourceInputFormat::Json => return Ok(batch.parse(&raw_doc)?),
+            SourceInputFormat::Json => return Ok(self.doc_batch.parse(&raw_doc)?),
             SourceInputFormat::PlainText => {
                 let text = std::str::from_utf8(&raw_doc)
                     .map_err(|error| DocProcessorError::JsonParsing(error.to_string()))?;
-                return Ok(batch.push_plain_text(text)?);
+                return Ok(self.doc_batch.push_plain_text(text)?);
             }
             SourceInputFormat::OtlpLogsJson => Either::Left(parse_otlp_logs_json(&raw_doc)?),
             SourceInputFormat::OtlpLogsProtobuf => {
@@ -294,7 +295,7 @@ impl DocumentConverter {
         };
         // Successful records count their share of the payload. Rejections count the raw payload.
         for (record, len) in records {
-            match batch.push_serialize(&record, len) {
+            match self.doc_batch.push_serialize(&record, len) {
                 Ok(()) => otlp_payload_lens.push(raw_doc.len()),
                 Err(error) => self.record_error(error.into(), raw_doc.len()),
             }
@@ -316,18 +317,17 @@ impl DocumentConverter {
         &mut self,
         raw_docs: impl IntoIterator<Item = Bytes>,
     ) -> Vec<ProcessedDoc> {
-        let mut batch = QuickwitDocBatch::default();
         let mut otlp_payload_lens = Vec::new();
         for raw_doc in raw_docs {
             let len = raw_doc.len();
-            if let Err(error) = self.parse_into_batch(raw_doc, &mut batch, &mut otlp_payload_lens) {
+            if let Err(error) = self.parse_into_batch(raw_doc, &mut otlp_payload_lens) {
                 self.record_error(error, len);
             }
         }
-        let mapped = batch.map(&self.doc_mapper, |_| ());
+        let mapped = self.doc_batch.map(&self.doc_mapper);
         let mut processed_docs = Vec::with_capacity(mapped.len());
         for (i, (num_bytes, result)) in mapped.enumerate() {
-            let result = result.and_then(|((), partition, doc)| {
+            let result = result.and_then(|(partition, doc)| {
                 let timestamp_opt = self.extract_timestamp(&doc)?;
                 Ok(ProcessedDoc {
                     doc,

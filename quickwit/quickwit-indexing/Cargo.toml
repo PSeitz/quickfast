@@ -29,6 +29,7 @@ percent-encoding = { workspace = true }
 quickwit-query = { workspace = true }
 regex = { workspace = true }
 rdkafka = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tantivy = { workspace = true }

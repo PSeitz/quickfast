@@ -37,21 +37,25 @@ A commented example is available here: [quickwit.yaml](https://github.com/quickw
 
 ## Document clustering
 
-The optional, experimental top-level `docs_clustering_config` groups documents in fresh splits using an ordered list of string field paths. It leaves split merging unchanged.
+The optional, experimental top-level `docs_clustering_config` buffers documents in fresh splits and indexes them in cluster order instead of remapping document IDs afterward. Split merging stays unchanged.
 
 ```yaml
 docs_clustering_config:
   - kind: raw
     path: service
+  - kind: structure
   - kind: raw
     path: status
 ```
 
-Paths resolve against the mapped index schema and JSON fields. Use dot-separated paths for nested fields and `_dynamic.service` for an unmapped `service` field. Each path must have nonempty components without leading or trailing whitespace. Unresolvable paths cause indexing to fail. Only string values participate. Arrays and repeated fields use their first value. Missing and nonstring values are ignored.
+Each entry defines one clustering level from outermost to innermost:
 
-Each entry specifies one field. Structure clustering, combined policies, and the old `fingerprint` wrapper are removed. `kind: tokenized` returns an explicit unsupported error. The former `docs_clustering` key is rejected.
+- `kind: raw` groups by string values at a mapped schema or JSON path. Use dot-separated paths for nested fields and `_dynamic.service` for an unmapped `service` field. Each path must have nonempty components without leading or trailing whitespace. Unresolvable paths cause indexing to fail. Arrays and repeated fields use their first value. Missing and non-string values share an ignored bucket that precedes string groups in ascending lexicographic order.
+- `kind: structure` groups by a 64-bit hash of the document's unique mapped leaf paths (values, scalar types, field order, and repetitions are ignored; arrays count as leaves; empty objects contribute no leaves), ordered by ascending hash.
 
-Omit the setting to disable clustering. `QW_DISABLE_DOCS_CLUSTERING=true` disables a supported configuration and bypasses its path validation. `false` preserves the configured fields and leaves clustering disabled when the setting is absent. Unsupported kinds and malformed entries remain errors even with the override enabled.
+The old `fingerprint` wrapper and `docs_clustering` key are rejected. `kind: tokenized` returns an explicit unsupported error.
+
+Omit the setting to disable clustering. `QW_DISABLE_DOCS_CLUSTERING=true` disables a supported configuration and bypasses path validation. `false` preserves the configured entries and leaves clustering disabled when the setting is absent. Unsupported kinds and malformed entries remain errors even with the override enabled.
 
 ## REST configuration
 

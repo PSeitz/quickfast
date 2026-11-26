@@ -38,7 +38,7 @@ mod source_config;
 mod storage_config;
 mod templating;
 
-pub use docs_clustering::DocsClusteringConfig;
+pub use docs_clustering::{ClusteringKey, DocsClusteringConfig};
 // We export that one for backward compatibility.
 // See #2048
 use index_config::serialize::{IndexConfigV0_8, VersionedIndexConfig};
