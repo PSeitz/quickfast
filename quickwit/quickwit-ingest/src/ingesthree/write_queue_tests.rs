@@ -493,7 +493,9 @@ async fn test_io_failure_stops_writer_and_releases_pending_requests() {
     assert_eq!(queue_metrics_tests::usage(&queue), byte_usage(&queue));
     {
         let admission = queue.admission.lock().unwrap();
-        assert_eq!(admission.metrics.validation.valid_docs.get(), 1);
+        // Both queued requests are prepared concurrently before the first hits
+        // the IO error, and validation metrics count documents once validated.
+        assert_eq!(admission.metrics.validation.valid_docs.get(), 2);
         assert_eq!(admission.metrics.unavailable.get(), 0);
         assert_eq!(admission.metrics.queue_limit_bytes.get(), BUDGET as f64);
         assert_eq!(admission.metrics.disk_limit_bytes.get(), BUDGET as f64);
@@ -551,4 +553,41 @@ async fn test_concurrent_admission_stays_within_both_budgets() {
     assert_eq!(successful, 3);
     assert_eq!(queue.finish().await.unwrap()[0].num_docs, 3);
     worker.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_pipelined_prepare_preserves_fifo_order_and_settles_reservations() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Ingester::open(dir.path(), BUDGET).unwrap();
+    let (queue, receiver) = WriteQueue::channel(&core, BUDGET);
+    let core = FileWriter::new(core, queue.admission.clone());
+    let num_batches = 16usize;
+    let mut requests = Vec::with_capacity(num_batches);
+    for idx in 0..num_batches {
+        let doc = format!(r#"{{"message":"doc-{idx:02}"}}"#);
+        let batch = DocBatchV2 {
+            doc_lengths: vec![doc.len() as u32],
+            doc_buffer: Bytes::from(doc.into_bytes()),
+            doc_uids: vec![DocUid::for_test(idx as u128)],
+        };
+        let mut fut = Box::pin(queue.append(index(), batch, Some(mapper())));
+        assert!(poll!(&mut fut).is_pending());
+        requests.push(fut);
+    }
+    let worker = tokio::spawn(write_batches(core, receiver, queue.admission.clone(), None));
+    for request in requests {
+        assert_eq!(request.await.unwrap().num_docs, 1);
+    }
+    let files = queue.finish().await.unwrap();
+    worker.await.unwrap().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].num_docs, num_batches as u64);
+    assert_eq!(byte_usage(&queue), (0, 0, files[0].num_bytes));
+    let expected: Vec<Vec<u8>> = (0..num_batches)
+        .map(|idx| format!(r#"{{"message":"doc-{idx:02}"}}"#).into_bytes())
+        .collect();
+    assert_eq!(
+        crate::ingesthree::tests::read_input(&files[0].path).1,
+        expected
+    );
 }

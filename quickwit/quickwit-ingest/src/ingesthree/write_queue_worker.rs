@@ -16,19 +16,34 @@
 
 use std::sync::{Arc, Mutex};
 
-use quickwit_common::thread_pool::run_cpu_intensive;
+use futures::FutureExt;
+use futures::future::BoxFuture;
+use futures::stream::{FuturesOrdered, StreamExt};
+use quickwit_common::thread_pool::{Panicked, run_cpu_intensive};
 use quickwit_doc_mapper::DocMapper;
 use quickwit_proto::ingest::{DocBatchV2, ParseFailure};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::{
-    Admission, AppendRequest, AppendResponse, CompressedBatch, FileWriter, IngestError,
-    PreparedRequest, ValidationMetrics, WriterRequest,
+    Admission, AppendRequest, AppendResponse, CompressedBatch, DocumentsStagedForUpload,
+    FileWriter, IngestError, PreparedRequest, ValidationMetrics, WriterRequest,
 };
 use crate::doc_mapper::{is_document_validation_enabled, validate_doc_batch_impl};
 use crate::ingesthree::handoff::FileHandoffs;
 use crate::ingesthree::{OpenFileLimit, Uploader};
+
+type PrepareFuture = BoxFuture<'static, Result<PreparedRequest, Panicked>>;
+
+enum PendingStop {
+    Finish(oneshot::Sender<Result<Vec<DocumentsStagedForUpload>, IngestError>>),
+    Drain(oneshot::Sender<Result<(), IngestError>>),
+    Closed,
+}
+
+fn prepare_concurrency() -> usize {
+    (quickwit_common::num_cpus() / 2).max(4)
+}
 
 impl AppendRequest {
     pub(super) fn prepare(self, metrics: &ValidationMetrics) -> PreparedRequest {
@@ -115,27 +130,60 @@ async fn write_until_stopped(
     drain_reply: &mut Option<oneshot::Sender<Result<(), IngestError>>>,
 ) -> anyhow::Result<()> {
     // Local IO errors or panics can drop the ingester on a blocking thread. Keep
-    // directory ownership until handoff is dropped too (locals drop in reverse order).
+    // directory ownership until handoff is shut down too (locals drop in reverse order).
     let directory_lock = ingester.directory_lock.clone();
-    // Each handoff completes after registration or remote discard, independently
-    // of other files. Keep it tracked until its local copy is deleted.
+    // Each handoff runs in its own Tokio task and completes after registration or
+    // remote discard, independently of other files. Keep it tracked until local deletion.
     let mut handoffs = FileHandoffs::default();
+    // Prepare multiple batches concurrently on the CPU pool while preserving FIFO write order.
+    let mut preparing: FuturesOrdered<PrepareFuture> = FuturesOrdered::new();
+    let mut pending_stop: Option<PendingStop> = None;
+    let max_prepare_concurrency = prepare_concurrency();
     loop {
+        if preparing.is_empty()
+            && let Some(stop) = pending_stop.take()
+        {
+            match stop {
+                PendingStop::Finish(reply) => {
+                    handoffs.shutdown().await;
+                    let result = tokio::task::spawn_blocking(move || ingester.finish()).await?;
+                    drop(directory_lock);
+                    let _ = reply.send(result.map_err(IngestError::Internal));
+                    return Ok(());
+                }
+                PendingStop::Drain(reply) => {
+                    *drain_reply = Some(reply);
+                    receiver.close();
+                    let (writer, result) = tokio::task::spawn_blocking(move || {
+                        let result = ingester.finish_files();
+                        (ingester, result)
+                    })
+                    .await?;
+                    ingester = writer;
+                    if let Err(error) = result {
+                        handoffs.shutdown().await;
+                        tokio::task::spawn_blocking(move || drop(ingester)).await?;
+                        return Err(error.context("failed to finish local files"));
+                    }
+                    if uploader.is_none() {
+                        handoffs.shutdown().await;
+                        tokio::task::spawn_blocking(move || drop(ingester)).await?;
+                        anyhow::bail!("handoff drain requires an uploader");
+                    }
+                }
+                PendingStop::Closed => break,
+            }
+        }
         if drain_reply.is_some() && ingester.finished.is_empty() {
             break;
         }
         if let Some(uploader) = &uploader {
-            handoffs.schedule_uploads(uploader, &ingester.finished);
+            handoffs.schedule_uploads(uploader, &directory_lock, &ingester.finished);
         }
         tokio::select! {
             // Cancellation and expiry take priority even when the request queue stays nonempty.
             biased;
-            _ = async {
-                match drain_reply.as_mut() {
-                    Some(reply) => reply.closed().await,
-                    None => std::future::pending().await,
-                }
-            } => break,
+            _ = wait_for_drain_cancel(drain_reply.as_mut(), pending_stop.as_mut()) => break,
             _ = wait_for_deadline(ingester.next_deadline()) => {
                 let (writer, result) = tokio::task::spawn_blocking(move || {
                     let result = ingester.finish_expired_files();
@@ -143,8 +191,8 @@ async fn write_until_stopped(
                 }).await?;
                 ingester = writer;
                 if let Err(error) = result {
-                    receiver.close();
-                    drop(handoffs);
+                    drain_receiver_and_preparing(&mut receiver, &mut preparing).await;
+                    handoffs.shutdown().await;
                     tokio::task::spawn_blocking(move || drop(ingester)).await?;
                     return Err(error.context("failed to finish local files"));
                 }
@@ -153,9 +201,9 @@ async fn write_until_stopped(
                 let file_id = match result {
                     Ok(file_id) => file_id,
                     Err(error) => {
-                        receiver.close();
                         admission.lock().expect("admission mutex poisoned").close();
-                        drop(handoffs);
+                        drain_receiver_and_preparing(&mut receiver, &mut preparing).await;
+                        handoffs.shutdown().await;
                         // Preserve accepted writes and release the directory on the blocking pool.
                         tokio::task::spawn_blocking(move || ingester.finish()).await??;
                         return Err(error);
@@ -174,56 +222,102 @@ async fn write_until_stopped(
                     }
                 }
             }
-            request = receiver.recv(), if drain_reply.is_none() => match request {
-                Some(WriterRequest::Append(append)) => {
-                    ingester = append_batch(ingester, append).await?;
+            Some(first_result) = preparing.next(), if !preparing.is_empty() => {
+                let mut ready = Vec::new();
+                let mut prepare_panic = None;
+                match first_result {
+                    Ok(prepared) => ready.push(prepared),
+                    Err(panicked) => prepare_panic = Some(panicked),
                 }
-                Some(WriterRequest::Finish(reply)) => {
-                    drop(handoffs);
-                    let result = tokio::task::spawn_blocking(move || ingester.finish()).await?;
-                    drop(directory_lock);
-                    let _ = reply.send(result.map_err(IngestError::Internal));
-                    return Ok(());
-                }
-                Some(WriterRequest::Drain(reply)) => {
-                    *drain_reply = Some(reply);
-                    receiver.close();
-                    let (writer, result) = tokio::task::spawn_blocking(move || {
-                        let result = ingester.finish_files();
-                        (ingester, result)
-                    }).await?;
-                    ingester = writer;
-                    if let Err(error) = result {
-                        drop(handoffs);
-                        tokio::task::spawn_blocking(move || drop(ingester)).await?;
-                        return Err(error.context("failed to finish local files"));
-                    }
-                    if uploader.is_none() {
-                        tokio::task::spawn_blocking(move || drop(ingester)).await?;
-                        anyhow::bail!("handoff drain requires an uploader");
+                while prepare_panic.is_none() {
+                    match preparing.next().now_or_never() {
+                        Some(Some(Ok(prepared))) => ready.push(prepared),
+                        Some(Some(Err(panicked))) => prepare_panic = Some(panicked),
+                        _ => break,
                     }
                 }
-                None => break,
-            },
+                if let Some(panicked) = prepare_panic {
+                    admission.lock().expect("admission mutex poisoned").close();
+                    drop(ready);
+                    drain_receiver_and_preparing(&mut receiver, &mut preparing).await;
+                    handoffs.shutdown().await;
+                    tokio::task::spawn_blocking(move || ingester.finish()).await??;
+                    return Err(panicked.into());
+                }
+                if drain_reply.is_none() {
+                    // Refill the CPU preparation pipeline before blocking on local file IO
+                    // so validation and compression keep overlapping with disk writes.
+                    refill_preparing(
+                        &mut receiver,
+                        &mut preparing,
+                        &mut pending_stop,
+                        max_prepare_concurrency,
+                    );
+                }
+                match tokio::task::spawn_blocking(move || {
+                    append_prepared_batches(ingester, ready)
+                })
+                .await?
+                {
+                    Ok(writer) => ingester = writer,
+                    Err(error) => {
+                        drain_receiver_and_preparing(&mut receiver, &mut preparing).await;
+                        handoffs.shutdown().await;
+                        return Err(error);
+                    }
+                }
+            }
+            request = receiver.recv(), if drain_reply.is_none() && pending_stop.is_none() && preparing.len() < max_prepare_concurrency => {
+                enqueue_request(request, &mut preparing, &mut pending_stop);
+                refill_preparing(
+                    &mut receiver,
+                    &mut preparing,
+                    &mut pending_stop,
+                    max_prepare_concurrency,
+                );
+            }
         }
     }
-    drop(handoffs);
+    drain_receiver_and_preparing(&mut receiver, &mut preparing).await;
+    handoffs.shutdown().await;
     tokio::task::spawn_blocking(move || ingester.finish()).await??;
     Ok(())
 }
 
-async fn wait_for_deadline(deadline: Option<Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => std::future::pending::<()>().await,
+fn refill_preparing(
+    receiver: &mut mpsc::UnboundedReceiver<WriterRequest>,
+    preparing: &mut FuturesOrdered<PrepareFuture>,
+    pending_stop: &mut Option<PendingStop>,
+    max_prepare_concurrency: usize,
+) {
+    while pending_stop.is_none() && preparing.len() < max_prepare_concurrency {
+        match receiver.try_recv() {
+            Ok(next_request) => {
+                enqueue_request(Some(next_request), preparing, pending_stop);
+            }
+            Err(mpsc::error::TryRecvError::Empty) => break,
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                *pending_stop = Some(PendingStop::Closed);
+                break;
+            }
+        }
     }
 }
 
-/// Prepares and writes one batch, settles its reservation, and replies to the caller.
-pub(super) async fn append_batch(
-    ingester: FileWriter,
-    append: AppendRequest,
-) -> anyhow::Result<FileWriter> {
+fn enqueue_request(
+    request: Option<WriterRequest>,
+    preparing: &mut FuturesOrdered<PrepareFuture>,
+    pending_stop: &mut Option<PendingStop>,
+) {
+    match request {
+        Some(WriterRequest::Append(append)) => preparing.push_back(spawn_prepare(append)),
+        Some(WriterRequest::Finish(reply)) => *pending_stop = Some(PendingStop::Finish(reply)),
+        Some(WriterRequest::Drain(reply)) => *pending_stop = Some(PendingStop::Drain(reply)),
+        None => *pending_stop = Some(PendingStop::Closed),
+    }
+}
+
+fn spawn_prepare(append: AppendRequest) -> PrepareFuture {
     let metrics = append
         .reservation
         .admission
@@ -234,8 +328,60 @@ pub(super) async fn append_batch(
         .clone();
     // Move the request into preparation. Cancellation can leave CPU work running,
     // and a discarded result must drop its buffers before its reservation.
-    let prepared = run_cpu_intensive(move || append.prepare(&metrics)).await?;
+    Box::pin(run_cpu_intensive(move || append.prepare(&metrics)))
+}
+
+/// Releases queued requests and waits for in-flight CPU preparations so all
+/// buffers and byte reservations settle before the writer stops.
+async fn drain_receiver_and_preparing(
+    receiver: &mut mpsc::UnboundedReceiver<WriterRequest>,
+    preparing: &mut FuturesOrdered<PrepareFuture>,
+) {
+    receiver.close();
+    while receiver.try_recv().is_ok() {}
+    while let Some(result) = preparing.next().await {
+        drop(result);
+    }
+}
+
+async fn wait_for_drain_cancel(
+    drain_reply: Option<&mut oneshot::Sender<Result<(), IngestError>>>,
+    pending_stop: Option<&mut PendingStop>,
+) {
+    if let Some(reply) = drain_reply {
+        reply.closed().await;
+    } else if let Some(PendingStop::Drain(reply)) = pending_stop {
+        reply.closed().await;
+    } else {
+        std::future::pending::<()>().await;
+    }
+}
+
+async fn wait_for_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Prepares and writes one batch, settles its reservation, and replies to the caller.
+#[cfg(test)]
+pub(super) async fn append_batch(
+    ingester: FileWriter,
+    append: AppendRequest,
+) -> anyhow::Result<FileWriter> {
+    let prepared = spawn_prepare(append).await?;
     tokio::task::spawn_blocking(move || append_prepared(ingester, prepared)).await?
+}
+
+fn append_prepared_batches(
+    mut ingester: FileWriter,
+    prepared_batches: Vec<PreparedRequest>,
+) -> anyhow::Result<FileWriter> {
+    for prepared in prepared_batches {
+        ingester = append_prepared(ingester, prepared)?;
+    }
+    Ok(ingester)
 }
 
 pub(super) fn append_prepared(

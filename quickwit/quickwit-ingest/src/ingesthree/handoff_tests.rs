@@ -38,7 +38,7 @@ const DOCUMENT: &str = "opaque\0document\n";
 
 // Prevent automatic clock advancement while filesystem/validation threads run.
 // Each test explicitly advances retry time. Drop also cleans up after assertion failures.
-struct ClockGuard(tokio::task::JoinHandle<()>);
+pub(super) struct ClockGuard(tokio::task::JoinHandle<()>);
 
 impl Drop for ClockGuard {
     fn drop(&mut self) {
@@ -46,7 +46,7 @@ impl Drop for ClockGuard {
     }
 }
 
-fn keep_clock_fixed() -> ClockGuard {
+pub(super) fn keep_clock_fixed() -> ClockGuard {
     ClockGuard(tokio::spawn(async {
         loop {
             tokio::task::yield_now().await;

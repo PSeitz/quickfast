@@ -227,6 +227,7 @@ async fn test_writer_loop_finishes_expired_files() {
 
 #[tokio::test(start_paused = true)]
 async fn test_continuous_appends_do_not_extend_the_creation_deadline() {
+    let _clock = super::handoff_tests::keep_clock_fixed();
     let dir = tempfile::tempdir().unwrap();
     let queue = WriteQueue::open(dir.path().to_path_buf(), BUDGET, BUDGET, None)
         .await
@@ -262,6 +263,7 @@ async fn test_continuous_appends_do_not_extend_the_creation_deadline() {
 
 #[tokio::test(start_paused = true)]
 async fn test_index_deadlines_are_independent_and_timer_restarts_after_idle() {
+    let _clock = super::handoff_tests::keep_clock_fixed();
     let dir = tempfile::tempdir().unwrap();
     let queue = WriteQueue::open(dir.path().to_path_buf(), BUDGET, BUDGET, None)
         .await

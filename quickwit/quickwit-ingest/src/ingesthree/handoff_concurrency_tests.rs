@@ -131,3 +131,44 @@ async fn test_local_deletion_retry_does_not_delay_other_files() {
     assert_eq!(retained_bytes(&queue), 0);
     assert!(uploads.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn test_spawned_handoff_progresses_without_polling_next_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, file) = ingester_with_finished_file(dir.path());
+    let (storage, mut uploads) = capture_uploads(vec![Ok(())]);
+    let (registered_tx, mut registered_rx) = mpsc::unbounded_channel();
+    let mut mock = MockMetastoreService::new();
+    mock.expect_register_file_for_indexing()
+        .once()
+        .returning(move |request| {
+            registered_tx.send(request.file_id.clone()).unwrap();
+            Ok(registration_response(request))
+        });
+    let (metastore, permits) = stalled_metastore(mock);
+    let uploader = Uploader::new(storage, metastore);
+    let mut handoffs = FileHandoffs::default();
+    handoffs.schedule_uploads(&uploader, &core.directory_lock, core.finished_files());
+
+    // Upload and registration must progress independently even while `next_delete()`
+    // is not polled (for example while the writer is busy preparing/appending batches).
+    let (uploaded_key, _) = tokio::time::timeout(Duration::from_secs(5), uploads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(uploaded_key, PathBuf::from(file.file_id.to_string()));
+    permits.add_permits(1);
+    let registered_id = tokio::time::timeout(Duration::from_secs(5), registered_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(registered_id, file.file_id.to_string());
+
+    let ready_for_delete = tokio::time::timeout(Duration::from_secs(5), handoffs.next_delete())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ready_for_delete, file.file_id);
+    handoffs.deleted(ready_for_delete);
+    handoffs.shutdown().await;
+}

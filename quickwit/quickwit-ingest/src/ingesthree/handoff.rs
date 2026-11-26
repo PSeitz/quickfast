@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashSet};
+use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
 use futures::future::BoxFuture;
-use futures::stream::{FuturesUnordered, StreamExt};
 use quickwit_common::retry::Retryable;
 use quickwit_proto::metastore::{
     EntityKind, MetastoreError, MetastoreService, MetastoreServiceClient, RegisterFileForIndexing,
 };
 use quickwit_storage::{FilePayload, Storage, StorageErrorKind};
+use tokio::task::JoinSet;
 use tokio::time::Instant;
 use ulid::Ulid;
 
@@ -33,40 +34,50 @@ use super::DocumentsStagedForUpload;
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Tracks uploads, registration, and local deletion of finished files.
-/// Each file retries independently.
+/// Each file runs in its own Tokio task and retries independently so uploads
+/// and registration make progress while the writer prepares and appends batches.
 #[derive(Default)]
 pub(super) struct FileHandoffs {
     // IDs of files scheduled for upload, retained until local deletion.
     scheduled_file_ids: HashSet<Ulid>,
-    uploads: FuturesUnordered<BoxFuture<'static, anyhow::Result<Ulid>>>,
+    uploads: JoinSet<anyhow::Result<Ulid>>,
     pending_delete: BTreeSet<(Instant, Ulid)>,
 }
 
 impl FileHandoffs {
-    /// Schedules uploads for finished files. Repeated scans schedule each file once
-    /// while its ID is tracked. `next_delete` polls the uploads and registration.
+    /// Spawns upload and registration tasks for finished files. Repeated scans
+    /// schedule each file once while its ID is tracked. Each spawned task retains
+    /// `directory_lock` until its upload/registration future drops.
     pub fn schedule_uploads(
         &mut self,
         uploader: &Uploader,
+        directory_lock: &Arc<File>,
         finished_files: &[DocumentsStagedForUpload],
     ) {
         for file in finished_files {
             if self.scheduled_file_ids.insert(file.file_id) {
-                self.uploads.push(uploader.start(file));
+                let directory_lock = directory_lock.clone();
+                let upload = uploader.start(file);
+                self.uploads.spawn(async move {
+                    // Declared before `upload.await` so aborting drops `upload`
+                    // before releasing directory ownership.
+                    let _directory_lock = directory_lock;
+                    upload.await
+                });
             }
         }
     }
 
-    /// Polls uploads and registration before yielding a file ID for local deletion.
-    /// Upload futures and deletion deadlines remain in `self` when the writer's
-    /// select loop cancels this call.
+    /// Waits for completed upload tasks and deletion deadlines before yielding a
+    /// file ID for local deletion. Cancel-safe across writer select iterations.
     pub async fn next_delete(&mut self) -> anyhow::Result<Ulid> {
         loop {
             let deadline = self.pending_delete.first().map(|(deadline, _)| *deadline);
             tokio::select! {
                 biased;
-                Some(result) = self.uploads.next(), if !self.uploads.is_empty() => {
-                    self.pending_delete.insert((Instant::now(), result?));
+                Some(join_result) = self.uploads.join_next(), if !self.uploads.is_empty() => {
+                    let file_id = join_result.context("ingesthree upload task failed")??;
+                    self.pending_delete.insert((Instant::now(), file_id));
                 }
                 _ = async {
                     match deadline {
@@ -79,6 +90,12 @@ impl FileHandoffs {
                 }
             }
         }
+    }
+
+    /// Aborts in-flight upload tasks and awaits their cancellation so every task
+    /// drops before the caller releases directory ownership or acknowledges drain.
+    pub async fn shutdown(&mut self) {
+        self.uploads.shutdown().await;
     }
 
     pub fn deleted(&mut self, file_id: Ulid) {

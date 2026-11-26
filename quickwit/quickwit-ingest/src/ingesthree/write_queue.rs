@@ -212,13 +212,19 @@ impl WriteQueue {
         .await
         .map_err(anyhow::Error::from)??;
         if let Some(uploader) = &uploader {
-            // Keep ownership until every handoff is dropped, including when local
+            // Keep ownership until every handoff is stopped, including when local
             // deletion fails or startup is cancelled during blocking filesystem work.
-            let _directory_lock = ingester.directory_lock.clone();
+            let directory_lock = ingester.directory_lock.clone();
             let mut handoffs = FileHandoffs::default();
-            handoffs.schedule_uploads(uploader, ingester.finished_files());
+            handoffs.schedule_uploads(uploader, &directory_lock, ingester.finished_files());
             while !ingester.finished_files().is_empty() {
-                let file_id = handoffs.next_delete().await?;
+                let file_id = match handoffs.next_delete().await {
+                    Ok(file_id) => file_id,
+                    Err(error) => {
+                        handoffs.shutdown().await;
+                        return Err(error.into());
+                    }
+                };
                 let (writer, result) = tokio::task::spawn_blocking(move || {
                     let result = ingester.delete_finished_file(file_id);
                     (ingester, result)
