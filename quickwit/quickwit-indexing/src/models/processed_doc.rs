@@ -14,11 +14,11 @@
 
 use std::fmt;
 
-use quickwit_doc_mapper::QuickwitDoc;
+use quickwit_doc_mapper::MappedDoc;
 use tantivy::DateTime;
 
 pub struct ProcessedDoc {
-    pub doc: QuickwitDoc,
+    pub doc: MappedDoc,
     pub timestamp_opt: Option<DateTime>,
     pub partition: u64,
     pub num_bytes: usize,

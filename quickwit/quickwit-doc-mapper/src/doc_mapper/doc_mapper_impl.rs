@@ -30,7 +30,7 @@ use tantivy::schema::{Field, FieldType, INDEXED, OwnedValue as TantivyValue, STO
 
 use super::DocMapperBuilder;
 use super::field_mapping_entry::RAW_TOKENIZER_NAME;
-use super::field_presence::populate_field_presence;
+use super::field_presence::{populate_field_presence, populate_field_presence_iter};
 use super::tantivy_val_to_json::tantivy_value_to_json;
 use crate::doc_mapper::mapping_tree::{
     JsonValueIterator, MappingNode, MappingNodeRoot, build_field_path_from_str, build_mapping_tree,
@@ -38,12 +38,14 @@ use crate::doc_mapper::mapping_tree::{
 };
 use crate::doc_mapper::{FieldMappingType, JsonObject, Partition};
 use crate::query_builder::build_query;
-use crate::quickwit_doc::{ByteDictionary, FieldBindings, QuickwitLeafValue, QuickwitObject};
-use crate::routing_expression::RoutingExpr;
+use crate::quickwit_doc::{
+    ByteDictionary, FieldBindings, MappedDoc, QuickwitDocData, QuickwitLeafValue, QuickwitObject,
+};
+use crate::routing_expression::{RoutingExpr, RoutingExprContext};
 use crate::{
     Cardinality, DOCUMENT_SIZE_FIELD_NAME, DYNAMIC_FIELD_NAME, DocMapping, DocParsingError,
-    FIELD_PRESENCE_FIELD_NAME, Mode, ModeType, NamedField, QueryParserError, QuickwitDoc,
-    SOURCE_FIELD_NAME, TokenizerEntry, WarmupInfo,
+    FIELD_PRESENCE_FIELD_NAME, Mode, ModeType, NamedField, QueryParserError, SOURCE_FIELD_NAME,
+    TokenizerEntry, WarmupInfo,
 };
 
 const FIELD_PRESENCE_FIELD: Field = Field::from_field_id(0u32);
@@ -465,7 +467,7 @@ impl DocMapper {
         Ok(())
     }
 
-    pub(crate) fn quickwit_partition(&self, doc: &QuickwitDoc) -> Partition {
+    pub(crate) fn quickwit_partition(&self, doc: &impl RoutingExprContext) -> Partition {
         self.partition_key.eval_hash(doc)
     }
 
@@ -504,10 +506,15 @@ impl DocMapper {
         Ok(bindings)
     }
 
-    /// Presence hashes use the final mapped values after the dictionary is frozen.
-    pub(crate) fn add_field_presence(&self, mapped: &mut QuickwitDoc) {
+    /// Populates field-presence hashes from the mapped document view.
+    pub(crate) fn add_field_presence(&self, data: &QuickwitDocData, mapped: &mut MappedDoc) {
         if self.index_field_presence {
-            for hash in populate_field_presence(mapped, &self.schema, true) {
+            let hashes = populate_field_presence_iter(
+                mapped.iter_fields_and_values(data),
+                &self.schema,
+                true,
+            );
+            for hash in hashes {
                 mapped
                     .bindings
                     .bind_computed(FIELD_PRESENCE_FIELD, QuickwitLeafValue::U64(hash));

@@ -107,6 +107,22 @@ pub struct MappedFields<'a> {
     bindings: slice::Iter<'a, (Field, Binding)>,
 }
 
+impl<'a> MappedFields<'a> {
+    #[inline]
+    pub(crate) fn new(
+        nodes: &'a [u8],
+        dictionary: &'a ByteDictionary,
+        bindings: &'a FieldBindings,
+    ) -> Self {
+        Self {
+            nodes,
+            dictionary,
+            dynamic: &bindings.dynamic,
+            bindings: bindings.values.iter(),
+        }
+    }
+}
+
 impl<'a> Iterator for MappedFields<'a> {
     type Item = (Field, MappedValue<'a>);
 

@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use quickwit_common::KillSwitch;
 use quickwit_common::io::IoControls;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::{ClusteringKey, DocsClusteringConfig, IndexingSettings};
-use quickwit_doc_mapper::{DocMapper, QuickwitDoc, QuickwitDocBatch};
+use quickwit_doc_mapper::{DocMapper, MappedDoc, QuickwitDocBatch, QuickwitDocData};
 use quickwit_proto::indexing::IndexingPipelineId;
 use quickwit_proto::types::{IndexUid, NodeId};
 use tantivy::schema::Value;
@@ -39,15 +41,23 @@ fn mapper() -> DocMapper {
     .unwrap()
 }
 
-fn map_docs(mapper: &DocMapper, docs: &[serde_json::Value]) -> Vec<QuickwitDoc> {
+fn map_docs(
+    mapper: &DocMapper,
+    docs: &[serde_json::Value],
+) -> (Arc<QuickwitDocData>, Vec<MappedDoc>) {
     let mut batch = QuickwitDocBatch::default();
     for doc in docs {
         batch.push_serialize(doc, 0).unwrap();
     }
-    batch.map(mapper).map(|(_, res)| res.unwrap().1).collect()
+    let mapped = batch
+        .map_pending(mapper)
+        .into_iter()
+        .map(|(_, res)| res.unwrap().1)
+        .collect();
+    (batch.take_frozen_data(), mapped)
 }
 
-fn processed_doc(doc: QuickwitDoc) -> ProcessedDoc {
+fn processed_doc(doc: MappedDoc) -> ProcessedDoc {
     ProcessedDoc {
         doc,
         timestamp_opt: None,
@@ -78,23 +88,30 @@ fn builder(
 }
 
 #[test]
-fn test_clustering_structure_hash_is_order_and_batch_independent() {
+fn test_clustering_structure_hash_is_order_independent_and_depth_sensitive() {
     let mapper = mapper();
-    // Different batches assign different dictionary key IDs to the same keys.
-    let batch1 = map_docs(
+    let (data, docs) = map_docs(
         &mapper,
         &[
             serde_json::json!({"alpha": 1, "beta": {"nested": "x"}}),
+            serde_json::json!({"beta": {"nested": [1, 2], "empty": {}}, "alpha": "str"}),
             serde_json::json!({"a": {"bc": 1}}),
             serde_json::json!({"ab": {"c": 1}}),
+            serde_json::json!({"alpha": 1, "nested": {"beta": "x"}}),
         ],
     );
-    let batch2 = map_docs(
-        &mapper,
-        &[serde_json::json!({"beta": {"nested": [1, 2], "empty": {}}, "alpha": "str"})],
+    assert_eq!(
+        structure_hash(docs[0].as_object(&data)),
+        structure_hash(docs[1].as_object(&data))
     );
-    assert_eq!(structure_hash(&batch1[0]), structure_hash(&batch2[0]));
-    assert_ne!(structure_hash(&batch1[1]), structure_hash(&batch1[2]));
+    assert_ne!(
+        structure_hash(docs[2].as_object(&data)),
+        structure_hash(docs[3].as_object(&data))
+    );
+    assert_ne!(
+        structure_hash(docs[0].as_object(&data)),
+        structure_hash(docs[4].as_object(&data))
+    );
 }
 
 #[test]
@@ -116,8 +133,9 @@ fn test_clustering_field_and_ignored_lexicographic_order() -> anyhow::Result<()>
         serde_json::json!({"body": "a_err_2", "service": "a", "labels": {"status": "error"}}),
         serde_json::json!({"body": "a_missing_st", "service": "a", "labels": {"status": 42}}),
     ];
-    for doc in map_docs(&mapper, &inputs) {
-        split_builder.add_document(processed_doc(doc))?;
+    let (data, docs) = map_docs(&mapper, &inputs);
+    for doc in docs {
+        split_builder.add_document(processed_doc(doc), &data)?;
     }
     assert_eq!(
         split_builder
@@ -127,7 +145,7 @@ fn test_clustering_field_and_ignored_lexicographic_order() -> anyhow::Result<()>
             .group_sizes(),
         vec![1, 1, 1, 2, 1, 1]
     );
-    let split = split_builder.finalize()?;
+    let split = split_builder.finalize(data)?;
     let reader = split.index.reader()?;
     let searcher = reader.searcher();
     let schema = split.index.schema();
@@ -154,6 +172,39 @@ fn test_clustering_field_and_ignored_lexicographic_order() -> anyhow::Result<()>
 }
 
 #[test]
+fn test_clustering_lazy_path_key_id_resolution_across_open_dictionary() -> anyhow::Result<()> {
+    let mapper = mapper();
+    let mut split_builder = builder(
+        &mapper,
+        vec![ClusteringKey::Field("labels.late_key".into())],
+    )?;
+    let mut batch = QuickwitDocBatch::default();
+    // Push docs incrementally into the open dictionary: early docs do not contain `late_key` yet.
+    for input in [
+        serde_json::json!({"body": "early_missing"}),
+        serde_json::json!({"body": "late_b", "labels": {"late_key": "b"}}),
+        serde_json::json!({"body": "late_a", "labels": {"late_key": "a"}}),
+        serde_json::json!({"body": "late_a_2", "labels": {"late_key": "a"}}),
+    ] {
+        batch.push_serialize(&input, 0)?;
+        let doc = batch.map_pending(&mapper).pop().unwrap().1?;
+        split_builder.add_document(processed_doc(doc.1), batch.doc_data())?;
+    }
+    let split = split_builder.finalize(batch.take_frozen_data())?;
+    let reader = split.index.reader()?;
+    let searcher = reader.searcher();
+    let body = split.index.schema().get_field("body")?;
+    let bodies: Vec<String> = (0..4u32)
+        .map(|doc_id| {
+            let doc: TantivyDocument = searcher.doc(DocAddress::new(0, doc_id)).unwrap();
+            doc.get_first(body).unwrap().as_str().unwrap().to_string()
+        })
+        .collect();
+    assert_eq!(bodies, ["early_missing", "late_a", "late_a_2", "late_b"]);
+    Ok(())
+}
+
+#[test]
 fn test_clustering_structure_groups_matching_shapes() -> anyhow::Result<()> {
     let mapper = mapper();
     let mut split_builder = builder(
@@ -173,8 +224,9 @@ fn test_clustering_structure_groups_matching_shapes() -> anyhow::Result<()> {
         // Shape B again
         serde_json::json!({"body": "b2", "service": "api", "labels": {"y": [1, 2], "x": null}}),
     ];
-    for doc in map_docs(&mapper, &inputs) {
-        split_builder.add_document(processed_doc(doc))?;
+    let (data, docs) = map_docs(&mapper, &inputs);
+    for doc in docs {
+        split_builder.add_document(processed_doc(doc), &data)?;
     }
     assert_eq!(
         split_builder
@@ -184,7 +236,7 @@ fn test_clustering_structure_groups_matching_shapes() -> anyhow::Result<()> {
             .group_sizes(),
         vec![2, 2]
     );
-    let split = split_builder.finalize()?;
+    let split = split_builder.finalize(data)?;
     let reader = split.index.reader()?;
     let searcher = reader.searcher();
     let body = split.index.schema().get_field("body")?;
@@ -203,30 +255,29 @@ fn test_clustering_structure_groups_matching_shapes() -> anyhow::Result<()> {
 }
 
 #[test]
-fn test_clustering_mem_usage_counts_shared_batch_once() {
+fn test_clustering_mem_usage_excludes_shared_doc_data() {
     let mapper = mapper();
     let config = DocsClusteringConfig {
-        group_by: vec![ClusteringKey::Field("body".into())],
+        group_by: vec![ClusteringKey::Field("service".into())],
     };
     let mut clusterer = DocClusterer::new(&config).unwrap();
     let payload = "x".repeat(4096);
-    let docs = map_docs(
+    let (data, docs) = map_docs(
         &mapper,
         &[
-            serde_json::json!({"body": payload}),
-            serde_json::json!({"body": "other"}),
-            serde_json::json!({"body": "third"}),
+            serde_json::json!({"service": "api", "body": payload}),
+            serde_json::json!({"service": "web", "body": "other"}),
         ],
     );
-    let (_, batch_mem) = docs[0].batch_data_id_and_mem_usage();
+    let data_mem = data.mem_usage();
     let before = clusterer.mem_usage();
-    clusterer.push(docs[0].clone());
-    let after_first = clusterer.mem_usage();
-    assert!(after_first - before >= batch_mem);
-    clusterer.push(docs[1].clone());
-    let after_second = clusterer.mem_usage();
-    // Second doc from the same batch must not double-count `BatchData`.
-    assert!(after_second - after_first < batch_mem);
+    clusterer.push(docs[0].clone(), &data);
+    clusterer.push(docs[1].clone(), &data);
+    let after = clusterer.mem_usage();
+    // Shared `QuickwitDocData` (holding the 4 KiB body) is tracked once by the caller rather than
+    // duplicated inside `DocClusterer`.
+    assert!(after > before);
+    assert!(after - before < data_mem);
 }
 
 #[test]
@@ -258,8 +309,9 @@ fn test_clustering_tokenized_groups_by_token_pattern_and_max_tokens() -> anyhow:
         // Word Gap Uuid (tag 1,5,4)
         serde_json::json!({"body": "uuid_1", "service": "api", "labels": {"message": "id 550e8400-e29b-41d4-a716-446655440000"}}),
     ];
-    for doc in map_docs(&mapper, &inputs) {
-        split_builder.add_document(processed_doc(doc))?;
+    let (data, docs) = map_docs(&mapper, &inputs);
+    for doc in docs {
+        split_builder.add_document(processed_doc(doc), &data)?;
     }
     assert_eq!(
         split_builder
@@ -269,7 +321,7 @@ fn test_clustering_tokenized_groups_by_token_pattern_and_max_tokens() -> anyhow:
             .group_sizes(),
         vec![2, 2, 2, 1]
     );
-    let split = split_builder.finalize()?;
+    let split = split_builder.finalize(data)?;
     let reader = split.index.reader()?;
     let searcher = reader.searcher();
     let body = split.index.schema().get_field("body")?;
@@ -299,8 +351,9 @@ fn test_clustering_tokenized_groups_by_token_pattern_and_max_tokens() -> anyhow:
         serde_json::json!({"body": "different", "labels": {"message": "10 req"}}),
         serde_json::json!({"body": "long", "labels": {"message": "req 20 extra 10.0.0.1"}}),
     ];
-    for doc in map_docs(&mapper, &truncated_inputs) {
-        truncated_builder.add_document(processed_doc(doc))?;
+    let (truncated_data, truncated_docs) = map_docs(&mapper, &truncated_inputs);
+    for doc in truncated_docs {
+        truncated_builder.add_document(processed_doc(doc), &truncated_data)?;
     }
     assert_eq!(
         truncated_builder
@@ -310,7 +363,7 @@ fn test_clustering_tokenized_groups_by_token_pattern_and_max_tokens() -> anyhow:
             .group_sizes(),
         vec![2, 1]
     );
-    let split = truncated_builder.finalize()?;
+    let split = truncated_builder.finalize(truncated_data)?;
     let reader = split.index.reader()?;
     let searcher = reader.searcher();
     let bodies: Vec<String> = (0..truncated_inputs.len() as u32)
@@ -327,14 +380,15 @@ fn test_clustering_tokenized_groups_by_token_pattern_and_max_tokens() -> anyhow:
 fn test_clustering_finalization_propagates_cancellation() -> anyhow::Result<()> {
     let mapper = mapper();
     let mut split_builder = builder(&mapper, vec![ClusteringKey::Field("body".into())])?;
-    for doc in map_docs(&mapper, &[serde_json::json!({"body": "hello"})]) {
-        split_builder.add_document(processed_doc(doc))?;
+    let (data, docs) = map_docs(&mapper, &[serde_json::json!({"body": "hello"})]);
+    for doc in docs {
+        split_builder.add_document(processed_doc(doc), &data)?;
     }
     let kill_switch = KillSwitch::default();
     split_builder
         .controlled_directory
         .set_io_controls(IoControls::default().set_kill_switch(kill_switch.clone()));
     kill_switch.kill();
-    assert!(split_builder.finalize().is_err());
+    assert!(split_builder.finalize(data).is_err());
     Ok(())
 }

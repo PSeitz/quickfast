@@ -56,7 +56,11 @@ fn bench_converter(
             SourceInputFormat::Json,
         )
         .unwrap();
-        b.iter(|| converter.process_batch(lines.iter().cloned()))
+        b.iter(|| {
+            let docs = converter.process_docs(lines.iter().cloned());
+            let data = converter.take_frozen_doc_data();
+            (docs, data)
+        })
     });
 }
 

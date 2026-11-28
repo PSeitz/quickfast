@@ -20,7 +20,9 @@ use bytes::Bytes;
 use itertools::Either;
 use quickwit_common::rate_limited_tracing::rate_limited_warn;
 use quickwit_config::{SourceInputFormat, TransformConfig};
-use quickwit_doc_mapper::{DocMapper, DocParsingError, QuickwitDocBatch};
+use quickwit_doc_mapper::{
+    DocMapper, DocParsingError, MappedDoc, QuickwitDocBatch, QuickwitDocData,
+};
 use quickwit_metrics::{Counter, counter, labels};
 use quickwit_opentelemetry::otlp::{
     OtlpLogsError, OtlpTracesError, parse_otlp_logs_json, parse_otlp_logs_protobuf,
@@ -28,8 +30,8 @@ use quickwit_opentelemetry::otlp::{
 };
 use quickwit_proto::types::{IndexId, SourceId};
 use serde::Serialize;
+use tantivy::DateTime;
 use tantivy::schema::{Field, Value};
-use tantivy::{DateTime, Document};
 use thiserror::Error;
 
 #[cfg(feature = "vrl")]
@@ -254,12 +256,16 @@ impl DocumentConverter {
         &self.counters
     }
 
-    fn extract_timestamp(&self, doc: &impl Document) -> Result<Option<DateTime>, DocParsingError> {
+    fn extract_timestamp(
+        &self,
+        doc: &MappedDoc,
+        data: &QuickwitDocData,
+    ) -> Result<Option<DateTime>, DocParsingError> {
         let Some(timestamp_field) = self.timestamp_field_opt else {
             return Ok(None);
         };
         let timestamp = doc
-            .iter_fields_and_values()
+            .iter_fields_and_values(data)
             .find(|(field, _)| *field == timestamp_field)
             .and_then(|(_, value)| value.as_datetime())
             .ok_or_else(|| {
@@ -313,10 +319,30 @@ impl DocumentConverter {
         self.counters.record_error(error, num_bytes as u64);
     }
 
-    pub fn process_batch(
-        &mut self,
-        raw_docs: impl IntoIterator<Item = Bytes>,
-    ) -> Vec<ProcessedDoc> {
+    /// Borrows the open shared dictionary and encoded node buffer for documents processed since
+    /// the last [`take_frozen_doc_data`](Self::take_frozen_doc_data).
+    #[inline]
+    pub fn doc_data(&self) -> &QuickwitDocData {
+        self.doc_batch.doc_data()
+    }
+
+    /// Freezes and takes the shared [`QuickwitDocData`] accumulated across all processed
+    /// documents, resetting the converter's dictionary and node buffer for the next indexing
+    /// window.
+    pub fn take_frozen_doc_data(&mut self) -> Arc<QuickwitDocData> {
+        self.doc_batch.take_frozen_data()
+    }
+
+    /// Parses and maps a single raw document into the converter's open [`QuickwitDocData`].
+    pub fn process_doc(&mut self, raw_doc: Bytes) -> Vec<ProcessedDoc> {
+        self.process_docs(std::iter::once(raw_doc))
+    }
+
+    /// Parses and maps raw documents into the converter's open [`QuickwitDocData`] without
+    /// freezing or resetting the dictionary. Call
+    /// [`take_frozen_doc_data`](Self::take_frozen_doc_data) when finalizing splits for the current
+    /// indexing window.
+    pub fn process_docs(&mut self, raw_docs: impl IntoIterator<Item = Bytes>) -> Vec<ProcessedDoc> {
         let mut otlp_payload_lens = Vec::new();
         for raw_doc in raw_docs {
             let len = raw_doc.len();
@@ -324,11 +350,12 @@ impl DocumentConverter {
                 self.record_error(error, len);
             }
         }
-        let mapped = self.doc_batch.map(&self.doc_mapper);
+        let mapped = self.doc_batch.map_pending(&self.doc_mapper);
+        let doc_data = self.doc_batch.doc_data();
         let mut processed_docs = Vec::with_capacity(mapped.len());
-        for (i, (num_bytes, result)) in mapped.enumerate() {
+        for (i, (num_bytes, result)) in mapped.into_iter().enumerate() {
             let result = result.and_then(|(partition, doc)| {
-                let timestamp_opt = self.extract_timestamp(&doc)?;
+                let timestamp_opt = self.extract_timestamp(&doc, doc_data)?;
                 Ok(ProcessedDoc {
                     doc,
                     timestamp_opt,
@@ -403,7 +430,7 @@ mod tests {
         let invalid_json = Bytes::from_static(b"{");
         let num_bytes =
             raw_doc.len() + second_raw_doc.len() + missing_timestamp.len() + invalid_json.len();
-        let processed_docs = converter.process_batch([
+        let processed_docs = converter.process_docs([
             raw_doc.clone(),
             second_raw_doc.clone(),
             missing_timestamp,
@@ -411,10 +438,8 @@ mod tests {
         ]);
 
         assert_eq!(processed_docs.len(), 2);
-        assert!(std::ptr::eq(
-            processed_docs[0].doc.dictionary(),
-            processed_docs[1].doc.dictionary()
-        ));
+        let doc_data = converter.take_frozen_doc_data();
+        assert!(!doc_data.is_empty());
         assert_eq!(processed_docs[0].num_bytes, raw_doc.len());
         assert_eq!(
             processed_docs[0].timestamp_opt,
@@ -458,7 +483,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        let processed = logs_converter.process_batch([Bytes::from(log_req.encode_to_vec())]);
+        let processed = logs_converter.process_docs([Bytes::from(log_req.encode_to_vec())]);
         assert_eq!(processed.len(), 1);
 
         let traces_cfg =
@@ -490,7 +515,7 @@ mod tests {
             }],
         };
         let processed_spans =
-            traces_converter.process_batch([Bytes::from(trace_req.encode_to_vec())]);
+            traces_converter.process_docs([Bytes::from(trace_req.encode_to_vec())]);
         assert_eq!(processed_spans.len(), 1);
     }
 
@@ -508,9 +533,16 @@ mod tests {
             SourceInputFormat::PlainText,
         )
         .unwrap();
-        let processed = converter.process_batch([Bytes::from_static(b"hello world")]);
+        let processed = converter.process_docs([Bytes::from_static(b"hello world")]);
         assert_eq!(processed.len(), 1);
-        let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
+        let doc_data = converter.take_frozen_doc_data();
+        let named: NamedFieldDocument = processed
+            .into_iter()
+            .next()
+            .unwrap()
+            .doc
+            .into_quickwit_doc(doc_data)
+            .to_named_doc(&doc_mapper.schema());
         let json: JsonValue = serde_json::to_value(named).unwrap();
         assert_eq!(json["plain_text"], serde_json::json!(["hello world"]));
     }
@@ -527,11 +559,18 @@ mod tests {
             SourceInputFormat::Json,
         )
         .unwrap();
-        let processed = converter.process_batch([Bytes::from_static(
+        let processed = converter.process_docs([Bytes::from_static(
             br#"{"body":"hello","timestamp":1628837062}"#,
         )]);
         assert_eq!(processed.len(), 1);
-        let named: NamedFieldDocument = processed[0].doc.to_named_doc(&doc_mapper.schema());
+        let doc_data = converter.take_frozen_doc_data();
+        let named: NamedFieldDocument = processed
+            .into_iter()
+            .next()
+            .unwrap()
+            .doc
+            .into_quickwit_doc(doc_data)
+            .to_named_doc(&doc_mapper.schema());
         let json: JsonValue = serde_json::to_value(named).unwrap();
         assert_eq!(json["body"], serde_json::json!(["HELLO"]));
     }

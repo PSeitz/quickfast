@@ -134,11 +134,12 @@ impl TestSandbox {
             None,
             SourceInputFormat::Json,
         )?;
-        let processed_docs = converter.process_batch(
+        let processed_docs = converter.process_docs(
             json_docs
                 .into_iter()
                 .map(|doc| Bytes::from(doc.to_string())),
         );
+        let doc_data = converter.take_frozen_doc_data();
 
         let delete_opstamp = self
             .metastore
@@ -172,13 +173,13 @@ impl TestSandbox {
                     )?)
                 }
             };
-            builder.add_document(doc)?;
+            builder.add_document(doc, &doc_data)?;
         }
 
         let tag_fields = self.doc_mapper.tag_named_fields()?;
         let mut new_splits = Vec::with_capacity(builders.len());
         for (_, builder) in builders {
-            let indexed_split = builder.finalize()?;
+            let indexed_split = builder.finalize(doc_data.clone())?;
             let packaged_split = create_packaged_split(indexed_split, &tag_fields)?;
             let (split_metadata, split_payload) = prepare_split_for_upload(
                 &packaged_split,

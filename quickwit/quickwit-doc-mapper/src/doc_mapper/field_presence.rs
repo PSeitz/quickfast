@@ -16,7 +16,7 @@ use fnv::FnvHashSet;
 use quickwit_common::PathHasher;
 use tantivy::Document;
 use tantivy::schema::document::{ReferenceValue, ReferenceValueLeaf};
-use tantivy::schema::{FieldType, Schema, Value};
+use tantivy::schema::{Field, FieldType, Schema, Value};
 
 /// Populates the field presence for a document.
 ///
@@ -29,9 +29,21 @@ pub(crate) fn populate_field_presence<D: Document>(
     schema: &Schema,
     populate_object_fields: bool,
 ) -> FnvHashSet<u64> {
+    populate_field_presence_iter(
+        document.iter_fields_and_values(),
+        schema,
+        populate_object_fields,
+    )
+}
+
+pub(crate) fn populate_field_presence_iter<'a, V: Value<'a>>(
+    fields_and_values: impl Iterator<Item = (Field, V)>,
+    schema: &Schema,
+    populate_object_fields: bool,
+) -> FnvHashSet<u64> {
     let mut field_presence_hashes: FnvHashSet<u64> =
         FnvHashSet::with_capacity_and_hasher(schema.num_fields(), Default::default());
-    for (field, value) in document.iter_fields_and_values() {
+    for (field, value) in fields_and_values {
         let field_entry = schema.get_field_entry(field);
         if !field_entry.is_indexed() || field_entry.is_fast() {
             // We are using an tantivy's ExistsQuery for fast fields.

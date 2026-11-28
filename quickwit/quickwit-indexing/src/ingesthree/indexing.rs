@@ -25,13 +25,12 @@ use quickwit_config::{
     DocsClusteringConfig, IndexConfig, IndexingSettings, RetentionPolicy, SourceInputFormat,
     build_doc_mapper,
 };
-use quickwit_doc_mapper::DocMapper;
+use quickwit_doc_mapper::{DocMapper, QuickwitDocData};
 use quickwit_ingest::ingesthree::DocumentFileReader;
 use quickwit_metastore::SplitMetadata;
 use quickwit_metrics::{Counter, Gauge, GaugeGuard, counter};
 use quickwit_proto::indexing::IndexingPipelineId;
 use quickwit_storage::SplitPayload;
-use tantivy::directory::OwnedBytes;
 
 use super::downloads::DownloadedFile;
 use super::metrics::MEMORY_FLUSHES;
@@ -64,19 +63,23 @@ impl SplitWriter {
         }
     }
 
-    fn add_document(&mut self, document: ProcessedDoc) -> anyhow::Result<()> {
-        let result = self.builder.add_document(document);
+    fn add_document(
+        &mut self,
+        document: ProcessedDoc,
+        doc_data: &QuickwitDocData,
+    ) -> anyhow::Result<()> {
+        let result = self.builder.add_document(document, doc_data);
         self.memory_usage
             .increment(self.builder.mem_usage() as f64 - self.memory_usage.delta());
         result
     }
 
-    pub fn finalize(self) -> anyhow::Result<IndexedSplit> {
+    pub fn finalize(self, doc_data: Arc<QuickwitDocData>) -> anyhow::Result<IndexedSplit> {
         let Self {
             builder,
             memory_usage,
         } = self;
-        let result = builder.finalize();
+        let result = builder.finalize(doc_data);
         drop(memory_usage);
         result
     }
@@ -94,6 +97,7 @@ pub(super) struct SplitBuilders {
     clustering_config: Option<DocsClusteringConfig>,
     splits: HashMap<u64, SplitWriter>,
     overflow: Option<SplitWriter>,
+    doc_data_memory: Option<GaugeGuard>,
     writer_memory: Gauge,
     memory_flushes: Counter,
 }
@@ -132,6 +136,7 @@ impl SplitBuilders {
             clustering_config,
             splits: HashMap::new(),
             overflow: None,
+            doc_data_memory: None,
             writer_memory: IN_FLIGHT_INDEX_WRITER.clone(),
         })
     }
@@ -150,26 +155,51 @@ impl SplitBuilders {
         Ok(SplitWriter::new(builder, &self.writer_memory))
     }
 
-    pub fn add_documents(&mut self, documents: Vec<Bytes>) -> anyhow::Result<()> {
-        self.io_controls.check_if_alive()?;
-        for document in self.converter.process_batch(documents) {
+    fn sync_doc_data_memory(&mut self) {
+        let bytes = self.converter.doc_data().mem_usage() as f64;
+        match &mut self.doc_data_memory {
+            Some(guard) => guard.increment(bytes - guard.delta()),
+            None => {
+                self.doc_data_memory = Some(GaugeGuard::new(&self.writer_memory, bytes));
+            }
+        }
+    }
+
+    fn add_processed_docs(&mut self, processed_docs: Vec<ProcessedDoc>) -> anyhow::Result<()> {
+        self.sync_doc_data_memory();
+        let doc_data = self.converter.doc_data();
+        let max_partitions = self.mapper.max_num_partitions().get() as usize;
+        for document in processed_docs {
             self.io_controls.check_if_alive()?;
             let partition = document.partition;
             if let Some(split) = self.splits.get_mut(&partition) {
-                split.add_document(document)?;
-            } else if self.splits.len() < self.mapper.max_num_partitions().get() as usize {
+                split.add_document(document, doc_data)?;
+            } else if self.splits.len() < max_partitions {
                 let mut split = self.create_split(partition)?;
-                split.add_document(document)?;
+                split.add_document(document, doc_data)?;
                 self.splits.insert(partition, split);
             } else {
                 let overflow = match &mut self.overflow {
                     Some(split) => split,
                     None => self.overflow.insert(self.create_split(OTHER_PARTITION_ID)?),
                 };
-                overflow.add_document(document)?;
+                overflow.add_document(document, doc_data)?;
             }
         }
         Ok(())
+    }
+
+    pub fn add_document(&mut self, document: Bytes) -> anyhow::Result<()> {
+        self.io_controls.check_if_alive()?;
+        let processed_docs = self.converter.process_doc(document);
+        self.add_processed_docs(processed_docs)
+    }
+
+    #[cfg(test)]
+    pub fn add_documents(&mut self, documents: Vec<Bytes>) -> anyhow::Result<()> {
+        self.io_controls.check_if_alive()?;
+        let processed_docs = self.converter.process_docs(documents);
+        self.add_processed_docs(processed_docs)
     }
 
     /// Processes the assignment on the blocking runtime, yielding only while waiting for input.
@@ -191,13 +221,9 @@ impl SplitBuilders {
                 &self.pipeline_id.index_uid,
                 num_bytes,
             )?;
-            loop {
+            while let Some(document) = reader.read_document()? {
                 self.io_controls.check_if_alive()?;
-                let documents = read_batch(&mut reader)?;
-                if documents.is_empty() {
-                    break;
-                }
-                self.add_documents(documents)?;
+                self.add_document(document)?;
                 if self.should_flush() {
                     self.memory_flushes.inc();
                     self.prepare_splits(merge_policy, retention, &mut prepared)?;
@@ -214,7 +240,7 @@ impl SplitBuilders {
         retention: Option<&RetentionPolicy>,
         prepared: &mut Vec<PreparedSplit>,
     ) -> anyhow::Result<()> {
-        let splits = self.take_splits();
+        let (doc_data, _doc_data_memory, splits) = self.take_splits();
         ensure!(
             prepared.len() + splits.len() <= 1000,
             "assigned group exceeds the publication split limit"
@@ -227,7 +253,7 @@ impl SplitBuilders {
                 .builder
                 .controlled_directory
                 .set_io_controls(io_controls.clone());
-            let packaged = create_packaged_split(split.finalize()?, &tags)?;
+            let packaged = create_packaged_split(split.finalize(doc_data.clone())?, &tags)?;
             io_controls.check_if_alive()?;
             let (metadata, payload) = prepare_split_for_upload(&packaged, merge_policy, retention)?;
             prepared.push(PreparedSplit {
@@ -240,34 +266,30 @@ impl SplitBuilders {
     }
 
     pub fn should_flush(&self) -> bool {
-        let mut num_bytes = 0;
+        if self.splits.is_empty() && self.overflow.is_none() {
+            return false;
+        }
+        let mut num_bytes = self.converter.doc_data().mem_usage() as u64;
         for split in self.splits.values().chain(self.overflow.iter()) {
             num_bytes += split.builder.mem_usage() as u64;
         }
         num_bytes >= self.settings.resources.heap_size.as_u64()
     }
 
-    pub fn take_splits(&mut self) -> Vec<SplitWriter> {
-        self.splits
+    pub fn take_splits(&mut self) -> (Arc<QuickwitDocData>, Option<GaugeGuard>, Vec<SplitWriter>) {
+        let doc_data = self.converter.take_frozen_doc_data();
+        let mut doc_data_memory = self.doc_data_memory.take();
+        if let Some(guard) = &mut doc_data_memory {
+            guard.increment(doc_data.mem_usage() as f64 - guard.delta());
+        }
+        let splits = self
+            .splits
             .drain()
             .map(|(_, split)| split)
             .chain(self.overflow.take())
-            .collect()
+            .collect();
+        (doc_data, doc_data_memory, splits)
     }
-}
-
-/// Read incrementally inside the assignment task. The final document can exceed the byte target.
-fn read_batch(reader: &mut DocumentFileReader<Cursor<OwnedBytes>>) -> anyhow::Result<Vec<Bytes>> {
-    let mut documents = Vec::new();
-    let mut num_bytes = 0;
-    while documents.len() < 128 && num_bytes < 1024 * 1024 {
-        let Some(document) = reader.read_document()? else {
-            break;
-        };
-        num_bytes += document.len();
-        documents.push(document);
-    }
-    Ok(documents)
 }
 
 #[cfg(test)]
@@ -346,17 +368,21 @@ mod tests {
                 .num_docs,
             2
         );
-        let expected_bytes: usize = builders
+        let split_bytes_total: usize = builders
             .splits
             .values()
             .chain(builders.overflow.iter())
             .map(|split| split.builder.mem_usage())
             .sum();
+        let expected_bytes = split_bytes_total + builders.converter.doc_data().mem_usage();
         assert!(expected_bytes > 0);
         assert_eq!(writer_memory.get(), expected_bytes as f64);
-        let splits = builders.take_splits();
+        let (doc_data, doc_data_memory, splits) = builders.take_splits();
         assert!(!builders.should_flush());
-        assert_eq!(writer_memory.get(), expected_bytes as f64);
+        assert_eq!(
+            writer_memory.get(),
+            (split_bytes_total + doc_data.mem_usage()) as f64
+        );
         for split in splits {
             assert_eq!(split.builder.split_attrs.num_docs, 2);
             let is_overflow = split.builder.split_attrs.partition_id == OTHER_PARTITION_ID;
@@ -371,7 +397,7 @@ mod tests {
             );
             let memory_before = writer_memory.get();
             let split_bytes = split.memory_usage.delta();
-            let split = split.finalize().unwrap();
+            let split = split.finalize(doc_data.clone()).unwrap();
             assert_eq!(writer_memory.get(), memory_before - split_bytes);
             let reader = split.index.reader().unwrap();
             let searcher = reader.searcher();
@@ -394,6 +420,8 @@ mod tests {
             };
             assert_eq!(owners, expected_owners);
         }
+        drop(doc_data_memory);
+        drop(doc_data);
         assert_eq!(writer_memory.get(), 0.0);
     }
 
@@ -472,11 +500,16 @@ mod tests {
     fn test_writer_memory_released_on_serialization_error() {
         let writer_memory = Gauge::local();
         let mut builders = builders_for_test(TempDirectory::for_test(), writer_memory.clone());
-        let writer = builders.take_splits().pop().unwrap();
-        assert_eq!(writer_memory.get(), writer.builder.mem_usage() as f64);
+        let (doc_data, doc_data_memory, mut splits) = builders.take_splits();
+        let writer = splits.pop().unwrap();
+        assert_eq!(
+            writer_memory.get(),
+            (writer.builder.mem_usage() + doc_data.mem_usage()) as f64
+        );
         assert!(writer_memory.get() > 0.0);
         builders.io_controls.kill();
-        assert!(writer.finalize().is_err());
+        assert!(writer.finalize(doc_data).is_err());
+        drop(doc_data_memory);
         assert_eq!(writer_memory.get(), 0.0);
     }
 
@@ -513,9 +546,10 @@ mod tests {
         let work_path = path.clone();
         let writer_memory = Gauge::local();
         let mut builders = builders_for_test(directory.clone(), writer_memory.clone());
-        let writer = builders.take_splits().pop().unwrap();
+        let (doc_data, doc_data_memory, mut splits) = builders.take_splits();
+        let writer = splits.pop().unwrap();
         drop(builders);
-        let expected_bytes = writer.builder.mem_usage() as f64;
+        let expected_bytes = (writer.builder.mem_usage() + doc_data.mem_usage()) as f64;
         assert!(expected_bytes > 0.0);
         let active_assignments = Gauge::local();
         let assignment = Arc::new(GaugeGuard::new(&active_assignments, 1.0));
@@ -523,7 +557,8 @@ mod tests {
             started.send(()).unwrap();
             wait_release.recv_timeout(Duration::from_secs(5)).unwrap();
             assert!(work_path.try_exists().unwrap());
-            drop(writer.finalize().unwrap());
+            drop(writer.finalize(doc_data).unwrap());
+            drop(doc_data_memory);
             finished.send(()).unwrap();
             Ok(())
         }));

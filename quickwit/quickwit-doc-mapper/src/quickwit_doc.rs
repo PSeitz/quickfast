@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Batch-interned documents stored in a flat byte buffer (`BatchData::nodes`).
+//! Dictionary-interned documents stored in a flat byte buffer (`QuickwitDocData::nodes`).
 //!
 //! Layout per value:
 //! - `TAG_NULL` / `TAG_FALSE` / `TAG_TRUE`: 1 byte
@@ -36,6 +36,7 @@ pub use dictionary::ByteDictionary;
 pub use parse::QuickwitDocBatch;
 use serde_json::Number;
 pub(crate) use tantivy_document::FieldBindings;
+pub use tantivy_document::{MappedFields, MappedValue};
 
 use crate::routing_expression::RoutingExprContext;
 
@@ -61,24 +62,79 @@ pub(crate) fn read_u32(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(read_bytes(bytes))
 }
 
+/// Shared dictionary and flat encoded node buffer for documents parsed in one indexing window.
 #[derive(Debug, Default)]
-pub(crate) struct BatchData {
+pub struct QuickwitDocData {
     pub(crate) dictionary: ByteDictionary,
     pub(crate) nodes: Vec<u8>,
 }
 
-impl BatchData {
-    fn mem_usage(&self) -> usize {
+impl QuickwitDocData {
+    /// Shared byte dictionary for all documents in this buffer.
+    #[inline]
+    pub fn dictionary(&self) -> &ByteDictionary {
+        &self.dictionary
+    }
+
+    /// Retained heap bytes across the dictionary (including lookup table) and node buffer.
+    pub fn mem_usage(&self) -> usize {
         std::mem::size_of::<Self>() + self.dictionary.mem_usage() + self.nodes.capacity()
+    }
+
+    /// Drops the dictionary's hash-table lookup index and shrinks buffers for read-only use.
+    pub fn freeze(&mut self) {
+        self.dictionary.freeze();
+        self.nodes.shrink_to_fit();
+    }
+
+    /// Returns `true` if no document nodes have been encoded into this buffer.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 }
 
-/// A parsed document referencing its root object inside the shared batch buffer, plus Tantivy
-/// field bindings populated during mapping.
+/// A parsed and mapped document living inside a [`QuickwitDocData`], without an `Arc` handle.
+#[derive(Clone, Debug, Default)]
+pub struct MappedDoc {
+    pub(crate) root_offset: u32,
+    pub(crate) bindings: FieldBindings,
+}
+
+impl MappedDoc {
+    /// Root object view backed by `data`.
+    #[inline]
+    pub fn as_object<'a>(&self, data: &'a QuickwitDocData) -> QuickwitObject<'a> {
+        decode_root_object(&data.nodes, self.root_offset)
+    }
+
+    /// Iterates over mapped Tantivy fields and values backed by `data`.
+    #[inline]
+    pub fn iter_fields_and_values<'a>(&'a self, data: &'a QuickwitDocData) -> MappedFields<'a> {
+        MappedFields::new(&data.nodes, &data.dictionary, &self.bindings)
+    }
+
+    /// Heap capacity owned exclusively by this document's Tantivy field bindings.
+    pub fn bindings_mem_usage(&self) -> usize {
+        self.bindings.mem_usage()
+    }
+
+    /// Attaches the frozen shared `data` to form a `'static` [`QuickwitDoc`] for Tantivy.
+    #[inline]
+    pub fn into_quickwit_doc(self, data: Arc<QuickwitDocData>) -> QuickwitDoc {
+        QuickwitDoc {
+            root_offset: self.root_offset,
+            data,
+            bindings: self.bindings,
+        }
+    }
+}
+
+/// A parsed document referencing its root object inside a frozen shared [`QuickwitDocData`], plus
+/// Tantivy field bindings populated during mapping.
 #[derive(Clone, Debug, Default)]
 pub struct QuickwitDoc {
     pub(crate) root_offset: u32,
-    pub(crate) data: Arc<BatchData>,
+    pub(crate) data: Arc<QuickwitDocData>,
     pub(crate) bindings: FieldBindings,
 }
 
@@ -213,19 +269,34 @@ impl QuickwitValue<'_> {
     }
 }
 
-impl RoutingExprContext for QuickwitDoc {
+pub(crate) struct QuickwitObjectRef<'a> {
+    pub(crate) object: QuickwitObject<'a>,
+    pub(crate) dictionary: &'a ByteDictionary,
+}
+
+impl RoutingExprContext for QuickwitObjectRef<'_> {
     fn hash_attribute<H: Hasher>(&self, path: &[String], hasher: &mut H) {
-        let Some(value) = self.get_path(path) else {
+        let Some(value) = self.object.get_path(path, self.dictionary) else {
             hasher.write_u8(0);
             return;
         };
         hasher.write_u8(1);
         value.hash_json(
-            self.dictionary(),
+            self.dictionary,
             hasher,
             |hasher, len| hasher.write_u64(len as u64),
             |hasher, number| number.hash(hasher),
         );
+    }
+}
+
+impl RoutingExprContext for QuickwitDoc {
+    fn hash_attribute<H: Hasher>(&self, path: &[String], hasher: &mut H) {
+        QuickwitObjectRef {
+            object: self.as_object(),
+            dictionary: self.dictionary(),
+        }
+        .hash_attribute(path, hasher);
     }
 }
 
@@ -310,6 +381,26 @@ impl<'a> QuickwitObject<'a> {
     ) -> impl Iterator<Item = (&'a str, QuickwitValue<'a>)> + 'a {
         self.entries()
             .map(move |(key_id, _, _, value)| (dictionary.get_str(key_id), value))
+    }
+
+    /// Iterates over `(key_id, value)` pairs in ascending `key_id` order.
+    #[inline]
+    pub fn iter_ids(self) -> impl Iterator<Item = (u32, QuickwitValue<'a>)> + 'a {
+        self.entries().map(|(key_id, _, _, value)| (key_id, value))
+    }
+
+    /// Looks up a field by its interned dictionary `key_id`.
+    /// Entries are stored in ascending `key_id` order, so lookup stops early once passed.
+    #[inline]
+    pub fn get_by_id(self, target_key_id: u32) -> Option<QuickwitValue<'a>> {
+        for (key_id, _, _, value) in self.entries() {
+            match key_id.cmp(&target_key_id) {
+                std::cmp::Ordering::Less => continue,
+                std::cmp::Ordering::Equal => return Some(value),
+                std::cmp::Ordering::Greater => return None,
+            }
+        }
+        None
     }
 
     #[inline]

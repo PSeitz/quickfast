@@ -44,7 +44,8 @@ pub use doc_mapping::{DocMapping, Mode, ModeType};
 pub use error::{DocParsingError, QueryParserError};
 use quickwit_common::shared_consts::FIELD_PRESENCE_FIELD_NAME;
 pub use quickwit_doc::{
-    ByteDictionary, QuickwitDoc, QuickwitDocBatch, QuickwitLeafValue, QuickwitObject, QuickwitValue,
+    ByteDictionary, MappedDoc, MappedFields, MappedValue, QuickwitDoc, QuickwitDocBatch,
+    QuickwitDocData, QuickwitLeafValue, QuickwitObject, QuickwitValue,
 };
 use quickwit_proto::types::DocMappingUid;
 pub use routing_expression::RoutingExpr;

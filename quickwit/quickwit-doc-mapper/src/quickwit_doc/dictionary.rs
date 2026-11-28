@@ -71,8 +71,28 @@ impl ByteDictionary {
         Ipv6Addr::from(octets)
     }
 
-    pub(super) fn len(&self) -> usize {
+    /// Looks up the dictionary ID for an interned object key, if present.
+    /// O(1) while building (before [`freeze`]); falls back to linear scan if frozen.
+    pub fn lookup_key_id(&self, key: &str) -> Option<u32> {
+        let bytes = key.as_bytes();
+        if !self.lookup.is_empty() {
+            let hash = hash_bytes(bytes);
+            return self
+                .lookup
+                .find(hash, |id| self.get_bytes(*id) == bytes)
+                .copied();
+        }
+        (0..self.len() as u32).find(|&id| self.get_bytes(id) == bytes)
+    }
+
+    /// Number of entries currently stored in this dictionary.
+    pub fn len(&self) -> usize {
         self.end_offsets.len()
+    }
+
+    /// Returns `true` if the dictionary contains no entries.
+    pub fn is_empty(&self) -> bool {
+        self.end_offsets.is_empty()
     }
 
     pub(super) fn intern_str(&mut self, text: &str) -> Result<u32, &'static str> {
@@ -137,7 +157,10 @@ impl ByteDictionary {
         self.end_offsets.shrink_to_fit();
     }
 
-    pub(crate) fn mem_usage(&self) -> usize {
-        self.bytes.capacity() + self.end_offsets.capacity() * std::mem::size_of::<u32>()
+    /// Retained heap bytes across stored bytes, offset index, and lookup table.
+    pub fn mem_usage(&self) -> usize {
+        self.bytes.capacity()
+            + self.end_offsets.capacity() * std::mem::size_of::<u32>()
+            + self.lookup.allocation_size()
     }
 }

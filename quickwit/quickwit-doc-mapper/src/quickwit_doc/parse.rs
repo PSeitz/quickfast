@@ -20,8 +20,8 @@ use simd_json::value::tape::Node;
 use simd_json::{Buffers, INPUT_PADDING, StaticNode, Tape, fill_tape_padded};
 
 use super::{
-    BatchData, ByteDictionary, FieldBindings, QuickwitDoc, TAG_ARRAY, TAG_F64, TAG_FALSE, TAG_I64,
-    TAG_NULL, TAG_OBJECT, TAG_STRING, TAG_TRUE, TAG_U64, decode_root_object,
+    ByteDictionary, MappedDoc, QuickwitDoc, QuickwitDocData, QuickwitObjectRef, TAG_ARRAY, TAG_F64,
+    TAG_FALSE, TAG_I64, TAG_NULL, TAG_OBJECT, TAG_STRING, TAG_TRUE, TAG_U64, decode_root_object,
 };
 use crate::doc_mapper::Partition;
 use crate::{DocMapper, DocParsingError};
@@ -31,10 +31,11 @@ const MAX_RETAINED_SCRATCH_CAPACITY: usize = 256 * 1024;
 
 // The input length stays outside the result so rejected documents count towards byte metrics.
 type MappedEntry = (usize, Result<(Partition, QuickwitDoc), DocParsingError>);
+type PendingMappedEntry = (usize, Result<(Partition, MappedDoc), DocParsingError>);
 
-/// Parses and maps JSON documents into one flat byte buffer with a shared batch dictionary.
+/// Parses and maps JSON documents into one flat byte buffer with a shared dictionary.
 pub struct QuickwitDocBatch {
-    pub(super) data: Arc<BatchData>,
+    pub(super) data: QuickwitDocData,
     pub(super) docs: Vec<(usize, u32)>,
     scratch: Vec<u8>,
     simd_buffers: Buffers,
@@ -45,7 +46,7 @@ pub struct QuickwitDocBatch {
 impl Default for QuickwitDocBatch {
     fn default() -> Self {
         Self {
-            data: Arc::default(),
+            data: QuickwitDocData::default(),
             docs: Vec::new(),
             scratch: Vec::new(),
             simd_buffers: Buffers::default(),
@@ -132,65 +133,79 @@ impl QuickwitDocBatch {
         result
     }
 
-    /// Maps all roots before freezing the dictionary so identical binary conversions across
-    /// documents share an entry. Resets the batch while retaining scratch buffers for reuse across
-    /// batches.
-    pub fn map<'a>(
-        &mut self,
-        mapper: &'a DocMapper,
-    ) -> impl ExactSizeIterator<Item = MappedEntry> + use<'a> {
-        let mut data = std::mem::take(&mut self.data);
+    /// Borrows the open shared dictionary and node buffer accumulated since the last
+    /// [`take_frozen_data`](Self::take_frozen_data).
+    #[inline]
+    pub fn doc_data(&self) -> &QuickwitDocData {
+        &self.data
+    }
+
+    /// Maps all parsed documents currently queued in this batch against the open
+    /// [`QuickwitDocData`] without freezing or resetting the dictionary, so subsequent calls
+    /// continue sharing the same dictionary IDs until [`take_frozen_data`](Self::take_frozen_data)
+    /// is called.
+    pub fn map_pending(&mut self, mapper: &DocMapper) -> Vec<PendingMappedEntry> {
         let mut results = Vec::with_capacity(self.docs.len());
         for (len, root_offset) in self.docs.drain(..) {
-            let mut doc = QuickwitDoc {
-                root_offset,
-                data,
-                bindings: FieldBindings::default(),
-            };
-            let partition = mapper.quickwit_partition(&doc);
-            let data_mut = Arc::get_mut(&mut doc.data).expect("unique BatchData");
-            let checkpoint = data_mut.dictionary.len();
-            let object = decode_root_object(&data_mut.nodes, root_offset);
+            let object = decode_root_object(&self.data.nodes, root_offset);
+            let partition = mapper.quickwit_partition(&QuickwitObjectRef {
+                object,
+                dictionary: &self.data.dictionary,
+            });
+            let checkpoint = self.data.dictionary.len();
             let result = mapper
-                .map_tantivy_fields(object, root_offset, &mut data_mut.dictionary, len as u64)
-                .inspect_err(|_| data_mut.dictionary.truncate(checkpoint))
-                .map(|bindings| (partition, root_offset, bindings));
-            data = doc.data;
+                .map_tantivy_fields(object, root_offset, &mut self.data.dictionary, len as u64)
+                .inspect_err(|_| self.data.dictionary.truncate(checkpoint))
+                .map(|bindings| {
+                    let mut doc = MappedDoc {
+                        root_offset,
+                        bindings,
+                    };
+                    mapper.add_field_presence(&self.data, &mut doc);
+                    (partition, doc)
+                });
             results.push((len, result));
         }
-        let data_mut = Arc::get_mut(&mut data).expect("unique BatchData");
-        data_mut.dictionary.freeze();
-        data_mut.nodes.shrink_to_fit();
         if self.scratch.capacity() > MAX_RETAINED_SCRATCH_CAPACITY {
             self.scratch = Vec::new();
             self.simd_buffers = Buffers::default();
             self.tape = Tape(Vec::new());
             self.key_scratch = Vec::new();
         }
+        results
+    }
+
+    /// Freezes and takes the accumulated [`QuickwitDocData`], resetting the internal dictionary
+    /// and node buffer for the next indexing window while retaining parser scratch buffers.
+    pub fn take_frozen_data(&mut self) -> Arc<QuickwitDocData> {
+        let mut data = std::mem::take(&mut self.data);
+        data.freeze();
+        Arc::new(data)
+    }
+
+    /// Maps all roots, freezes the dictionary, and attaches the frozen [`QuickwitDocData`] to each
+    /// returned [`QuickwitDoc`]. Resets the batch while retaining scratch buffers for reuse.
+    pub fn map<'a>(
+        &mut self,
+        mapper: &'a DocMapper,
+    ) -> impl ExactSizeIterator<Item = MappedEntry> + use<'a> {
+        let results = self.map_pending(mapper);
+        let data = self.take_frozen_data();
         results.into_iter().map(move |(len, result)| {
             (
                 len,
-                result.map(|(partition, root_offset, bindings)| {
-                    let mut doc = QuickwitDoc {
-                        root_offset,
-                        data: data.clone(),
-                        bindings,
-                    };
-                    mapper.add_field_presence(&mut doc);
-                    (partition, doc)
-                }),
+                result.map(|(partition, doc)| (partition, doc.into_quickwit_doc(data.clone()))),
             )
         })
     }
 }
 
 fn push_doc(
-    data: &mut Arc<BatchData>,
+    data: &mut QuickwitDocData,
     docs: &mut Vec<(usize, u32)>,
     original_len: usize,
     write_object: impl FnOnce(&mut ByteDictionary, &mut Vec<u8>) -> serde_json::Result<()>,
 ) -> serde_json::Result<()> {
-    let data = Arc::get_mut(data).expect("unique BatchData");
     let dict_checkpoint = data.dictionary.len();
     let nodes_checkpoint = data.nodes.len();
     let root_offset = u32::try_from(nodes_checkpoint)

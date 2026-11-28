@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::fmt;
+use std::mem::size_of;
 use std::ops::RangeInclusive;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Context;
 use quickwit_common::io::IoControls;
 use quickwit_common::metrics::index_label;
 use quickwit_common::temp_dir::TempDirectory;
 use quickwit_config::{DocsClusteringConfig, IndexingSettings};
-use quickwit_doc_mapper::{DocMapper, QuickwitDoc};
+use quickwit_doc_mapper::{DocMapper, MappedDoc, QuickwitDoc, QuickwitDocData};
 use quickwit_metrics::{histogram, label_values};
 use quickwit_proto::indexing::IndexingPipelineId;
 use quickwit_proto::types::{DocMappingUid, SplitId};
@@ -43,6 +45,8 @@ pub struct IndexedSplitBuilder {
     pub split_scratch_directory: TempDirectory,
     pub controlled_directory: ControlledDirectory,
     pub doc_clusterer_opt: Option<DocClusterer>,
+    buffered_docs: Vec<MappedDoc>,
+    buffered_docs_mem_usage: usize,
     ram_directory_opt: Option<RamDirectory>,
 }
 
@@ -178,6 +182,8 @@ impl IndexedSplitBuilder {
             },
             index_writer,
             doc_clusterer_opt,
+            buffered_docs: Vec::new(),
+            buffered_docs_mem_usage: 0,
             split_scratch_directory,
             controlled_directory,
             ram_directory_opt,
@@ -185,9 +191,14 @@ impl IndexedSplitBuilder {
     }
 
     /// Adds a document and updates the split's metadata and clustering.
-    /// The document must use this split's schema. The caller handles partition routing.
-    /// Discard the builder on error: its metadata is updated before writing the document.
-    pub fn add_document(&mut self, processed_doc: ProcessedDoc) -> anyhow::Result<()> {
+    /// The document must use this split's schema and belong to `doc_data`, which must remain the
+    /// same instance across all calls until [`finalize`](Self::finalize). The caller handles
+    /// partition routing.
+    pub fn add_document(
+        &mut self,
+        processed_doc: ProcessedDoc,
+        doc_data: &QuickwitDocData,
+    ) -> anyhow::Result<()> {
         let ProcessedDoc {
             doc,
             timestamp_opt,
@@ -200,11 +211,13 @@ impl IndexedSplitBuilder {
             record_timestamp(timestamp, &mut self.split_attrs.time_range);
         }
         if let Some(doc_clusterer) = self.doc_clusterer_opt.as_mut() {
-            doc_clusterer.push(doc);
+            doc_clusterer.push(doc, doc_data);
         } else {
-            self.index_writer
-                .add_document(doc)
-                .context("failed to add document")?;
+            self.buffered_docs_mem_usage += doc.bindings_mem_usage();
+            let capacity = self.buffered_docs.capacity();
+            self.buffered_docs.push(doc);
+            self.buffered_docs_mem_usage +=
+                (self.buffered_docs.capacity() - capacity) * size_of::<MappedDoc>();
         }
         Ok(())
     }
@@ -223,7 +236,7 @@ impl IndexedSplitBuilder {
             num_merge_ops=%self.split_attrs.num_merge_ops,
         )
     )]
-    pub fn finalize(mut self) -> anyhow::Result<IndexedSplit> {
+    pub fn finalize(mut self, doc_data: Arc<QuickwitDocData>) -> anyhow::Result<IndexedSplit> {
         let split_attrs = self.split_attrs;
         if let Some(doc_clusterer) = self.doc_clusterer_opt.take() {
             let index_label = index_label(&split_attrs.index_uid.index_id);
@@ -235,7 +248,16 @@ impl IndexedSplitBuilder {
             for group_size in doc_clusterer.group_sizes() {
                 histogram.observe(group_size as f64);
             }
-            doc_clusterer.drain(&mut |doc| self.index_writer.add_document(doc))?;
+            doc_clusterer.drain(&mut |doc| {
+                self.index_writer
+                    .add_document(doc.into_quickwit_doc(doc_data.clone()))
+            })?;
+        } else {
+            for doc in self.buffered_docs.drain(..) {
+                self.index_writer
+                    .add_document(doc.into_quickwit_doc(doc_data.clone()))
+                    .context("failed to add document")?;
+            }
         }
         // Buffered indexing errors propagate before the split can be packaged or uploaded.
         let index = self.index_writer.finalize()?;
@@ -263,6 +285,7 @@ impl IndexedSplitBuilder {
 
     pub fn mem_usage(&self) -> usize {
         self.index_writer.mem_usage()
+            + self.buffered_docs_mem_usage
             + self
                 .doc_clusterer_opt
                 .as_ref()
@@ -363,9 +386,11 @@ mod tests {
             split_scratch_directory,
             controlled_directory,
             doc_clusterer_opt: None,
+            buffered_docs: Vec::new(),
+            buffered_docs_mem_usage: 0,
             ram_directory_opt: Some(ram_directory.clone()),
         };
-        let split = builder.finalize()?;
+        let split = builder.finalize(Arc::default())?;
         // A file added only after persistence must not be visible through the returned index.
         let marker = Path::new("ram-only");
         ram_directory.atomic_write(marker, b"not persisted")?;

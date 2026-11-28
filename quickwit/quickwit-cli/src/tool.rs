@@ -485,7 +485,7 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
         if batch.is_empty() {
             break;
         }
-        for doc in converter.process_batch(batch) {
+        for doc in converter.process_docs(batch) {
             let partition_id = doc.partition;
             let builder = match builders.entry(partition_id) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -505,14 +505,15 @@ pub async fn local_ingest_docs_cli(args: LocalIngestDocsArgs) -> anyhow::Result<
                     )?)
                 }
             };
-            builder.add_document(doc)?;
+            builder.add_document(doc, converter.doc_data())?;
         }
     }
 
+    let doc_data = converter.take_frozen_doc_data();
     let tag_fields = doc_mapper.tag_named_fields()?;
     let mut staged_split_ids = Vec::with_capacity(builders.len());
     for (_, builder) in builders {
-        let indexed_split = builder.finalize()?;
+        let indexed_split = builder.finalize(doc_data.clone())?;
         let packaged_split = create_packaged_split(indexed_split, &tag_fields)?;
         let (split_metadata, split_payload) = prepare_split_for_upload(
             &packaged_split,
